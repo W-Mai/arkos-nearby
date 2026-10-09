@@ -1,0 +1,17 @@
+{
+  "family": "Noto Sans CJK SC Regular",
+  "upstream_commit": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+  "source_url": "https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+  "source_sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
+  "license_url": "https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/LICENSE",
+  "license": "SIL Open Font License 1.1",
+  "tool": "icu bake-font",
+  "size": 20,
+  "format": "gray",
+  "bit_depth": 4,
+  "charset_count": 3856,
+  "charset": "ASCII printable, GB2312 level 1, nearby menu labels",
+  "output": "nearby-menu-20.mirx",
+  "output_sha256": "0889d41b4f88d05c833e5739e6bf6e231a87d7e7ee1794f765ff83b624a2b0c8",
+  "output_size": 3478604
+}

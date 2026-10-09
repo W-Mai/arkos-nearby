@@ -1,0 +1,12 @@
+ArkOS Nearby
+
+The Rust runtime is licensed under MIT.
+The embedded mirui renderer includes its font license and source record.
+wpa_supplicant 2.10 retains its BSD copyright and license notice.
+The RTL8188EU kernel module retains its GPL-2.0 license notice.
+ABI-specific core inspectors are included as separate native helpers.
+The signing implementation includes ring 0.17.14 and its license notices.
+The private ARM64 C++ runtime includes its GCC license and Runtime Library Exception.
+
+Asset versions, checksums and source locations are recorded in release-sources.json.
+RetroArch, game cores, ROMs, saves and firmware images are not included.

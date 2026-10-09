@@ -1,0 +1,14 @@
+{
+  "page": "choice",
+  "title": "魂斗罗",
+  "core": "FCEUmm",
+  "selected": 0,
+  "entries": [],
+  "rooms": [],
+  "room_name": "附近房间",
+  "ready": false,
+  "busy": false,
+  "status": "",
+  "phase": "idle",
+  "back_label": "单机游玩"
+}

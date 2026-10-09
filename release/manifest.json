@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "version": "0.2.0",
+  "profile": "arkos4clone-4.4.189-rtl8188eu",
+  "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
+  "gui_version": "0.47.0",
+  "files": [
+    {
+      "name": "arkos-nearby-gui",
+      "sha256": "3911d9e202064991930b44962f375f4e7f0e93eb23d8eb4e45f6a915923adb0b",
+      "size": 5851024,
+      "offset": 0,
+      "mode": 493
+    },
+    {
+      "name": "assets/8188eu.ko",
+      "sha256": "e099dcd8f6df0e02749d08c4af201bb1d26ca460a369247630782f0888468965",
+      "size": 3022808,
+      "offset": 5851024,
+      "mode": 420
+    },
+    {
+      "name": "assets/build.json",
+      "sha256": "bd20822cabf2f462ea5a00eafd82423b4c87726563e5774f939c0d5a2262f184",
+      "size": 1448,
+      "offset": 8873832,
+      "mode": 420
+    },
+    {
+      "name": "assets/wpa_supplicant",
+      "sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e",
+      "size": 1743784,
+      "offset": 8875280,
+      "mode": 493
+    },
+    {
+      "name": "compat/arm64/libgcc_s.so.1",
+      "sha256": "3f81f337c558b6a08924b05dc73b5fcc117d39c11ba306a49f1f973b960adc2c",
+      "size": 129480,
+      "offset": 10619064,
+      "mode": 420
+    },
+    {
+      "name": "compat/arm64/libstdc++.so.6",
+      "sha256": "c116f7a27884c399ed3ab89eed9c0150a8f09ed5990b5a36d2c18ac14c0a3d66",
+      "size": 2600552,
+      "offset": 10748544,
+      "mode": 420
+    },
+    {
+      "name": "compat/arm64/source.json",
+      "sha256": "137f6da3a50ffcff389b61132f963a5049f15c140a148bda7389dd4de781d894",
+      "size": 2681,
+      "offset": 13349096,
+      "mode": 420
+    },
+    {
+      "name": "core-inspect-build.json",
+      "sha256": "5d77a36642272114846fa8721f302e22665e97961c66d839d7e2feab7fb3a8b1",
+      "size": 2275,
+      "offset": 13351777,
+      "mode": 420
+    },
+    {
+      "name": "core-inspect32",
+      "sha256": "f33873cf785438633abb186ee1282ba3ddffa2969d195f3cd62b48496e5e08b8",
+      "size": 3908,
+      "offset": 13354052,
+      "mode": 493
+    },
+    {
+      "name": "core-inspect64",
+      "sha256": "52c23815cea0cb5235873212b8f6e5d94a76978ec4b2bb98f36c9f9f3ed76baa",
+      "size": 6520,
+      "offset": 13357960,
+      "mode": 493
+    },
+    {
+      "name": "font/OFL.txt",
+      "sha256": "af55b908a0ccf969b7bdd0e6cac6f4866a7ed0d1aeb9c7b29516ca0d24422981",
+      "size": 4346,
+      "offset": 13364480,
+      "mode": 420
+    },
+    {
+      "name": "font/font-source.json",
+      "sha256": "729bc03c7e82299b2594dd3d5b344fe31e05dfcbd0702e43c83c4d6b550ec78d",
+      "size": 850,
+      "offset": 13368826,
+      "mode": 420
+    },
+    {
+      "name": "licenses/NOTICE.txt",
+      "sha256": "5ac05cbc3579c454e32a97e6384f2bb8ee5000d2695abd148cbeb19b76d2a152",
+      "size": 646,
+      "offset": 13369676,
+      "mode": 420
+    },
+    {
+      "name": "licenses/driver-COPYING.txt",
+      "sha256": "af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7",
+      "size": 18693,
+      "offset": 13370322,
+      "mode": 420
+    },
+    {
+      "name": "licenses/gcc-runtime-COPYING.txt",
+      "sha256": "6e5031de1c9c6a678cad8d05046ae6d43f6131c72bf97506a15ac930b6b44988",
+      "size": 38536,
+      "offset": 13389015,
+      "mode": 420
+    },
+    {
+      "name": "licenses/ring-LICENSE.txt",
+      "sha256": "5fb6716f68e863ec2fdacbe3aa1d0f16e84e5f29e1ab96182f2b62383a2cef4c",
+      "size": 16104,
+      "offset": 13427551,
+      "mode": 420
+    },
+    {
+      "name": "licenses/wpa-COPYING.txt",
+      "sha256": "b878788aa037728ade1983e7a6c9b425ab077382cc1dc5b48f7bb3771c4aa5c3",
+      "size": 1866,
+      "offset": 13443655,
+      "mode": 420
+    },
+    {
+      "name": "nearby-gui-build.json",
+      "sha256": "1fa553b8720cc8f0d682e368341cc3afd6824969da8297a32169ee137cd9f5df",
+      "size": 363,
+      "offset": 13445521,
+      "mode": 420
+    },
+    {
+      "name": "release-sources.json",
+      "sha256": "c2df6125117a56e59b9745e43a1d68f27b08bbccdb0e7a283df07ce2d9e08726",
+      "size": 1073,
+      "offset": 13445884,
+      "mode": 420
+    }
+  ]
+}

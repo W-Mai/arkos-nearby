@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "runtime_version": "0.2.0",
+  "profile": "arkos4clone-4.4.189-rtl8188eu",
+  "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
+  "renderer": {
+    "version": "0.47.0",
+    "sha256": "3911d9e202064991930b44962f375f4e7f0e93eb23d8eb4e45f6a915923adb0b",
+    "source_sha256": "c8af57839f15928bcf5b4ca3e853f275b64a75640c73f03bac236ee0850b6998"
+  },
+  "driver": {
+    "sha256": "e099dcd8f6df0e02749d08c4af201bb1d26ca460a369247630782f0888468965",
+    "module": "4.4.189 / RTL8188EU",
+    "source": "https://github.com/lcdyk0517/arkos.bsp.4.4/tree/c6b78a0da080650110705472b59b749f0c5393d2"
+  },
+  "supplicant": {
+    "sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e",
+    "source_archive": "https://w1.fi/releases/wpa_supplicant-2.10.tar.gz",
+    "source_archive_sha256": "20df7ae5154b3830355f8ab4269123a87affdea59fe74fe9292a91d0d7e17b2f",
+    "bridge_scope": "verified local MAC and private session",
+    "bridge_source_sha256": "8793da534220ca05667a7facb9821586679c7df78d4dede88cead2912222edfa"
+  }
+}

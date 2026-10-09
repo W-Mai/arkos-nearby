@@ -1,0 +1,2 @@
+[build]
+target-dir = "/tmp/arkos-rust-build/public-cargo"

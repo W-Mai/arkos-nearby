@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "maximum_glibc": "2.25",
+  "libraries": {
+    "libstdc++.so.6": "c116f7a27884c399ed3ab89eed9c0150a8f09ed5990b5a36d2c18ac14c0a3d66",
+    "libgcc_s.so.1": "3f81f337c558b6a08924b05dc73b5fcc117d39c11ba306a49f1f973b960adc2c"
+  },
+  "packages": [
+    {
+      "Package": "libstdc++6",
+      "Source": "gcc-16",
+      "Priority": "optional",
+      "Section": "libs",
+      "Installed-Size": "3124",
+      "Maintainer": "Ubuntu Core developers <ubuntu-devel-discuss@lists.ubuntu.com>",
+      "Architecture": "arm64",
+      "Version": "16-20260315-1ubuntu1~18~ppa3",
+      "Replaces": "libstdc++6-16-dbg (<< 4.9.0-3)",
+      "Depends": "gcc-16-base (= 16-20260315-1ubuntu1~18~ppa3), libc6 (>= 2.25), libgcc-s1 (>= 4.5)",
+      "Conflicts": "scim (<< 1.4.2-1)",
+      "Breaks": "gcc-4.3 (<< 4.3.6-1), gcc-4.4 (<< 4.4.6-4), gcc-4.5 (<< 4.5.3-2)",
+      "Filename": "pool/main/g/gcc-16/libstdc++6_16-20260315-1ubuntu1~18~ppa3_arm64.deb",
+      "Size": "671852",
+      "MD5sum": "8dc15a7c440e13107757aae293a210fd",
+      "SHA1": "0d7e1943f570208669663749dabac087f6bdf51e",
+      "SHA256": "efedbd805125c62ebd7180c056b23845c6a3ab286dcb6321829784d4038d31bc",
+      "Description": "GNU Standard C++ Library v3",
+      "Description-md5": "724ab84919e0e220afb960e36463914d",
+      "Multi-Arch": "same",
+      "Original-Maintainer": "Debian GCC Maintainers <debian-gcc@lists.debian.org>"
+    },
+    {
+      "Package": "libgcc-s1",
+      "Source": "gcc-16",
+      "Priority": "optional",
+      "Section": "libs",
+      "Installed-Size": "145",
+      "Maintainer": "Ubuntu Core developers <ubuntu-devel-discuss@lists.ubuntu.com>",
+      "Architecture": "arm64",
+      "Version": "16-20260315-1ubuntu1~18~ppa3",
+      "Replaces": "libgcc1 (<< 1:10)",
+      "Provides": "libgcc1 (= 1:16-20260315-1ubuntu1~18~ppa3)",
+      "Depends": "gcc-16-base (= 16-20260315-1ubuntu1~18~ppa3), libc6 (>= 2.17)",
+      "Filename": "pool/main/g/gcc-16/libgcc-s1_16-20260315-1ubuntu1~18~ppa3_arm64.deb",
+      "Size": "53508",
+      "MD5sum": "cc6bbe25d3b98903c9151ba3be31346a",
+      "SHA1": "c3570d7009efa97cf850bd7f6cba656993a02320",
+      "SHA256": "742d99f335aafa3930b4de2c2af89e1e7026b58ed7569a9619a05387b87ec7a1",
+      "Description": "GCC support library",
+      "Description-md5": "bbd60d723e97d8e06c04228ee4c76f10",
+      "Multi-Arch": "same",
+      "Original-Maintainer": "Debian GCC Maintainers <debian-gcc@lists.debian.org>"
+    }
+  ],
+  "repository": "https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu/",
+  "source": "https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu/pool/main/g/gcc-16/",
+  "scope": "MAME ARM64 metadata and owned native game processes only"
+}

@@ -1,0 +1,22 @@
+[package]
+name = "arkos-nearby-gui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[dependencies]
+mirui = { version = "=0.47.0", default-features = false, features = ["std", "quad-aa"] }
+mirx = "=0.47.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+png = "0.17"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+signal-hook = "0.3"
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = "thin"

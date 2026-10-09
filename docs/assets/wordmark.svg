@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="150" viewBox="0 0 600 150">
+  <title>ArkOS Nearby</title>
+  <g transform="translate(24 0)">
+  <rect x="12" y="29" width="92" height="92" fill="#a33d2e"/>
+  <path d="M35 52h13v20h21V52h13v47H69V85H48v14H35z" fill="#f3eddf"/>
+  <text x="133" y="97" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="67" font-weight="650" letter-spacing="-2" fill="#a33d2e">ArkOS Nearby</text>
+  </g>
+</svg>

@@ -1,0 +1,27 @@
+{
+  "phase": "ready",
+  "sources": {
+    "libc6-dev_2.30-0ubuntu2.2_arm64.deb": "3f1da3e3a9f94657913a1787a23a6b355a10f571dfb03f6c66ebfb1d55c251c2",
+    "linux-libc-dev_5.3.0-64.58_arm64.deb": "0873029158b8a5b5ef17bd7e89770b9b049d40db9ff3ab4d85ec5bd3e42757bb",
+    "wpa_supplicant-2.10.tar.gz": "20df7ae5154b3830355f8ab4269123a87affdea59fe74fe9292a91d0d7e17b2f",
+    "libnl-3-dev_3.4.0-1_arm64.deb": "15e8cdcbf2da4c363870c13805d278800e74c57b69a7ee77fa5bcb7de7e81094",
+    "libnl-genl-3-dev_3.4.0-1_arm64.deb": "857fcc3cf88781840989cd70d45e0a9b1be6417aa8d344793418cf74306ba6dc",
+    "libssl-dev_1.1.1c-1ubuntu4.1_arm64.deb": "e43bd96a595b81fc510dcb2ae71783ac11c15a7f35ef53dbbaf885a59238d840"
+  },
+  "runtime_only": true,
+  "rtl_ie_bridge_sha256": "8793da534220ca05667a7facb9821586679c7df78d4dede88cead2912222edfa",
+  "unit": "arkos-lab-p2p-build-3b3114915dbf",
+  "binaries": {
+    "wpa_supplicant": {
+      "sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e",
+      "bytes": 1743784,
+      "version": "wpa_supplicant v2.10\nCopyright (c) 2003-2022, Jouni Malinen <j@w1.fi> and contributors"
+    },
+    "wpa_cli": {
+      "sha256": "10a51267310a611ca662131bbaf5a88209a1e871cfedd8e39d7e5228b52f19ad",
+      "bytes": 169320,
+      "version": "wpa_cli v2.10\nCopyright (c) 2004-2022, Jouni Malinen <j@w1.fi> and contributors"
+    }
+  },
+  "reproduced_sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e"
+}

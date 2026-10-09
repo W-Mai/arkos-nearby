@@ -1,0 +1,14 @@
+{
+  "page": "host",
+  "title": "魂斗罗",
+  "core": "FCEUmm",
+  "selected": 0,
+  "entries": [],
+  "rooms": [],
+  "room_name": "附近房间",
+  "ready": true,
+  "busy": false,
+  "status": "对方已准备好",
+  "phase": "host_ready",
+  "back_label": "关闭房间"
+}

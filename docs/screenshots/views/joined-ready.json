@@ -1,0 +1,14 @@
+{
+  "page": "joined",
+  "title": "魂斗罗",
+  "core": "FCEUmm",
+  "selected": 0,
+  "entries": [],
+  "rooms": [],
+  "room_name": "附近房间",
+  "ready": true,
+  "busy": false,
+  "status": "游戏核对完成，等待房主开始",
+  "phase": "waiting_start",
+  "back_label": "离开房间"
+}

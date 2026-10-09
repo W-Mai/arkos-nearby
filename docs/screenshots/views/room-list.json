@@ -1,0 +1,27 @@
+{
+  "page": "rooms",
+  "title": "魂斗罗",
+  "core": "FCEUmm",
+  "selected": 0,
+  "entries": [],
+  "rooms": [
+    {
+      "name": "朋友的房间",
+      "detail": "魂斗罗 · 可加入",
+      "signal": 3,
+      "available": true
+    },
+    {
+      "name": "附近的掌机",
+      "detail": "魂斗罗 · 可加入",
+      "signal": 2,
+      "available": true
+    }
+  ],
+  "room_name": "附近房间",
+  "ready": false,
+  "busy": false,
+  "status": "已发现 2 个房间",
+  "phase": "idle",
+  "back_label": "返回"
+}

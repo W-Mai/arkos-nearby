@@ -1,0 +1,25 @@
+{
+  "kernel": {
+    "commit": "c6b78a0da080650110705472b59b749f0c5393d2",
+    "archive": "arkos-kernel-c6b78a0.tar.gz",
+    "sha256": "a163b8c7d8064c554285fda24cf14a8a5e38947bd8778d69525f5589cafb1dee",
+    "url": "https://github.com/lcdyk0517/arkos.bsp.4.4"
+  },
+  "gcc": {
+    "source_package": "gcc-16",
+    "version": "16-20260315-1ubuntu1~18~ppa3",
+    "dsc": "gcc-16_16-20260315-1ubuntu1~18~ppa3.dsc",
+    "url": "https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu/pool/main/g/gcc-16/",
+    "archive": "gcc-16-16-20260315-source.tar.gz"
+  },
+  "supplicant": {
+    "source_archive_sha256": "20df7ae5154b3830355f8ab4269123a87affdea59fe74fe9292a91d0d7e17b2f",
+    "bridge_sha256": "8793da534220ca05667a7facb9821586679c7df78d4dede88cead2912222edfa",
+    "released_binary_sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e"
+  },
+  "rust": {
+    "source_archive": "arkos-nearby-0.2.0-rust-sources.tar.gz",
+    "locked_crates": 86,
+    "included_crates": 81
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "arm32-libc.so.6": {
+    "source": "/usr/lib/arm-linux-gnueabihf/libc-2.30.so",
+    "bytes": 968348,
+    "sha256": "074b2aceeebdc45da1c0a7b9a02ff932b2eb7de4c44728894de0875693975615"
+  },
+  "arm32-libdl.so.2": {
+    "source": "/usr/lib/arm-linux-gnueabihf/libdl-2.30.so",
+    "bytes": 9740,
+    "sha256": "4fc70e61bf60a8063117d7cb286bcd27fa72ff0fafefe76314f330a59bfbe4ab"
+  },
+  "arm32-ld-linux-armhf.so.3": {
+    "source": "/usr/lib/arm-linux-gnueabihf/ld-2.30.so",
+    "bytes": 106676,
+    "sha256": "99108d12fd598602be9a8c7955b7bfae7aae8c59d8a6c96c5512c2167b102fd2"
+  },
+  "arm64-libc.so.6": {
+    "source": "/usr/lib/aarch64-linux-gnu/libc-2.30.so",
+    "bytes": 1445800,
+    "sha256": "0b81f41f62f93e18a1fd1cffd678b09b98a3a78524c7268a626763ddc7e50aa9"
+  },
+  "arm64-libdl.so.2": {
+    "source": "/usr/lib/aarch64-linux-gnu/libdl-2.30.so",
+    "bytes": 14528,
+    "sha256": "c70338106957b18813fcddc2eeb8dc51dd59f714a67ca2235bf89de5a63b1545"
+  },
+  "arm64-ld-linux-aarch64.so.1": {
+    "source": "/usr/lib/aarch64-linux-gnu/ld-2.30.so",
+    "bytes": 142200,
+    "sha256": "ddbbb661704d9f0a1be703c83c9f8fa44edcd30afa76356c5ab3a6a56d804518"
+  },
+  "arm64-crt1.o": {
+    "source": "/usr/lib/aarch64-linux-gnu/crt1.o",
+    "bytes": 1768,
+    "sha256": "a775d1896132626f08218d4c6b49029a5860316fa0bba23f0b782b46aa9b5874"
+  },
+  "arm64-crti.o": {
+    "source": "/usr/lib/aarch64-linux-gnu/crti.o",
+    "bytes": 1440,
+    "sha256": "5e999dd076731ecfd30d1cc572e64c81343d3a878a90af4652cc4f649a56c797"
+  },
+  "arm64-crtn.o": {
+    "source": "/usr/lib/aarch64-linux-gnu/crtn.o",
+    "bytes": 1016,
+    "sha256": "4d3f1d1f9707d07815dbf691d6b0a16d2567dce2d95c1e841fe0a6f34b437ad2"
+  },
+  "arm64-libc_nonshared.a": {
+    "source": "/usr/lib/aarch64-linux-gnu/libc_nonshared.a",
+    "bytes": 22972,
+    "sha256": "77c6bc3f4a0367c4c0c28539af2e51cdc9d84a7c977501a2fcc726c3798f144d"
+  }
+}
