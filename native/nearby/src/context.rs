@@ -73,7 +73,12 @@ pub fn flags(path: &Path) -> Result<std::collections::HashMap<String, String>> {
 }
 
 pub fn inspect(path: &Path, frontend: &str) -> Result<Core> {
-    let root = config(frontend)?.join("cores").canonicalize()?;
+    let owned = crate::owned_core::by_path(path, frontend);
+    let root = if owned.is_some() {
+        PathBuf::from(crate::owned_core::ROOT).canonicalize()?
+    } else {
+        config(frontend)?.join("cores").canonicalize()?
+    };
     let path = confined(path, std::slice::from_ref(&root))?;
     require(
         path.parent() == Some(root.as_path()),
@@ -87,6 +92,17 @@ pub fn inspect(path: &Path, frontend: &str) -> Result<Core> {
         .strip_suffix("_libretro.so")
         .ok_or("Unknown local core filename")?
         .to_owned();
+    require(
+        crate::owned_core::entry(&id).is_none() || owned.is_some(),
+        "Owned core identifier is outside its fixed registry path",
+    )?;
+    let sha256 = digest(&path)?;
+    if let Some(entry) = owned {
+        require(
+            path.file_name().is_some_and(|name| name == entry.filename) && sha256 == entry.sha256,
+            "Owned core artifact differs",
+        )?;
+    }
     let mut header = [0; 6];
     fs::File::open(&path)?.read_exact(&mut header)?;
     require(
@@ -94,6 +110,9 @@ pub fn inspect(path: &Path, frontend: &str) -> Result<Core> {
         "Core is not an installed ELF library",
     )?;
     let bits = if header[4] == 1 { 32 } else { 64 };
+    if let Some(entry) = owned {
+        require(bits == entry.bits, "Owned core ABI differs")?;
+    }
     let helper = format!("{INSTALL}/core-inspect{bits}");
     let output = if let Some(runtime) = crate::core_runtime::directory(&id, bits)? {
         command(
@@ -129,6 +148,9 @@ pub fn inspect(path: &Path, frontend: &str) -> Result<Core> {
             && metadata["block_extract"].is_boolean(),
         "Core returned invalid ABI metadata",
     )?;
+    if let Some(entry) = owned {
+        entry.validate_metadata(&metadata)?;
+    }
     let name = metadata["library_name"]
         .as_str()
         .ok_or("Core returned no name")?
@@ -150,27 +172,49 @@ pub fn inspect(path: &Path, frontend: &str) -> Result<Core> {
         .filter(|v| !v.is_empty())
         .map(str::to_owned)
         .collect();
-    let info_path = path.with_extension("info");
-    if info_path.is_file() {
-        require(
-            info_path.canonicalize()?.parent() == Some(root.as_path()),
-            "Core information is outside registry",
-        )?;
-    }
-    let values = flags(&info_path)?;
-    let supported = values.get("savestate").is_some_and(|v| v == "true")
-        && values
-            .get("savestate_features")
-            .is_some_and(|v| v.split('|').any(|v| v == "deterministic"));
+    let supported = if owned.is_some() {
+        true
+    } else {
+        let info_path = path.with_extension("info");
+        if info_path.is_file() {
+            require(
+                info_path.canonicalize()?.parent() == Some(root.as_path()),
+                "Core information is outside registry",
+            )?;
+        }
+        let values = flags(&info_path)?;
+        values.get("savestate").is_some_and(|v| v == "true")
+            && values
+                .get("savestate_features")
+                .is_some_and(|v| v.split('|').any(|v| v == "deterministic"))
+    };
     Ok(Core {
         identity,
-        sha256: digest(&path)?,
+        sha256,
         path,
         bits,
         extensions,
         block_extract: metadata["block_extract"].as_bool().unwrap(),
         supported,
     })
+}
+
+pub fn resolve_core(frontend: &str, id: &str) -> Result<PathBuf> {
+    if let Some(entry) = crate::owned_core::entry(id) {
+        require(frontend == entry.frontend, "Owned core frontend differs")?;
+        return Ok(entry.path());
+    }
+    require(
+        !id.is_empty()
+            && id.len() <= 128
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')),
+        "Invalid local core identifier",
+    )?;
+    Ok(config(frontend)?
+        .join("cores")
+        .join(format!("{id}_libretro.so")))
 }
 
 pub fn library_argument(args: &[String]) -> Result<String> {
@@ -312,6 +356,59 @@ fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Result<Contex
             }
         }
     }
+    if adapt
+        && let Some(entry) = crate::owned_core::replacement(
+            &frontend,
+            &core.identity.id,
+            &core.sha256,
+            core.bits,
+            &game_path,
+        )
+    {
+        let path = entry.path();
+        core = inspect(&path, entry.frontend)?;
+        args = replace_core(&args, &path);
+    }
+    let (mut content, mut header) =
+        fingerprint_with_header(&game_path, &core.extensions, &roots, core.block_extract)?;
+    if adapt
+        && let Some(rule) = crate::core_choice::performance_candidate(
+            &frontend,
+            &core.identity.id,
+            &core.sha256,
+            core.bits,
+            &content.sha256,
+        )
+    {
+        let path = config(rule.target.frontend)?
+            .join("cores")
+            .join(format!("{}_libretro.so", rule.target.id));
+        if let Ok(candidate) = inspect(&path, rule.target.frontend)
+            && candidate.supported
+            && rule.matches_target(
+                rule.target.frontend,
+                &candidate.identity.id,
+                &candidate.sha256,
+                candidate.bits,
+            )
+        {
+            let (candidate_content, candidate_header) = fingerprint_with_header(
+                &game_path,
+                &candidate.extensions,
+                &roots,
+                candidate.block_extract,
+            )?;
+            require(
+                candidate_content.same_bytes(&content),
+                "Performance candidate interprets different content",
+            )?;
+            core = candidate;
+            frontend = rule.target.frontend.into();
+            args = replace_core(&args, &path);
+            content = candidate_content;
+            header = candidate_header;
+        }
+    }
     let configuration = config(&frontend)?;
     let frontend_root = PathBuf::from("/opt/retroarch/bin").canonicalize()?;
     let frontend_path = confined(
@@ -323,8 +420,6 @@ fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Result<Contex
         "Frontend is outside the installed registry",
     )?;
     let version = frontend_version(&frontend, &frontend_path)?;
-    let (content, header) =
-        fingerprint_with_header(&game_path, &core.extensions, &roots, core.block_extract)?;
     let link_mode = crate::handheld_link::select(&core.identity.id, &header);
     let supported = core.supported
         && (!(crate::handheld_link::preferred(&game_path).is_some()
@@ -384,9 +479,7 @@ impl Context {
     pub fn matching(&self, room: &VerifiedRoom, profile: &Profile) -> Result<Self> {
         profile.validate(room)?;
         room.room().core.validate()?;
-        let path = config(&profile.frontend)?
-            .join("cores")
-            .join(format!("{}_libretro.so", profile.core_id));
+        let path = resolve_core(&profile.frontend, &profile.core_id)?;
         let args = replace_core(&self.argv, &path);
         let matched = parse_selected(&profile.frontend, &args, false)?;
         require(

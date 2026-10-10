@@ -15,7 +15,13 @@ class ReleaseContract(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(
                     name.startswith(
-                        ("native/nearby/", "native/core_inspect/", "gui/nearby/")
+                        (
+                            "native/nearby/",
+                            "native/core_inspect/",
+                            "native/netplay_compression/",
+                            "native/owned_cores/",
+                            "gui/nearby/",
+                        )
                     )
                 )
                 self.assertEqual(

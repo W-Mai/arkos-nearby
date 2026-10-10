@@ -20,6 +20,8 @@ pub const ALLOWED: &[&str] = &[
     "assets/8188eu.ko",
     "assets/wpa_supplicant",
     "assets/build.json",
+    "assets/netplay-compression.so",
+    "assets/netplay-compression-build.json",
     "core-inspect-build.json",
     "nearby-gui-build.json",
     "font/OFL.txt",
@@ -33,6 +35,10 @@ pub const ALLOWED: &[&str] = &[
     "compat/arm64/libgcc_s.so.1",
     "compat/arm64/source.json",
     "licenses/gcc-runtime-COPYING.txt",
+    "licenses/netplay-compression-COPYING.txt",
+    "cores/nestopia_nearby_libretro.so",
+    "cores/owned-core-build.json",
+    "licenses/nestopia-COPYING.txt",
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use crate::content::{confined, digest};
 use crate::context::{Context, config};
+use crate::handheld_link::LinkMode;
 use crate::menu::OwnedChild;
 use crate::protocol::{Room, VerifiedRoom};
 use crate::session::{State, best, cmd, current, live_peer, task};
@@ -35,7 +36,14 @@ fn chown(path: &Path, uid: u32, gid: u32) -> Result<()> {
     )
 }
 
-pub fn configuration(path: &Path) -> Result<String> {
+fn controller_users(link_mode: Option<LinkMode>) -> usize {
+    match link_mode {
+        None | Some(LinkMode::GbDual) => 2,
+        Some(_) => 1,
+    }
+}
+
+pub fn configuration(path: &Path, link_mode: Option<LinkMode>) -> Result<String> {
     let path = path.to_str().ok_or("Invalid runtime configuration path")?;
     require(
         !path.contains(['"', '\n', '\r']),
@@ -62,6 +70,7 @@ pub fn configuration(path: &Path) -> Result<String> {
         "config_save_on_exit",
         "remap_save_on_exit",
         "auto_overrides_enable",
+        "auto_remaps_enable",
         "game_specific_options",
         "cheevos_enable",
         "netplay_public_announce",
@@ -73,9 +82,42 @@ pub fn configuration(path: &Path) -> Result<String> {
     lines.extend([
         "global_core_options = \"true\"".into(),
         "netplay_ip_port = \"55435\"".into(),
+        // Match RetroArch's default periodic state check interval.
+        "netplay_check_frames = \"600\"".into(),
     ]);
+    let users = controller_users(link_mode);
+    lines.push(format!("input_max_users = \"{users}\""));
     Ok(lines.join("\n") + "\n")
 }
+
+pub fn frontend_arguments(context: &Context, directory: &Path, host: bool) -> Vec<String> {
+    let mut args = vec![
+        context.frontend_path.to_string_lossy().into_owned(),
+        "--verbose".into(),
+        "-c".into(),
+        directory.join("base.cfg").to_string_lossy().into_owned(),
+        "--appendconfig".into(),
+        directory.join("netplay.cfg").to_string_lossy().into_owned(),
+        format!("--nick=ArkOS_{}", if host { "host" } else { "peer" }),
+        "--sram-mode=noload-nosave".into(),
+    ];
+    // Device types in base.cfg are ignored by RetroArch. The CLI sets the
+    // devices used by both ordinary initialization and the netplay handshake.
+    let users = controller_users(context.link_mode);
+    for port in 1..=16 {
+        let device = u8::from(port <= users);
+        args.push(format!("--device={port}:{device}"));
+    }
+    args.extend([
+        "-L".into(),
+        context.core_path.to_string_lossy().into_owned(),
+        context.game_path.to_string_lossy().into_owned(),
+        if host { "-H" } else { "--connect=192.168.49.1" }.into(),
+        "--port=55435".into(),
+    ]);
+    args
+}
+
 pub fn isolated(original: &str, overrides: &str) -> String {
     let keys: std::collections::BTreeSet<_> = overrides
         .lines()
@@ -123,7 +165,7 @@ pub fn prepare(state: &State, context: &Context, remote: Option<&VerifiedRoom>) 
         mkdir(&path)?;
         chown(&path, uid, gid)?;
     }
-    let overrides = configuration(&directory)?;
+    let overrides = configuration(&directory, context.link_mode)?;
     let configuration = config(&context.frontend)?;
     let source = confined(
         &configuration.join("retroarch.cfg"),
@@ -293,32 +335,20 @@ pub fn run(id: &str) -> Result<()> {
             "env".into(),
             format!("XDG_RUNTIME_DIR=/run/user/{uid}"),
             "TERM=linux".into(),
-            context.frontend_path.to_string_lossy().into_owned(),
-            "--verbose".into(),
-            "-c".into(),
-            directory.join("base.cfg").to_string_lossy().into_owned(),
-            "--appendconfig".into(),
-            directory.join("netplay.cfg").to_string_lossy().into_owned(),
-            format!(
-                "--nick=ArkOS_{}",
-                if state.role == "host" { "host" } else { "peer" }
-            ),
-            "--sram-mode=noload-nosave".into(),
-            "-L".into(),
-            context.core_path.to_string_lossy().into_owned(),
-            context.game_path.to_string_lossy().into_owned(),
         ];
+        args.extend(frontend_arguments(
+            &context,
+            &directory,
+            state.role == "host",
+        ));
         if let Some(runtime) =
             crate::core_runtime::directory(&context.core_id, context.core_elf_bits)?
         {
             args.insert(4, format!("LD_LIBRARY_PATH={runtime}"));
         }
-        args.push(if state.role == "host" {
-            "-H".into()
-        } else {
-            "--connect=192.168.49.1".into()
-        });
-        args.push("--port=55435".into());
+        if let Some(compression) = crate::netplay_compression::environment(&context)? {
+            args.insert(4, compression);
+        }
         let log = File::create(directory.join("game.log"))?;
         game["phase"] = "running".into();
         write(&directory.join("game.json"), &game)?;

@@ -14,6 +14,8 @@ pub mod identity;
 pub mod installer;
 pub mod manual;
 pub mod menu;
+pub mod netplay_compression;
+pub mod owned_core;
 pub mod pairing;
 pub mod protocol;
 pub mod radio;

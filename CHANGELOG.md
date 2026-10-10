@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Faster full-state compression for the verified ARM64 RetroArch build.
+- Bundled Nestopia core with complete input-state restoration and zeroed state padding.
+- FBNeo selection from MAME for verified Final Fight content, restricted to matching 64-bit source and target builds.
+- Super Bomberman 5 retains its supported local core.
+- Explicit controller ports and a 600-frame state verification interval for multiplayer sessions.
+
 ## [0.2.0] - 2026-10-09
 
 - Native Rust installer and nearby room runtime for the checked ArkOS4Clone / RTL8188EU profile.

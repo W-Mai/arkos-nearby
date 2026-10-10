@@ -171,7 +171,7 @@ fn observed_readiness_expires_and_retired_claims_cannot_return() {
 #[test]
 fn native_configuration_confines_all_owned_write_destinations() {
     let path = std::path::Path::new("/run/arkos-nearby-rust/session/game");
-    let overrides = crate::game::configuration(path).unwrap();
+    let overrides = crate::game::configuration(path, None).unwrap();
     let original = "savefile_directory = \"/roms/saves\"\ncache_directory = \"/roms/cache\"\nconfig_save_on_exit = \"true\"\nvideo_driver = \"gl\"\n";
     let isolated = crate::game::isolated(original, &overrides);
     assert!(!isolated.contains("/roms/"));
@@ -179,7 +179,115 @@ fn native_configuration_confines_all_owned_write_destinations() {
     assert!(isolated.contains("video_driver = \"gl\""));
     assert!(isolated.contains("config_save_on_exit = \"false\""));
     let wrong = std::path::Path::new("/run/session\"\ncache_directory=\"/roms");
-    assert!(crate::game::configuration(wrong).is_err());
+    assert!(crate::game::configuration(wrong, None).is_err());
+}
+
+#[test]
+fn netplay_compression_is_scoped_to_the_inspected_state_frontend() {
+    use crate::handheld_link::LinkMode;
+    use crate::netplay_compression::{FRONTEND_SHA, eligible, environment};
+    let mut compatible = context();
+    compatible.frontend_sha256 = FRONTEND_SHA.into();
+    for mode in [None, Some(LinkMode::GbDual)] {
+        compatible.link_mode = mode;
+        assert!(eligible(&compatible));
+    }
+    for mode in [
+        LinkMode::Rfu,
+        LinkMode::PokemonCable,
+        LinkMode::AdvanceWarsCable,
+        LinkMode::AdvanceWars2Cable,
+    ] {
+        compatible.link_mode = Some(mode);
+        assert!(!eligible(&compatible));
+        assert!(environment(&compatible).unwrap().is_none());
+    }
+    compatible.link_mode = None;
+    for alteration in 0..4 {
+        let mut other = compatible.clone();
+        match alteration {
+            0 => other.frontend = "retroarch32".into(),
+            1 => other.frontend_path = "/opt/retroarch32/bin/retroarch".into(),
+            2 => other.frontend_sha256 = "0".repeat(64),
+            _ => other.core_elf_bits = 32,
+        }
+        assert!(!eligible(&other));
+        assert!(environment(&other).unwrap().is_none());
+    }
+}
+
+#[test]
+fn ordinary_and_network_controller_initialization_share_the_same_ports() {
+    use crate::handheld_link::LinkMode;
+    for mode in [
+        None,
+        Some(LinkMode::GbDual),
+        Some(LinkMode::Rfu),
+        Some(LinkMode::PokemonCable),
+        Some(LinkMode::AdvanceWarsCable),
+        Some(LinkMode::AdvanceWars2Cable),
+    ] {
+        let generated =
+            crate::game::configuration(std::path::Path::new("/run/game"), mode).unwrap();
+        let original = "input_max_users = \"16\"\ninput_libretro_device_p3 = \"1\"\nauto_remaps_enable = \"true\"\ninput_player1_a_btn = \"2\"\nnetplay_check_frames = \"10\"\n";
+        let merged = crate::game::isolated(original, &generated);
+        let values: std::collections::BTreeMap<_, _> = merged
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .map(|(key, value)| (key.trim(), value.trim().trim_matches('"')))
+            .collect();
+        let users: usize = values["input_max_users"].parse().unwrap();
+        assert_eq!(
+            users,
+            if mode.is_none() || mode == Some(LinkMode::GbDual) {
+                2
+            } else {
+                1
+            }
+        );
+        assert!(!generated.contains("input_libretro_device_p"));
+        let mut context = context();
+        context.link_mode = mode;
+        for host in [true, false] {
+            let args =
+                crate::game::frontend_arguments(&context, std::path::Path::new("/run/game"), host);
+            let devices: std::collections::BTreeMap<usize, u8> = args
+                .iter()
+                .filter_map(|arg| arg.strip_prefix("--device="))
+                .map(|value| {
+                    let (port, device) = value.split_once(':').unwrap();
+                    (port.parse().unwrap(), device.parse().unwrap())
+                })
+                .collect();
+            assert_eq!(devices.len(), 16);
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| arg.starts_with("--device="))
+                    .count(),
+                16
+            );
+            for port in 1..=16 {
+                let handshake = devices[&port];
+                let ordinary = if port <= users { handshake } else { 0 };
+                assert_eq!(ordinary, handshake);
+                assert_eq!(handshake, u8::from(port <= users));
+            }
+            assert_eq!(args[0], context.frontend_path.to_str().unwrap());
+            assert!(
+                args.windows(2)
+                    .any(|pair| pair == ["-c", "/run/game/base.cfg"])
+            );
+            assert!(
+                args.windows(2)
+                    .any(|pair| pair == ["-L", context.core_path.to_str().unwrap()])
+            );
+            assert!(args.contains(&context.game_path.to_string_lossy().into_owned()));
+            assert!(args.contains(&if host { "-H" } else { "--connect=192.168.49.1" }.to_string()));
+        }
+        assert_eq!(values["auto_remaps_enable"], "false");
+        assert_eq!(values["netplay_check_frames"], "600");
+        assert_eq!(values["input_player1_a_btn"], "2");
+    }
 }
 
 #[test]

@@ -7,6 +7,7 @@ The RTL8188EU kernel module retains its GPL-2.0 license notice.
 ABI-specific core inspectors are included as separate native helpers.
 The signing implementation includes ring 0.17.14 and its license notices.
 The private ARM64 C++ runtime includes its GCC license and Runtime Library Exception.
+The Netplay compression helper includes its MIT license and the RetroArch stream ABI notice.
+Nestopia 1.53.2 uses the GNU GPL version 2; its state restoration patch and source archive reference are included.
 
 Asset versions, checksums and source locations are recorded in release-sources.json.
-RetroArch, game cores, ROMs, saves and firmware images are not included.

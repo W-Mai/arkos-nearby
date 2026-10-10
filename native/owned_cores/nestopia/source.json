@@ -1,0 +1,52 @@
+{
+  "id": "nestopia_nearby",
+  "revision": "7dfdc250fa59e440b0d6eef4be1863c59f3c6147",
+  "source_archive": "https://codeload.github.com/libretro/nestopia/tar.gz/7dfdc250fa59e440b0d6eef4be1863c59f3c6147",
+  "source_archive_sha256": "b1d2017e72682641386fa8d261edce3a2b3cfec65a269f33c4fb388fa24df964",
+  "source_file_sha256": "8a672aa566634f7d88571a541eff37891189b1c2349b26b3d2286bd5a48d8725",
+  "patched_file_sha256": "3c726b72f2cc41e828e04f1ffc3fe7393db942eca3f77237d6eda53819a276a9",
+  "patch": "native/owned_cores/nestopia/state-footer.patch",
+  "patch_sha256": "b83aa47608687b62a18692ec7f750fbd70abd0271069611c525962a30303b8bc",
+  "license": "GPL-2.0",
+  "license_sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
+  "artifact_sha256": "2c276c3338e7df8105213f7c2008a8e2a0cd307a89f40f19fbde05fc2c84f430",
+  "artifact_bytes": 5272832,
+  "metadata": {
+    "pointer_bits": 64,
+    "library_name": "Nestopia",
+    "library_version": "1.53.27dfdc25-footer1",
+    "valid_extensions": "nes|fds|unf|unif",
+    "need_fullpath": false,
+    "block_extract": false
+  },
+  "build_inputs": {
+    "libstdc++-9-dev_arm64.deb": {
+      "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/g/gcc-9/libstdc++-9-dev_9.2.1-9ubuntu2_arm64.deb",
+      "sha256": "aa0efe55ba5002e2d3572271b6c0106dfb59f7a6c61be0a0c406c4836e12472b"
+    },
+    "libgcc-9-dev_arm64.deb": {
+      "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/g/gcc-9/libgcc-9-dev_9.2.1-9ubuntu2_arm64.deb",
+      "sha256": "4e4a83c4d83471eff726fd819b4e5d266fd01c0fbb66f1376718b78bfd4ae116"
+    },
+    "gcc-9-base_arm64.deb": {
+      "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/g/gcc-9/gcc-9-base_9.2.1-9ubuntu2_arm64.deb",
+      "sha256": "0ad374edb441f27b78f71b745806a4e41c5a488c5e0c17f0e17b89876fa3eff9"
+    }
+  },
+  "link_inputs": {
+    "libstdc++.so.6": "c116f7a27884c399ed3ab89eed9c0150a8f09ed5990b5a36d2c18ac14c0a3d66",
+    "libgcc_s.so.1": "3f81f337c558b6a08924b05dc73b5fcc117d39c11ba306a49f1f973b960adc2c",
+    "libc.so.6": "0b81f41f62f93e18a1fd1cffd678b09b98a3a78524c7268a626763ddc7e50aa9",
+    "libm.so.6": "a1fe0ac5fea38015c41a8c5a6357a462ab018e1639d5a6ec031a777f71b57d88",
+    "builtins.a": "af04518ea7ae2fecb03a4a8e74ac1edb5dfcaa264d29bb6c752cb2fb260ad324"
+  },
+  "build": {
+    "target": "aarch64-linux-gnu",
+    "git_version": "7dfdc25-footer1",
+    "optimization": "-O2",
+    "compiler": "Apple clang 21.0.0 (clang-2100.3.20.102)",
+    "linker": "rust-lld from Rust 1.92",
+    "strip": "llvm-strip from LLVM 18",
+    "recipe": "scripts/build_owned_cores.py"
+  }
+}

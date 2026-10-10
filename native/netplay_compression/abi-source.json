@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "frontend_sha256": "81f3cf1b8850f9457730346d3f973dfb03d5316d62c4bb92b1654372bbc86e77",
+  "frontend_build_id": "d7b216b135a48779da357f7ed4c12670feac2d64",
+  "frontend_bytes": 14691912,
+  "machine": "AArch64",
+  "backend_address": "0x11262d8",
+  "callsite_return_addresses": [
+    "0xad34e0",
+    "0xad350c",
+    "0xad3538"
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/libretro/RetroArch/v1.22.2/libretro-common/include/streams/trans_stream.h",
+      "sha256": "fdd4e3d4fb9041bd93a5e11c645ed08560446afbec0b53cbfc7fd2bd5cfd2c6c"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/libretro/RetroArch/v1.22.2/libretro-common/streams/trans_stream_zlib.c",
+      "sha256": "391fe36eb8ef822b745895d1ca333f6e4a963349c015ac4a89ee3923435104c6"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/libretro/RetroArch/v1.22.2/network/netplay/netplay_frontend.c",
+      "sha256": "405f0df83e6a5068915b5438ab4f5cd96a650bec4d8d136be3ea42cedb54da95"
+    }
+  ]
+}

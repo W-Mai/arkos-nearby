@@ -1,0 +1,73 @@
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -1763,7 +1763,8 @@
+       return false;
+ 
+    std::string state = ss.str();
+-   if (state.size() + tracked_input_state_size_bytes > size)
++   if (!data || size < tracked_input_state_size_bytes ||
++       state.size() > size - tracked_input_state_size_bytes)
+       return false;
+ 
+    std::copy(state.begin(), state.end(), reinterpret_cast<char*>(data));
+@@ -1779,22 +1780,42 @@
+    *tracked_input_state_ptr++ = prevL;
+    *tracked_input_state_ptr++ = prevR;
+ 
++   // The frontend retains a capacity that can exceed the current state.
++   memset(tracked_input_state_ptr, 0, size - state.size() - tracked_input_state_size_bytes);
++
+    return true;
+ }
+ 
+ bool retro_unserialize(const void *data, size_t size)
+ {
+-   // Preserve ability to load states not containing libretro-specific bits
+-   size_t nestopia_savestate_size = size < retro_serialize_size() ?
+-      size : size - tracked_input_state_size_bytes;
++   // The NST root stores its actual payload length, independently of capacity.
++   if (!data || size < 8)
++      return false;
++
++   const unsigned char *bytes = reinterpret_cast<const unsigned char*>(data);
++   if (memcmp(bytes, "NST\x1a", 4))
++      return false;
++
++   const uint32_t payload_size = uint32_t(bytes[4]) |
++      (uint32_t(bytes[5]) << 8) | (uint32_t(bytes[6]) << 16) |
++      (uint32_t(bytes[7]) << 24);
++   if (payload_size > size - 8)
++      return false;
++
++   const size_t nestopia_savestate_size = 8 + size_t(payload_size);
++   const size_t trailing_size = size - nestopia_savestate_size;
++   if (trailing_size && trailing_size < tracked_input_state_size_bytes)
++      return false;
+ 
+    std::stringstream ss(std::string(reinterpret_cast<const char*>(data),
+-      reinterpret_cast<const char*>(data) + nestopia_savestate_size));
+-
+-   // Only load libretro-specific bits if they exist
+-   if (size < retro_serialize_size()) {
+-      unsigned char const *tracked_input_state_ptr =
+-         reinterpret_cast<unsigned char const*>(data) + nestopia_savestate_size;
++      nestopia_savestate_size));
++   if (machine->LoadState(ss))
++      return false;
++
++   // Exact machine-only states remain valid. Padded states keep the footer
++   // immediately after the actual NST root, not at the end of the capacity.
++   if (trailing_size >= tracked_input_state_size_bytes) {
++      unsigned char const *tracked_input_state_ptr = bytes + nestopia_savestate_size;
+       tstate[0] = *tracked_input_state_ptr++;
+       tstate[1] = *tracked_input_state_ptr++;
+       tstate[2] = *tracked_input_state_ptr++;
+@@ -1805,7 +1826,7 @@
+       prevR  = *tracked_input_state_ptr++;
+    }
+ 
+-   return !machine->LoadState(ss);
++   return true;
+ }
+ 
+ void *retro_get_memory_data(unsigned id)
