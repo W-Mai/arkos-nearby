@@ -124,14 +124,7 @@ impl Flow {
         } else {
             Page::Unavailable
         };
-        let unavailable = if context.as_ref().is_some_and(|context| {
-            crate::handheld_link::preferred(&context.game_path) == Some("gpsp")
-                && context.link_mode.is_none()
-        }) {
-            "这款 GBA 游戏暂时无法联机，按 B 继续单机。"
-        } else {
-            "暂时无法核对当前游戏，按 B 继续单机。"
-        };
+        let unavailable = "暂时无法核对当前游戏，按 B 继续单机。";
         Self {
             context,
             page,

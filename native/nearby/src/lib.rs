@@ -1,3 +1,4 @@
+pub mod arcade;
 pub mod bundle;
 pub mod catalog;
 pub mod compat;

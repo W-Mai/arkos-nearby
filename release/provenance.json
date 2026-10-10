@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "development_repository": "https://github.com/W-Mai/arkos-nearby-dev",
-  "development_commit": "94cc5c925c3151a9c6d63117496e865da7f5dcbb",
-  "version": "0.3.0",
+  "development_commit": "22d3253f0ebc15d9a00666681c8acc4b830cb21e",
+  "version": "0.3.1",
   "source_files": {
     "gui/nearby/Cargo.lock": "8ef35dca6b45d551d1997aa1e571d3057dfa2e0d8d2ad7986f75890f1c40478e",
     "gui/nearby/Cargo.toml": "f9803727f7880c8a3f77cd0bd3506a43536475811426d859ac01ce7d26d50034",
@@ -18,24 +18,29 @@
     "native/core_inspect/core_inspect.c": "83823e9950db0ece5c44a675f0086954308c0abb8bb4926196354eb376fd9afd",
     "native/core_inspect/runtime-pins.json": "bc7676e9a8513accb320dfcc966352d7df6e3715514b33f95a20572d4eadfc84",
     "native/core_inspect/start32.S": "9fa1116e49ce9e16c680a9258ff311620c6009fda3f047514e5790fe1d6bf277",
-    "native/nearby/Cargo.lock": "0abc6e1349f7b85d52715c8097890e1cc7f5812a98e4a0393688716a76de3d34",
-    "native/nearby/Cargo.toml": "b74e6040113e1ec05f6ae12e6c61fc4ecf5ae96300130c02daa4eb4e0a3dde60",
-    "native/nearby/src/bundle.rs": "272a534fb1679380fe20fb782130182fe9342a048c7afd6d88062ad71341bd7f",
+    "native/core_probe/ABI-LICENSE.txt": "33fde21f1c1da14841c616e1d668435965efea826626a8cfe1f85968d7b9fbb9",
+    "native/core_probe/README.md": "b1bdc88da134acf9d897ab45e04b51419b696650a21996a415816d70b237ffbc",
+    "native/core_probe/abi.h": "19e6e56a3e504e0a053522b28df94811399aa85bf830d707d5b4eff804347d03",
+    "native/core_probe/probe.c": "f0d6a47fe22e5ef4d00252d9d8981032bebe304020ebd0742182e3ce20d77484",
+    "native/nearby/Cargo.lock": "7ffe2ac53001a0883bcecd0ccaa4079ac879368ba2f46ff0d71898599aab248e",
+    "native/nearby/Cargo.toml": "5a373db1f88ee89b135933583a2e0491e46e1a62f3a2f3f70ceb5e0288d5feb4",
+    "native/nearby/src/arcade.rs": "1255998f646cedfadc39d6c56d635ab610504860f630191a5d7f9e15f1b374ca",
+    "native/nearby/src/bundle.rs": "4e0476c405bb769f1315847913680e5516ec7487618f009826b69aedbda695bc",
     "native/nearby/src/catalog.rs": "906a5fcbf9c7563425da0619949adb54e7ec855860a9637a380d3c553ae0ad12",
     "native/nearby/src/compat.rs": "f2479a63bbed345b9bfe6ccc66f6dbaac1dc30882078bf02db74c8db3d219300",
-    "native/nearby/src/content.rs": "e4c60a9115d633a29d634769964aa70678260136773c42c252567ba27310040b",
-    "native/nearby/src/context.rs": "b223e18dfd7c7fd2fd6e8030e9a60cb8c2f6ed64ba2c1a5649fdc2c97aa03051",
-    "native/nearby/src/contracts.rs": "eeee70e787bd734a0e533fef840041069d5e2000353e77808e87a21466b153cc",
-    "native/nearby/src/core_choice.rs": "efc26bd94fc2a51d33530578027c20f4b65b050833b1eb48416370a72330b346",
+    "native/nearby/src/content.rs": "bb942b9c60ab261cb7f03baea2feb84d11a8ba2e87d8819125a4a88604ab7f28",
+    "native/nearby/src/context.rs": "30a8060dbfb2b769ad1ae4e34cf1dbe44a19ac440ef3f3152f931722eed41fee",
+    "native/nearby/src/contracts.rs": "17fd31e3f3dcde105542859af87814c3ea1f2f8704fa5d400461cd1ec8ae5ec0",
+    "native/nearby/src/core_choice.rs": "95b7a3807fbf8464812efe0828ee61808ad81c8872d88a347fc5ec4927622798",
     "native/nearby/src/core_runtime.rs": "ab6a56e87a055771ce20cf794a35c5c9624f271f770828191747e463c40b53a8",
-    "native/nearby/src/flow.rs": "d8dd3fb252491da4f8e06c6ea1be2e35fe722d003708e6f36256943a39e8a158",
-    "native/nearby/src/game.rs": "25bcd020f480edca9034fc44d95072808f76f62600c40026b55ca8cd3583e122",
-    "native/nearby/src/handheld_link.rs": "ccd8dc151e48c792e36c215789b49b1c2fb75a662114e5bb93b722d753a5f4b3",
+    "native/nearby/src/flow.rs": "6c10c98ea8ea8b54837ad763fba36f08e4dbca6cfa2d3543003e36d3979eefb7",
+    "native/nearby/src/game.rs": "8879129ed5e0aa188b7ac28f8b37618b4c8b8959acfcf1f4af114023ca0a5d6c",
+    "native/nearby/src/handheld_link.rs": "25a264a9a6ec299b4893d303fbb85be94f9c65b9217000aac0ab23eb1d4b8a72",
     "native/nearby/src/handshake.rs": "2e3276dc746460849218cac5ff9126d91713eb152a5b83851c30cbd7ee9aacf0",
     "native/nearby/src/http.rs": "01ae9f516ea3788d30aee4d972813051c7fa4f8c90e45389d28d95f4e458bda6",
     "native/nearby/src/identity.rs": "9528e16a5a51ff3a27704e79f02a7ea6733611036b274d4105b6dce1e803e82d",
     "native/nearby/src/installer.rs": "a4c39ea0eab2b91eb60c57083ac66505add08baa5e657e96c320195e8eb270ae",
-    "native/nearby/src/lib.rs": "2d7710e5407944ebb8426d400506659a77dead63b91fd8439727013eb914ee79",
+    "native/nearby/src/lib.rs": "e790a389cebb7b52bc37dbe59b623b51a1d2badb5a0c4cac3846f30ab213c8f5",
     "native/nearby/src/main.rs": "162cb8aae707424e64b3a498826066737a8bdde9b6fb78357cc1e51698a0f6a0",
     "native/nearby/src/manual.rs": "f981e977acb49cf25a310c231edb5cefca685a7c89db7ed71777ec6de3c2424a",
     "native/nearby/src/menu.rs": "201424da09b2dc45cf20b5468dcb0516bd8f0ad69621bc328e2671439825920f",
@@ -45,7 +50,7 @@
     "native/nearby/src/protocol.rs": "4321258d876e4e3a926035fa98a1fa26a6e50aa30d647e95512a1e299e54b64e",
     "native/nearby/src/radio.rs": "37e7c931ae61b76b58864858080a79c15def5c725cadc2b43033cbfae1d1cec3",
     "native/nearby/src/readiness.rs": "9fc3cefe654485f13ac34c2b03c62b58feed0c12fda822c268f8939abb32d656",
-    "native/nearby/src/session.rs": "b2e61a445b9687963f4168539862922fd39fc0629df7f2241d3b903f86a07d80",
+    "native/nearby/src/session.rs": "f1d74267fc385245905ac1d0ed579c587523e80893601f181d515398cbdc0244",
     "native/nearby/src/system.rs": "db3a787f311c65dc3a199dd9d9d2d421315ee29d79ca1b7ac51eeca65de7514c",
     "native/netplay_compression/ABI-COPYING.txt": "5133d09c0e4d83ba7ed1645721511198b3943861965a4c5534890c5f81b8243a",
     "native/netplay_compression/LICENSE": "81f2efd28e5bc99b6ca147f8de4839b91503586f226250535aa2ebac48e6f5be",
@@ -59,23 +64,24 @@
   },
   "device_tested_build": {
     "version": "0.2.0",
-    "sha256": "9857e62dd1d4aea38888241e5fdd29a5829c862d37cbfb70a83854d9f0cdb16c",
-    "development_commit": "94cc5c925c3151a9c6d63117496e865da7f5dcbb"
+    "sha256": "e27958a1f69b648b781fff2a08c3c2a3aca2f99b4c957da75241b44b06d0560e",
+    "development_commit": "e7fb6a6ae9e5edd37b65a6e9e88b340805173723",
+    "scope": "Arcade load and rollback checks, two-device native admission and scene progression, cancellation and network recovery"
   },
   "source_adjustments": {
     "native/nearby/Cargo.toml": {
       "development_sha256": "05a194069bfcff4748a0a94fc0e16eeb2d1e1c988868f3641bb37882c26078bf",
-      "change": "Package version 0.3.0"
+      "change": "Package version 0.3.1"
     },
     "native/nearby/Cargo.lock": {
       "development_sha256": "6c21a655d5ad5bbd21c7fd19879263671df95c928606c81d4f5a7240628101a4",
-      "change": "Package version 0.3.0"
+      "change": "Package version 0.3.1"
     }
   },
   "release_build": {
-    "version": "0.3.0",
+    "version": "0.3.1",
     "target": "aarch64-unknown-linux-musl",
-    "sha256": "a6c6607c6da277d19dc6b3c46576c7c0752d086133490a47992fd4bd8eaaa8a0",
-    "bytes": 8491392
+    "sha256": "22b7b1bc297b9ccf0e5e151fdf11e9d2d5598fb90ead2fd6bbf78a7233b1f71c",
+    "bytes": 8508272
   }
 }

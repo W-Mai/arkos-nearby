@@ -34,12 +34,11 @@ pub fn digest(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 
-fn identity(title: String, mut stream: impl Read) -> Result<(ContentIdentity, Vec<u8>)> {
+fn identity(title: String, mut stream: impl Read) -> Result<ContentIdentity> {
     let mut hash = Sha256::new();
     let mut crc = crc32fast::Hasher::new();
     let mut size = 0;
     let mut block = [0u8; 65536];
-    let mut header = Vec::with_capacity(192);
     loop {
         let count = stream.read(&mut block)?;
         if count == 0 {
@@ -49,8 +48,6 @@ fn identity(title: String, mut stream: impl Read) -> Result<(ContentIdentity, Ve
         require(size <= MAX_CONTENT, "Content limit exceeded")?;
         hash.update(&block[..count]);
         crc.update(&block[..count]);
-        let sample = count.min(192 - header.len());
-        header.extend_from_slice(&block[..sample]);
     }
     let result = ContentIdentity {
         title,
@@ -59,7 +56,7 @@ fn identity(title: String, mut stream: impl Read) -> Result<(ContentIdentity, Ve
         crc32: crc.finalize(),
     };
     result.validate()?;
-    Ok((result, header))
+    Ok(result)
 }
 
 fn u16_at(data: &[u8], offset: usize) -> u16 {
@@ -77,11 +74,7 @@ fn allowed(name: &[u8], extensions: &[String]) -> bool {
     })
 }
 
-fn zip_identity(
-    title: String,
-    mut file: File,
-    extensions: &[String],
-) -> Result<(ContentIdentity, Vec<u8>)> {
+fn zip_identity(title: String, mut file: File, extensions: &[String]) -> Result<ContentIdentity> {
     let length = file.metadata()?.len();
     let tail_length = length.min(65557) as usize;
     file.seek(SeekFrom::End(-(tail_length as i64)))?;
@@ -181,7 +174,7 @@ fn zip_identity(
         _ => return Err("Unsupported ZIP compression".into()),
     };
     require(
-        result.0.size == size && result.0.crc32 == crc,
+        result.size == size && result.crc32 == crc,
         "ZIP content checksum differs",
     )?;
     Ok(result)
@@ -193,15 +186,6 @@ pub fn fingerprint(
     roots: &[PathBuf],
     block_extract: bool,
 ) -> Result<ContentIdentity> {
-    Ok(fingerprint_with_header(path, extensions, roots, block_extract)?.0)
-}
-
-pub fn fingerprint_with_header(
-    path: &Path,
-    extensions: &[String],
-    roots: &[PathBuf],
-    block_extract: bool,
-) -> Result<(ContentIdentity, Vec<u8>)> {
     let actual = confined(path, roots)?;
     let title = actual
         .file_stem()

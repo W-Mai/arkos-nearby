@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
   "gui_version": "0.47.0",
@@ -90,94 +90,115 @@
       "mode": 493
     },
     {
+      "name": "core-probe-build.json",
+      "sha256": "8843a594f6b62e5a53fad5617016a0c89bd8a81c410aeacd851e7d4e3dfab963",
+      "size": 1725,
+      "offset": 13379071,
+      "mode": 420
+    },
+    {
+      "name": "core-probe64",
+      "sha256": "cf21e3ec71941dc49019ac639cf3d7d19fabb04961c94f0f02f9b2dee1c87b59",
+      "size": 13240,
+      "offset": 13380796,
+      "mode": 493
+    },
+    {
       "name": "cores/nestopia_nearby_libretro.so",
       "sha256": "2c276c3338e7df8105213f7c2008a8e2a0cd307a89f40f19fbde05fc2c84f430",
       "size": 5272832,
-      "offset": 13379071,
+      "offset": 13394036,
       "mode": 420
     },
     {
       "name": "cores/owned-core-build.json",
       "sha256": "1b96b863bdbc980bce8bb61e338360d322ee882498dde38a334479529aa6129c",
       "size": 2572,
-      "offset": 18651903,
+      "offset": 18666868,
       "mode": 420
     },
     {
       "name": "font/OFL.txt",
       "sha256": "af55b908a0ccf969b7bdd0e6cac6f4866a7ed0d1aeb9c7b29516ca0d24422981",
       "size": 4346,
-      "offset": 18654475,
+      "offset": 18669440,
       "mode": 420
     },
     {
       "name": "font/font-source.json",
       "sha256": "729bc03c7e82299b2594dd3d5b344fe31e05dfcbd0702e43c83c4d6b550ec78d",
       "size": 850,
-      "offset": 18658821,
+      "offset": 18673786,
       "mode": 420
     },
     {
       "name": "licenses/NOTICE.txt",
-      "sha256": "798e40738702efe7688f5f83bf3d8134f7b1aedd156c362403bdb4b1a12976d3",
-      "size": 781,
-      "offset": 18659671,
+      "sha256": "94cc2b5c0364089841d5e126e7f54dc6d787a5d4672ff8e3590dca6a6601f42c",
+      "size": 850,
+      "offset": 18674636,
+      "mode": 420
+    },
+    {
+      "name": "licenses/core-probe-ABI-LICENSE.txt",
+      "sha256": "33fde21f1c1da14841c616e1d668435965efea826626a8cfe1f85968d7b9fbb9",
+      "size": 1067,
+      "offset": 18675486,
       "mode": 420
     },
     {
       "name": "licenses/driver-COPYING.txt",
       "sha256": "af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7",
       "size": 18693,
-      "offset": 18660452,
+      "offset": 18676553,
       "mode": 420
     },
     {
       "name": "licenses/gcc-runtime-COPYING.txt",
       "sha256": "6e5031de1c9c6a678cad8d05046ae6d43f6131c72bf97506a15ac930b6b44988",
       "size": 38536,
-      "offset": 18679145,
+      "offset": 18695246,
       "mode": 420
     },
     {
       "name": "licenses/nestopia-COPYING.txt",
       "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
       "size": 15122,
-      "offset": 18717681,
+      "offset": 18733782,
       "mode": 420
     },
     {
       "name": "licenses/netplay-compression-COPYING.txt",
       "sha256": "d3891b7bea9affc9738fcedf0d2cac581f743092f35d5fe5c3de65eecd28cec1",
       "size": 2444,
-      "offset": 18732803,
+      "offset": 18748904,
       "mode": 420
     },
     {
       "name": "licenses/ring-LICENSE.txt",
       "sha256": "5fb6716f68e863ec2fdacbe3aa1d0f16e84e5f29e1ab96182f2b62383a2cef4c",
       "size": 16104,
-      "offset": 18735247,
+      "offset": 18751348,
       "mode": 420
     },
     {
       "name": "licenses/wpa-COPYING.txt",
       "sha256": "b878788aa037728ade1983e7a6c9b425ab077382cc1dc5b48f7bb3771c4aa5c3",
       "size": 1866,
-      "offset": 18751351,
+      "offset": 18767452,
       "mode": 420
     },
     {
       "name": "nearby-gui-build.json",
       "sha256": "1fa553b8720cc8f0d682e368341cc3afd6824969da8297a32169ee137cd9f5df",
       "size": 363,
-      "offset": 18753217,
+      "offset": 18769318,
       "mode": 420
     },
     {
       "name": "release-sources.json",
-      "sha256": "302faeb5e0de7e87a046c72262b7de3a1b5c09a29d2fa33279d3a933a314a4a4",
-      "size": 5919,
-      "offset": 18753580,
+      "sha256": "227c6f4d0c9c52df922338f33b82f01c6c7b934207443a641027d6ed51c4c5e8",
+      "size": 7753,
+      "offset": 18769681,
       "mode": 420
     }
   ]

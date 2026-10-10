@@ -7,4 +7,5 @@ python3 -W error -m compileall -q scripts tests
 python3 -m unittest discover -s tests -v
 python3 scripts/build.py check
 python3 scripts/build_core_inspect.py check
+python3 scripts/build_core_probe.py check
 git diff --check

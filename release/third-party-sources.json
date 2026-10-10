@@ -18,7 +18,7 @@
     "released_binary_sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e"
   },
   "rust": {
-    "source_archive": "arkos-nearby-0.3.0-rust-sources.tar.gz",
+    "source_archive": "arkos-nearby-0.3.1-rust-sources.tar.gz",
     "locked_crates": 86,
     "included_crates": 81
   },
@@ -135,5 +135,52 @@
     "filename": "nestopia-7dfdc25-footer1-source.tar.gz",
     "sha256": "dc56d6ac1e00a8f3c2a0a800cd03c255d041e26621e3c476472ae32e99ba8fab",
     "bytes": 1163489
+  },
+  "core_probe": {
+    "schema": 1,
+    "source_sha256": "811453aad9badbf6cd097221f9172b381cf75eb84e617ec69d6930ad7b352f18",
+    "mode": "load-only-rollback",
+    "target": "aarch64-linux-gnu",
+    "loader": "/lib/ld-linux-aarch64.so.1",
+    "toolchain": "1.92",
+    "runtime_pins": {
+      "arm64-libc.so.6": {
+        "source": "/usr/lib/aarch64-linux-gnu/libc-2.30.so",
+        "bytes": 1445800,
+        "sha256": "0b81f41f62f93e18a1fd1cffd678b09b98a3a78524c7268a626763ddc7e50aa9"
+      },
+      "arm64-libdl.so.2": {
+        "source": "/usr/lib/aarch64-linux-gnu/libdl-2.30.so",
+        "bytes": 14528,
+        "sha256": "c70338106957b18813fcddc2eeb8dc51dd59f714a67ca2235bf89de5a63b1545"
+      },
+      "arm64-ld-linux-aarch64.so.1": {
+        "source": "/usr/lib/aarch64-linux-gnu/ld-2.30.so",
+        "bytes": 142200,
+        "sha256": "ddbbb661704d9f0a1be703c83c9f8fa44edcd30afa76356c5ab3a6a56d804518"
+      },
+      "arm64-crt1.o": {
+        "source": "/usr/lib/aarch64-linux-gnu/crt1.o",
+        "bytes": 1768,
+        "sha256": "a775d1896132626f08218d4c6b49029a5860316fa0bba23f0b782b46aa9b5874"
+      },
+      "arm64-crti.o": {
+        "source": "/usr/lib/aarch64-linux-gnu/crti.o",
+        "bytes": 1440,
+        "sha256": "5e999dd076731ecfd30d1cc572e64c81343d3a878a90af4652cc4f649a56c797"
+      },
+      "arm64-crtn.o": {
+        "source": "/usr/lib/aarch64-linux-gnu/crtn.o",
+        "bytes": 1016,
+        "sha256": "4d3f1d1f9707d07815dbf691d6b0a16d2567dce2d95c1e841fe0a6f34b437ad2"
+      },
+      "arm64-libc_nonshared.a": {
+        "source": "/usr/lib/aarch64-linux-gnu/libc_nonshared.a",
+        "bytes": 22972,
+        "sha256": "77c6bc3f4a0367c4c0c28539af2e51cdc9d84a7c977501a2fcc726c3798f144d"
+      }
+    },
+    "bytes": 13240,
+    "sha256": "cf21e3ec71941dc49019ac639cf3d7d19fabb04961c94f0f02f9b2dee1c87b59"
   }
 }

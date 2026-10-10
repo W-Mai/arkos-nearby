@@ -132,7 +132,40 @@ pub fn isolated(original: &str, overrides: &str) -> String {
         + overrides
 }
 
-pub fn prepare(state: &State, context: &Context, remote: Option<&VerifiedRoom>) -> Result<()> {
+pub struct Settings {
+    pub base: String,
+    pub options: Vec<u8>,
+}
+
+pub fn settings(context: &Context) -> Result<Settings> {
+    let configuration = config(&context.frontend)?;
+    let source = confined(
+        &configuration.join("retroarch.cfg"),
+        std::slice::from_ref(&configuration),
+    )?;
+    let path = configuration.join("retroarch-core-options.cfg");
+    let bytes = if path.is_file() {
+        fs::read(confined(&path, std::slice::from_ref(&configuration))?)?
+    } else {
+        vec![]
+    };
+    let options = if let Some(mode) = context.link_mode {
+        isolated(&String::from_utf8(bytes)?, mode.options()).into_bytes()
+    } else {
+        bytes
+    };
+    Ok(Settings {
+        base: fs::read_to_string(source)?,
+        options,
+    })
+}
+
+pub fn prepare(
+    state: &State,
+    context: &Context,
+    remote: Option<&VerifiedRoom>,
+    settings: &Settings,
+) -> Result<()> {
     context.revalidate()?;
     let room = if let Some(remote) = remote {
         require(
@@ -166,28 +199,12 @@ pub fn prepare(state: &State, context: &Context, remote: Option<&VerifiedRoom>) 
         chown(&path, uid, gid)?;
     }
     let overrides = configuration(&directory, context.link_mode)?;
-    let configuration = config(&context.frontend)?;
-    let source = confined(
-        &configuration.join("retroarch.cfg"),
-        std::slice::from_ref(&configuration),
-    )?;
     private_write(
         &directory.join("base.cfg"),
-        isolated(&fs::read_to_string(source)?, &overrides).as_bytes(),
+        isolated(&settings.base, &overrides).as_bytes(),
     )?;
     private_write(&directory.join("netplay.cfg"), overrides.as_bytes())?;
-    let options = configuration.join("retroarch-core-options.cfg");
-    let bytes = if options.is_file() {
-        fs::read(confined(&options, std::slice::from_ref(&configuration))?)?
-    } else {
-        vec![]
-    };
-    let options = if let Some(mode) = context.link_mode {
-        isolated(&String::from_utf8(bytes)?, mode.options()).into_bytes()
-    } else {
-        bytes
-    };
-    private_write(&directory.join("core-options.cfg"), &options)?;
+    private_write(&directory.join("core-options.cfg"), &settings.options)?;
     for name in ["base.cfg", "netplay.cfg", "core-options.cfg"] {
         chown(&directory.join(name), uid, gid)?;
     }

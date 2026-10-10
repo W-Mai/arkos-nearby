@@ -13,67 +13,11 @@ const fn core(id: &'static str) -> Choice {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct PerformanceRule {
-    source: Choice,
-    source_sha256: &'static str,
-    pub target: Choice,
-    target_sha256: &'static str,
-    elf_bits: u8,
-    content_sha256: &'static str,
-}
+pub const ARCADE_CORE: Choice = core("fbneo");
 
-impl PerformanceRule {
-    fn matches_source(
-        &self,
-        frontend: &str,
-        core_id: &str,
-        core_sha256: &str,
-        elf_bits: u8,
-        content_sha256: &str,
-    ) -> bool {
-        self.source.frontend == frontend
-            && self.source.id == core_id
-            && self.source_sha256 == core_sha256
-            && self.elf_bits == elf_bits
-            && self.content_sha256 == content_sha256
-    }
-
-    pub fn matches_target(
-        &self,
-        frontend: &str,
-        core_id: &str,
-        core_sha256: &str,
-        elf_bits: u8,
-    ) -> bool {
-        self.target.frontend == frontend
-            && self.target.id == core_id
-            && self.target_sha256 == core_sha256
-            && self.elf_bits == elf_bits
-    }
-}
-
-const FFIGHT: PerformanceRule = PerformanceRule {
-    source: core("mame"),
-    source_sha256: "adbb2488b7d170432f8acca2f4a665fec760adcf361f363c2c3cfc2aa6cfe1a6",
-    target: core("fbneo"),
-    target_sha256: "514a62b76a6eb6ca33db7beec0966949fe9711190f9719e9e650c771055f5dea",
-    elf_bits: 64,
-    content_sha256: "a7cc8894488ee126851ee1f45eccb99e6da96f63b5bbd31689adaf08f7a37eab",
-};
-
-const PERFORMANCE_RULES: &[PerformanceRule] = &[FFIGHT];
-
-pub fn performance_candidate(
-    frontend: &str,
-    core_id: &str,
-    core_sha256: &str,
-    elf_bits: u8,
-    content_sha256: &str,
-) -> Option<&'static PerformanceRule> {
-    PERFORMANCE_RULES
-        .iter()
-        .find(|rule| rule.matches_source(frontend, core_id, core_sha256, elf_bits, content_sha256))
+pub fn arcade_candidate(game: &Path, core_id: &str) -> Option<Choice> {
+    (matches!(core_id, "mame" | "fbneo_plus") && candidates(game) == [ARCADE_CORE])
+        .then_some(ARCADE_CORE)
 }
 
 pub fn candidates(game: &Path) -> &'static [Choice] {
@@ -165,70 +109,19 @@ mod tests {
     }
 
     #[test]
-    fn performance_selection_requires_the_tested_content_source_and_target() {
-        assert_eq!(PERFORMANCE_RULES.len(), 1);
-        for tested in PERFORMANCE_RULES {
-            let rule = performance_candidate(
-                tested.source.frontend,
-                tested.source.id,
-                tested.source_sha256,
-                tested.elf_bits,
-                tested.content_sha256,
-            )
-            .unwrap();
-            assert_eq!(rule.target, tested.target);
-            for (frontend, id, digest, bits, content) in [
-                (
-                    "retroarch32",
-                    tested.source.id,
-                    tested.source_sha256,
-                    64,
-                    tested.content_sha256,
-                ),
-                (
-                    "retroarch",
-                    tested.target.id,
-                    tested.source_sha256,
-                    64,
-                    tested.content_sha256,
-                ),
-                (
-                    "retroarch",
-                    tested.source.id,
-                    tested.target_sha256,
-                    64,
-                    tested.content_sha256,
-                ),
-                (
-                    "retroarch",
-                    tested.source.id,
-                    tested.source_sha256,
-                    32,
-                    tested.content_sha256,
-                ),
-                (
-                    "retroarch",
-                    tested.source.id,
-                    tested.source_sha256,
-                    64,
-                    tested.source_sha256,
-                ),
-            ] {
-                assert!(performance_candidate(frontend, id, digest, bits, content).is_none());
+    fn arcade_selection_depends_on_platform_and_core_family() {
+        for root in ["/roms", "/roms2"] {
+            for platform in ["arcade", "neogeo", "cps1", "cps2", "cps3"] {
+                let path = Path::new(root).join(platform).join("any-local-game.zip");
+                for id in ["mame", "fbneo_plus"] {
+                    assert_eq!(arcade_candidate(&path, id), Some(ARCADE_CORE));
+                }
+                for id in ["fbneo", "mame2003_plus", "fceumm"] {
+                    assert_eq!(arcade_candidate(&path, id), None);
+                }
             }
-            assert!(rule.matches_target("retroarch", tested.target.id, tested.target_sha256, 64));
-            assert!(!rule.matches_target(
-                "retroarch32",
-                tested.target.id,
-                tested.target_sha256,
-                64
-            ));
-            assert!(!rule.matches_target("retroarch", tested.source.id, tested.target_sha256, 64));
-            assert!(!rule.matches_target("retroarch", tested.target.id, tested.source_sha256, 64));
-            assert!(!rule.matches_target("retroarch", tested.target.id, tested.target_sha256, 32));
-            assert!(crate::protocol::hex(tested.source_sha256, 64));
-            assert!(crate::protocol::hex(tested.target_sha256, 64));
-            assert!(crate::protocol::hex(tested.content_sha256, 64));
         }
+        assert!(arcade_candidate(Path::new("/roms/nes/game.zip"), "mame").is_none());
+        assert!(arcade_candidate(Path::new("/tmp/arcade/game.zip"), "mame").is_none());
     }
 }

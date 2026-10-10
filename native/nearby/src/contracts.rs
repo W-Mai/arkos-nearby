@@ -192,16 +192,9 @@ fn netplay_compression_is_scoped_to_the_inspected_state_frontend() {
         compatible.link_mode = mode;
         assert!(eligible(&compatible));
     }
-    for mode in [
-        LinkMode::Rfu,
-        LinkMode::PokemonCable,
-        LinkMode::AdvanceWarsCable,
-        LinkMode::AdvanceWars2Cable,
-    ] {
-        compatible.link_mode = Some(mode);
-        assert!(!eligible(&compatible));
-        assert!(environment(&compatible).unwrap().is_none());
-    }
+    compatible.link_mode = Some(LinkMode::GbaAuto);
+    assert!(!eligible(&compatible));
+    assert!(environment(&compatible).unwrap().is_none());
     compatible.link_mode = None;
     for alteration in 0..4 {
         let mut other = compatible.clone();
@@ -219,14 +212,7 @@ fn netplay_compression_is_scoped_to_the_inspected_state_frontend() {
 #[test]
 fn ordinary_and_network_controller_initialization_share_the_same_ports() {
     use crate::handheld_link::LinkMode;
-    for mode in [
-        None,
-        Some(LinkMode::GbDual),
-        Some(LinkMode::Rfu),
-        Some(LinkMode::PokemonCable),
-        Some(LinkMode::AdvanceWarsCable),
-        Some(LinkMode::AdvanceWars2Cable),
-    ] {
+    for mode in [None, Some(LinkMode::GbDual), Some(LinkMode::GbaAuto)] {
         let generated =
             crate::game::configuration(std::path::Path::new("/run/game"), mode).unwrap();
         let original = "input_max_users = \"16\"\ninput_libretro_device_p3 = \"1\"\nauto_remaps_enable = \"true\"\ninput_player1_a_btn = \"2\"\nnetplay_check_frames = \"10\"\n";

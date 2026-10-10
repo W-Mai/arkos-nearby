@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-10
+
+- Use gpSP automatic cartridge protocol detection for GBA Netpacket sessions.
+
+- Select FBNeo for compatible arcade games through isolated ROM loading and rollback-state checks during room preparation.
+
 ## [0.3.0] - 2026-10-10
 
 - Faster full-state compression for the verified ARM64 RetroArch build.

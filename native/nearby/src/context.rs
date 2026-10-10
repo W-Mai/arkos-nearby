@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::content::{confined, digest, fingerprint_with_header};
+use crate::content::{confined, digest, fingerprint};
 use crate::handheld_link::LinkMode;
 use crate::protocol::{CoreIdentity, GameIdentity, Profile, VerifiedRoom};
 use crate::system::{command, mkdir, read, write};
@@ -369,46 +369,7 @@ fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Result<Contex
         core = inspect(&path, entry.frontend)?;
         args = replace_core(&args, &path);
     }
-    let (mut content, mut header) =
-        fingerprint_with_header(&game_path, &core.extensions, &roots, core.block_extract)?;
-    if adapt
-        && let Some(rule) = crate::core_choice::performance_candidate(
-            &frontend,
-            &core.identity.id,
-            &core.sha256,
-            core.bits,
-            &content.sha256,
-        )
-    {
-        let path = config(rule.target.frontend)?
-            .join("cores")
-            .join(format!("{}_libretro.so", rule.target.id));
-        if let Ok(candidate) = inspect(&path, rule.target.frontend)
-            && candidate.supported
-            && rule.matches_target(
-                rule.target.frontend,
-                &candidate.identity.id,
-                &candidate.sha256,
-                candidate.bits,
-            )
-        {
-            let (candidate_content, candidate_header) = fingerprint_with_header(
-                &game_path,
-                &candidate.extensions,
-                &roots,
-                candidate.block_extract,
-            )?;
-            require(
-                candidate_content.same_bytes(&content),
-                "Performance candidate interprets different content",
-            )?;
-            core = candidate;
-            frontend = rule.target.frontend.into();
-            args = replace_core(&args, &path);
-            content = candidate_content;
-            header = candidate_header;
-        }
-    }
+    let content = fingerprint(&game_path, &core.extensions, &roots, core.block_extract)?;
     let configuration = config(&frontend)?;
     let frontend_root = PathBuf::from("/opt/retroarch/bin").canonicalize()?;
     let frontend_path = confined(
@@ -420,7 +381,7 @@ fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Result<Contex
         "Frontend is outside the installed registry",
     )?;
     let version = frontend_version(&frontend, &frontend_path)?;
-    let link_mode = crate::handheld_link::select(&core.identity.id, &header);
+    let link_mode = crate::handheld_link::select(&core.identity.id);
     let supported = core.supported
         && (!(crate::handheld_link::preferred(&game_path).is_some()
             || matches!(core.identity.id.as_str(), "gpsp" | "tgbdual"))
@@ -451,6 +412,18 @@ fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Result<Contex
 }
 
 impl Context {
+    pub fn with_core(&self, choice: crate::core_choice::Choice) -> Result<Self> {
+        let path = resolve_core(choice.frontend, choice.id)?;
+        let args = replace_core(&self.argv, &path);
+        let selected = parse_selected(choice.frontend, &args, false)?;
+        require(
+            selected.supported
+                && selected.game_path == self.game_path
+                && selected.identity.content.same_bytes(&self.identity.content),
+            "Candidate interprets different local content or lacks Netplay support",
+        )?;
+        Ok(selected)
+    }
     pub fn key(&self) -> Value {
         json!([
             self.identity.frontend_version,

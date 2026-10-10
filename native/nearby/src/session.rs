@@ -707,9 +707,12 @@ pub fn worker(id: &str) -> Result<()> {
         let context: Context = read(&local.root().join("context.json"))?;
         let mut radio_control = None;
         if local.role == "host" {
-            context.revalidate()?;
+            progress(id, None, "creating", "正在核对游戏与联机核心...")?;
+            let (context, settings) = crate::arcade::host(&local, &context)?;
+            write(&local.root().join("context.json"), &context)?;
+            crate::game::prepare(&local, &context, None, &settings)?;
+            progress(id, None, "creating", "正在准备无线连接...")?;
             radio_control = Some(crate::radio::host(&local)?);
-            crate::game::prepare(&local, &context, None)?;
             crate::radio::services(&local)?;
             progress(
                 id,
@@ -739,7 +742,11 @@ pub fn worker(id: &str) -> Result<()> {
                 state.claim = Some(claim);
             })?;
             write(&local.root().join("context.json"), &matched)?;
-            crate::game::prepare(&local, &matched, Some(&verified))?;
+            if matched.core_id == "fbneo" && matched.core_elf_bits == 64 {
+                progress(id, None, "checking", "正在检查街机 ROM 与 BIOS...")?;
+            }
+            let settings = crate::arcade::client(&local, &matched)?;
+            crate::game::prepare(&local, &matched, Some(&verified), &settings)?;
             progress(id, None, "notifying", "游戏核对完成，正在通知房主...")?;
         }
         let mut launched = false;
@@ -1027,6 +1034,7 @@ pub fn recover(id: &str, reason: &str) -> Result<Value> {
     if reason != "worker_exit" {
         best(&["systemctl", "stop", &format!("{}.service", local.unit())]);
     }
+    attempt("arcade load check", crate::arcade::stop(&local));
     if local.role == "client" && local.claim.is_some() {
         let _ = crate::http::request(
             "/unready",
