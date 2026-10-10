@@ -87,10 +87,15 @@ impl Drop for FrameMetrics {
     }
 }
 
-fn snapshot(input: &Path, output: &Path, time_ms: Option<u64>) -> Result<(), String> {
+fn snapshot(
+    input: &Path,
+    output: &Path,
+    time_ms: Option<u64>,
+    size: [u16; 2],
+) -> Result<(), String> {
     let view: model::View = serde_json::from_reader(File::open(input).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    let surface = FramebufSurface::with_format(640, 480, ColorFormat::RGBA8888, |_, _| {});
+    let surface = FramebufSurface::with_format(size[0], size[1], ColorFormat::RGBA8888, |_, _| {});
     let mut app = App::new(surface);
     app.with_default_widgets().with_default_systems();
     render::install_fonts(&mut app)?;
@@ -102,7 +107,7 @@ fn snapshot(input: &Path, output: &Path, time_ms: Option<u64>) -> Result<(), Str
         motion.paint(&mut app, &scene, now)?;
     }
     let file = BufWriter::new(File::create(output).map_err(|e| e.to_string())?);
-    let mut encoder = png::Encoder::new(file, 640, 480);
+    let mut encoder = png::Encoder::new(file, u32::from(size[0]), u32::from(size[1]));
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
@@ -154,8 +159,8 @@ fn benchmark() -> Result<(), String> {
             let previous = view.clone();
             if matches!(name, "focus" | "room_focus") && frame % 15 == 0 {
                 view.selected = 1 - view.selected;
-                render::update(&mut app, &mut scene, &view);
-                motion.retarget(&view.page, render::focus_rect(&view), now);
+                render::update(&mut app, &mut scene, &view)?;
+                motion.retarget(&view.page, scene.focus_rect, now);
             }
             if name == "status" {
                 view.status = if frame % 2 == 0 {
@@ -164,7 +169,7 @@ fn benchmark() -> Result<(), String> {
                     "等待好友准备"
                 }
                 .into();
-                render::update(&mut app, &mut scene, &view);
+                render::update(&mut app, &mut scene, &view)?;
             }
             if !render::can_update(&previous, &view) {
                 return Err("Benchmark updates must retain their scene".into());
@@ -275,10 +280,10 @@ fn live() -> Result<(), String> {
                     && let Some(current_scene) = scene.as_mut()
                 {
                     full = false;
-                    render::update(&mut app, current_scene, &latest);
+                    render::update(&mut app, current_scene, &latest)?;
                     motion.retarget(
                         &latest.page,
-                        render::focus_rect(&latest),
+                        current_scene.focus_rect,
                         epoch.elapsed().as_millis() as u64,
                     );
                     motion.paint(&mut app, current_scene, epoch.elapsed().as_millis() as u64)?;
@@ -363,13 +368,13 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [argument] if argument == "--version" => {
-            println!("arkos-nearby-gui 0.1.0 (mirui 0.47.0)");
+            println!("arkos-nearby-gui 0.1.0 (mirui 0.48.0)");
             Ok(())
         }
         #[cfg(target_os = "linux")]
         [argument] if argument == "--probe" => {
             let panel = platform::Framebuffer::open().map_err(|e| e.to_string())?;
-            let mut app = App::headless(640, 480);
+            let mut app = App::headless(panel.width, panel.height);
             app.with_default_widgets().with_default_systems();
             render::install_fonts(&mut app)?;
             println!(
@@ -379,11 +384,19 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         [mode, input, output] if mode == "--snapshot" => {
-            snapshot(Path::new(input), Path::new(output), None)
+            snapshot(Path::new(input), Path::new(output), None, [640, 480])
         }
         [mode, input, output, time] if mode == "--snapshot" => {
             let time = time.parse().map_err(|_| "Invalid animation time")?;
-            snapshot(Path::new(input), Path::new(output), Some(time))
+            snapshot(Path::new(input), Path::new(output), Some(time), [640, 480])
+        }
+        [mode, input, output, width, height] if mode == "--snapshot" => {
+            let width = width.parse().map_err(|_| "Invalid viewport width")?;
+            let height = height.parse().map_err(|_| "Invalid viewport height")?;
+            if width == 0 || height == 0 {
+                return Err("Viewport dimensions must be positive".into());
+            }
+            snapshot(Path::new(input), Path::new(output), None, [width, height])
         }
         [argument] if argument == "--benchmark" => benchmark(),
         [] => {

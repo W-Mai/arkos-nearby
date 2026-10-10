@@ -1,20 +1,23 @@
 {
   "schema": 1,
   "development_repository": "https://github.com/W-Mai/arkos-nearby-dev",
-  "development_commit": "22d3253f0ebc15d9a00666681c8acc4b830cb21e",
-  "version": "0.3.1",
+  "development_commit": "82e581b7849ef2d28eb85eee8c35ed661fe7150a",
+  "version": "0.3.2",
   "source_files": {
-    "gui/nearby/Cargo.lock": "8ef35dca6b45d551d1997aa1e571d3057dfa2e0d8d2ad7986f75890f1c40478e",
-    "gui/nearby/Cargo.toml": "f9803727f7880c8a3f77cd0bd3506a43536475811426d859ac01ce7d26d50034",
+    "gui/nearby/Cargo.lock": "dff6cdde26c204424addf487b2c2101176fedf7b19b45ecbd11c4dbf0ce55537",
+    "gui/nearby/Cargo.toml": "708b1d3f34a05c95a3399ab380489d225e619cda55c9b9fe813b62a36a76ad0b",
     "gui/nearby/assets/OFL.txt": "af55b908a0ccf969b7bdd0e6cac6f4866a7ed0d1aeb9c7b29516ca0d24422981",
     "gui/nearby/assets/font-source.json": "729bc03c7e82299b2594dd3d5b344fe31e05dfcbd0702e43c83c4d6b550ec78d",
     "gui/nearby/assets/nearby-menu-20.mirx": "0889d41b4f88d05c833e5739e6bf6e231a87d7e7ee1794f765ff83b624a2b0c8",
     "gui/nearby/assets/nearby-menu-charset.txt": "288f4456299cbd6f62c2ebf1b22d8cdc17d9a05238d75ce452691822c86a8dea",
-    "gui/nearby/src/main.rs": "c8d1517ca452805ec48b5a32eb00d1b034938e1c448fbfc3f3da32d6a0c5090a",
+    "gui/nearby/patches/README.md": "1d6727a06201a814d25585ef21153c8ee64c47e6de7d3b65400fccfd816d7ee6",
+    "gui/nearby/patches/mirui-0.48.0.patch": "a18f2199c352257b9c0a10b880124b39550d2d49cc4fe3f7b75603cad51c223f",
+    "gui/nearby/src/main.rs": "0cb15f573f04019942308ac3936b6399d31cdac1e4caa7878636a2d0ea5cf67c",
     "gui/nearby/src/model.rs": "51269a7b1cdee6e83946c2334d2b57305f659af1eb58b9ec81666bf378b7a872",
-    "gui/nearby/src/motion.rs": "9c9b28683d8dadda95173eb38baec563b483e23ddf2c9f0129b13355d5eee817",
+    "gui/nearby/src/motion.rs": "8cc468d6e1437d21eca52f02b885b3dc0229f7bde044ba0a9fd769d807f5e5e9",
     "gui/nearby/src/platform.rs": "8e19a45e0d0e68d68dc2963d4754e9587880cfadad9966f907a37805a068f31d",
-    "gui/nearby/src/render.rs": "e19ecc570678e5b76f42d92ec360f341f95df04e0b466b852756df2f8ad68ee7",
+    "gui/nearby/src/render.rs": "a476380536b7c0f2658ce56e01e491b27a74ddbad98ce17d01c6b2ffde2f0520",
+    "gui/nearby/src/render_tests.rs": "1fef4f5c10b8fcb02fb3f00e6203432912684547b54fd1b2fb8cd754a590eb85",
     "native/core_inspect/core_inspect.c": "83823e9950db0ece5c44a675f0086954308c0abb8bb4926196354eb376fd9afd",
     "native/core_inspect/runtime-pins.json": "bc7676e9a8513accb320dfcc966352d7df6e3715514b33f95a20572d4eadfc84",
     "native/core_inspect/start32.S": "9fa1116e49ce9e16c680a9258ff311620c6009fda3f047514e5790fe1d6bf277",
@@ -22,10 +25,10 @@
     "native/core_probe/README.md": "b1bdc88da134acf9d897ab45e04b51419b696650a21996a415816d70b237ffbc",
     "native/core_probe/abi.h": "19e6e56a3e504e0a053522b28df94811399aa85bf830d707d5b4eff804347d03",
     "native/core_probe/probe.c": "f0d6a47fe22e5ef4d00252d9d8981032bebe304020ebd0742182e3ce20d77484",
-    "native/nearby/Cargo.lock": "7ffe2ac53001a0883bcecd0ccaa4079ac879368ba2f46ff0d71898599aab248e",
-    "native/nearby/Cargo.toml": "5a373db1f88ee89b135933583a2e0491e46e1a62f3a2f3f70ceb5e0288d5feb4",
+    "native/nearby/Cargo.lock": "89bab60eb1bd21404a9985c59236dcef160c42aa89b4e0c6aa54b273b8e107a7",
+    "native/nearby/Cargo.toml": "08572f2fb8202ea0fa070fe22f3a0af4ff2c081e4d3fa0783bdeec4990a34a20",
     "native/nearby/src/arcade.rs": "1255998f646cedfadc39d6c56d635ab610504860f630191a5d7f9e15f1b374ca",
-    "native/nearby/src/bundle.rs": "4e0476c405bb769f1315847913680e5516ec7487618f009826b69aedbda695bc",
+    "native/nearby/src/bundle.rs": "e3dc5d6ff309d770a3b0f666279264c86eaf798725970ecf6cdb494265fa0c74",
     "native/nearby/src/catalog.rs": "906a5fcbf9c7563425da0619949adb54e7ec855860a9637a380d3c553ae0ad12",
     "native/nearby/src/compat.rs": "f2479a63bbed345b9bfe6ccc66f6dbaac1dc30882078bf02db74c8db3d219300",
     "native/nearby/src/content.rs": "bb942b9c60ab261cb7f03baea2feb84d11a8ba2e87d8819125a4a88604ab7f28",
@@ -62,26 +65,25 @@
     "native/owned_cores/nestopia/source.json": "57d7312182b52c469c27fc7963714e2f976ae05a1c615f9e88603cc15d152eb3",
     "native/owned_cores/nestopia/state-footer.patch": "b83aa47608687b62a18692ec7f750fbd70abd0271069611c525962a30303b8bc"
   },
-  "device_tested_build": {
-    "version": "0.2.0",
-    "sha256": "e27958a1f69b648b781fff2a08c3c2a3aca2f99b4c957da75241b44b06d0560e",
-    "development_commit": "e7fb6a6ae9e5edd37b65a6e9e88b340805173723",
-    "scope": "Arcade load and rollback checks, two-device native admission and scene progression, cancellation and network recovery"
-  },
   "source_adjustments": {
     "native/nearby/Cargo.toml": {
       "development_sha256": "05a194069bfcff4748a0a94fc0e16eeb2d1e1c988868f3641bb37882c26078bf",
-      "change": "Package version 0.3.1"
+      "change": "Package version 0.3.2"
     },
     "native/nearby/Cargo.lock": {
       "development_sha256": "6c21a655d5ad5bbd21c7fd19879263671df95c928606c81d4f5a7240628101a4",
-      "change": "Package version 0.3.1"
+      "change": "Package version 0.3.2"
     }
   },
+  "device_validation": {
+    "development_commit": "82e581b7849ef2d28eb85eee8c35ed661fe7150a",
+    "gui_sha256": "c9abdc8e863810307dd4395bdc96022180c97c6d25281cfc9c15c2267d97812a",
+    "record": "docs/specs/mirui-048/device-validation.md"
+  },
   "release_build": {
-    "version": "0.3.1",
+    "version": "0.3.2",
     "target": "aarch64-unknown-linux-musl",
-    "sha256": "22b7b1bc297b9ccf0e5e151fdf11e9d2d5598fb90ead2fd6bbf78a7233b1f71c",
-    "bytes": 8508272
+    "sha256": "03a9f139c4a51bb3be543729550aeb53ba1c0ffde3f3598d69b58307c2d4bddb",
+    "bytes": 8662832
   }
 }

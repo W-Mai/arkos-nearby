@@ -1,3 +1,4 @@
 docs/licenses/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 # Unified patches use a space to mark unchanged empty lines.
 native/owned_cores/**/*.patch whitespace=-blank-at-eol
+gui/nearby/patches/*.patch whitespace=-blank-at-eol

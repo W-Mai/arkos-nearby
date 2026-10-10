@@ -1,33 +1,16 @@
-# ArkOS Nearby 0.3.1
+# ArkOS Nearby 0.3.2
 
-街机核心适配与 GBA 通信模式更新。
+- 调整长游戏名和连接提示的显示，文字保持在所属区域内。
+- 修正选中框的位置与尺寸变化，切换选项时平滑过渡。
 
-- 街机在准备房间时使用实际 ROM、BIOS 和核心选项检查 FBNeo，载入与状态回读通过后采用；两台掌机使用相同核心。
-- GBA 使用 gpSP 自动识别卡带通信协议。
-
-![两台 R36S 准备开始游戏](https://raw.githubusercontent.com/W-Mai/arkos-nearby/v0.3.1/docs/photos/room-ready.jpg)
+![创建房间与加入房间](https://raw.githubusercontent.com/W-Mai/arkos-nearby/v0.3.2/docs/screenshots/room-choice.png)
 
 ## 安装与更新
 
-下载 **`arkos-nearby-0.3.1-arm64.tar.gz`**，解压后将 `arkos-nearby` 文件夹放入游戏卡的 `ports` 目录，在掌机 **Ports → Install Nearby Multiplayer** 中安装。已有版本使用相同方式更新，两台掌机安装同一版本。
+下载 **`arkos-nearby-0.3.2-arm64.tar.gz`**，解压后将 `arkos-nearby` 文件夹放入游戏卡的 `ports` 目录，在掌机 **Ports → Install Nearby Multiplayer** 中安装。已有版本使用相同方式更新，两台掌机安装同一版本。
 
 适用配置：**ArkOS4Clone 08262026 · Linux ARM64 4.4.189 · RTL8188EU · 640×480 屏幕**。
 
 游戏加载前按住 **X**，或从 **Options → Nearby Multiplayer** 选择游戏。一台创建房间，另一台选中房间加入，双方准备完成后由房主开始游戏。
 
-[安装与更新](https://github.com/W-Mai/arkos-nearby/blob/v0.3.1/docs/installation.md) · [平台与游戏](https://github.com/W-Mai/arkos-nearby/blob/v0.3.1/docs/compatibility.md) · [源码构建](https://github.com/W-Mai/arkos-nearby/blob/v0.3.1/docs/building.md)
-
-## 下载文件
-
-| 文件 | 用途 |
-| --- | --- |
-| `arkos-nearby-0.3.1-arm64.tar.gz` | 掌机安装包 |
-| `SHA256SUMS` | 下载校验值 |
-| `build-info.json` | 构建记录 |
-| `arkos-nearby-0.3.1-source.tar.gz` | 应用源码，含街机载入检查器 |
-| `arkos-nearby-0.3.1-build-assets.tar.gz` | 源码构建所需资产 |
-| `nestopia-7dfdc25-footer1-source.tar.gz` | Nestopia 源码、状态恢复补丁和构建脚本 |
-| `arkos-nearby-0.3.1-wireless-source.tar.gz` | supplicant 源码、广告桥补丁和配置 |
-| `arkos-nearby-0.3.1-rust-sources.tar.gz` | Rust 依赖源码 |
-| `arkos-kernel-c6b78a0.tar.gz` | 无线模块对应的 BSP 源码 |
-| `gcc-16-16-20260315-source.tar.gz` | C++ 运行库对应的源包、打包补丁和 `.dsc` |
+[安装与更新](https://github.com/W-Mai/arkos-nearby/blob/v0.3.2/docs/installation.md) · [平台与游戏](https://github.com/W-Mai/arkos-nearby/blob/v0.3.2/docs/compatibility.md) · [源码构建](https://github.com/W-Mai/arkos-nearby/blob/v0.3.2/docs/building.md)

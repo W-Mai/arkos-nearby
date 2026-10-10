@@ -100,7 +100,7 @@ impl Bundle {
             manifest.schema == 1
                 && manifest.profile == PROFILE
                 && manifest.kernel_sha256 == KERNEL_SHA
-                && manifest.gui_version == "0.47.0"
+                && manifest.gui_version == "0.48.0"
                 && !manifest.version.is_empty(),
             "Unsupported release profile",
         )?;
@@ -143,5 +143,61 @@ impl Bundle {
     pub fn bytes(&self, asset: &Asset) -> &[u8] {
         &self.data
             [self.start + asset.offset as usize..self.start + (asset.offset + asset.size) as usize]
+    }
+}
+
+#[cfg(all(test, feature = "release-bundle"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_renderer_matches_its_manifest_and_build_record() {
+        let bundle = Bundle::embedded().expect("The built release must decode");
+        let asset = |name: &str| {
+            bundle
+                .manifest
+                .files
+                .iter()
+                .find(|asset| asset.name == name)
+                .expect("The release contains its renderer and build record")
+        };
+        let report: serde_json::Value =
+            serde_json::from_slice(bundle.bytes(asset("nearby-gui-build.json"))).unwrap();
+        let renderer = asset("arkos-nearby-gui");
+        assert_eq!(report["mirui"], bundle.manifest.gui_version);
+        assert_eq!(report["target"], "aarch64-unknown-linux-musl");
+        assert_eq!(report["sha256"], renderer.sha256);
+        assert_eq!(report["bytes"], renderer.size);
+        assert_eq!(
+            report["cargo_lock_sha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!("../../../gui/nearby/Cargo.lock"))
+            )
+        );
+        assert_eq!(
+            report["mirui_patch_sha256"],
+            format!(
+                "{:x}",
+                Sha256::digest(include_bytes!(
+                    "../../../gui/nearby/patches/mirui-0.48.0.patch"
+                ))
+            )
+        );
+        let sources: serde_json::Value =
+            serde_json::from_slice(bundle.bytes(asset("release-sources.json"))).unwrap();
+        for (field, report_field) in [
+            ("version", "mirui"),
+            ("mirx_version", "mirx"),
+            ("sha256", "sha256"),
+            ("source_sha256", "source_sha256"),
+            ("cargo_lock_sha256", "cargo_lock_sha256"),
+            ("mirui_crate_sha256", "mirui_crate_sha256"),
+            ("mirui_patch_sha256", "mirui_patch_sha256"),
+            ("effective_cargo_lock_sha256", "effective_cargo_lock_sha256"),
+        ] {
+            assert!(report[report_field].as_str().is_some());
+            assert_eq!(sources["renderer"][field], report[report_field]);
+        }
     }
 }

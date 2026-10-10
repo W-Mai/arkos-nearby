@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-10
+
+- Keep long game names and connection messages within their panels.
+- Align the selection border with the selected item during movement and resizing.
+
 ## [0.3.1] - 2026-10-10
 
 - Use gpSP automatic cartridge protocol detection for GBA Netpacket sessions.

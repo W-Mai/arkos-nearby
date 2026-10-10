@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
-  "gui_version": "0.47.0",
+  "gui_version": "0.48.0",
   "files": [
     {
       "name": "arkos-nearby-gui",
-      "sha256": "3911d9e202064991930b44962f375f4e7f0e93eb23d8eb4e45f6a915923adb0b",
-      "size": 5851024,
+      "sha256": "c9abdc8e863810307dd4395bdc96022180c97c6d25281cfc9c15c2267d97812a",
+      "size": 6199984,
       "offset": 0,
       "mode": 493
     },
@@ -16,189 +16,189 @@
       "name": "assets/8188eu.ko",
       "sha256": "e099dcd8f6df0e02749d08c4af201bb1d26ca460a369247630782f0888468965",
       "size": 3022808,
-      "offset": 5851024,
+      "offset": 6199984,
       "mode": 420
     },
     {
       "name": "assets/build.json",
       "sha256": "bd20822cabf2f462ea5a00eafd82423b4c87726563e5774f939c0d5a2262f184",
       "size": 1448,
-      "offset": 8873832,
+      "offset": 9222792,
       "mode": 420
     },
     {
       "name": "assets/netplay-compression-build.json",
       "sha256": "3a656453add071fa65873b9091e6683d20c8daa493aceeb158f773c7cc39e39d",
       "size": 2015,
-      "offset": 8875280,
+      "offset": 9224240,
       "mode": 420
     },
     {
       "name": "assets/netplay-compression.so",
       "sha256": "381d05d1ff68ff5f4eca503965f35a6fe99922e280f4e52620e68b21dca0d633",
       "size": 12576,
-      "offset": 8877295,
+      "offset": 9226255,
       "mode": 420
     },
     {
       "name": "assets/wpa_supplicant",
       "sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e",
       "size": 1743784,
-      "offset": 8889871,
+      "offset": 9238831,
       "mode": 493
     },
     {
       "name": "compat/arm64/libgcc_s.so.1",
       "sha256": "3f81f337c558b6a08924b05dc73b5fcc117d39c11ba306a49f1f973b960adc2c",
       "size": 129480,
-      "offset": 10633655,
+      "offset": 10982615,
       "mode": 420
     },
     {
       "name": "compat/arm64/libstdc++.so.6",
       "sha256": "c116f7a27884c399ed3ab89eed9c0150a8f09ed5990b5a36d2c18ac14c0a3d66",
       "size": 2600552,
-      "offset": 10763135,
+      "offset": 11112095,
       "mode": 420
     },
     {
       "name": "compat/arm64/source.json",
       "sha256": "137f6da3a50ffcff389b61132f963a5049f15c140a148bda7389dd4de781d894",
       "size": 2681,
-      "offset": 13363687,
+      "offset": 13712647,
       "mode": 420
     },
     {
       "name": "core-inspect-build.json",
       "sha256": "5d77a36642272114846fa8721f302e22665e97961c66d839d7e2feab7fb3a8b1",
       "size": 2275,
-      "offset": 13366368,
+      "offset": 13715328,
       "mode": 420
     },
     {
       "name": "core-inspect32",
       "sha256": "f33873cf785438633abb186ee1282ba3ddffa2969d195f3cd62b48496e5e08b8",
       "size": 3908,
-      "offset": 13368643,
+      "offset": 13717603,
       "mode": 493
     },
     {
       "name": "core-inspect64",
       "sha256": "52c23815cea0cb5235873212b8f6e5d94a76978ec4b2bb98f36c9f9f3ed76baa",
       "size": 6520,
-      "offset": 13372551,
+      "offset": 13721511,
       "mode": 493
     },
     {
       "name": "core-probe-build.json",
       "sha256": "8843a594f6b62e5a53fad5617016a0c89bd8a81c410aeacd851e7d4e3dfab963",
       "size": 1725,
-      "offset": 13379071,
+      "offset": 13728031,
       "mode": 420
     },
     {
       "name": "core-probe64",
       "sha256": "cf21e3ec71941dc49019ac639cf3d7d19fabb04961c94f0f02f9b2dee1c87b59",
       "size": 13240,
-      "offset": 13380796,
+      "offset": 13729756,
       "mode": 493
     },
     {
       "name": "cores/nestopia_nearby_libretro.so",
       "sha256": "2c276c3338e7df8105213f7c2008a8e2a0cd307a89f40f19fbde05fc2c84f430",
       "size": 5272832,
-      "offset": 13394036,
+      "offset": 13742996,
       "mode": 420
     },
     {
       "name": "cores/owned-core-build.json",
       "sha256": "1b96b863bdbc980bce8bb61e338360d322ee882498dde38a334479529aa6129c",
       "size": 2572,
-      "offset": 18666868,
+      "offset": 19015828,
       "mode": 420
     },
     {
       "name": "font/OFL.txt",
       "sha256": "af55b908a0ccf969b7bdd0e6cac6f4866a7ed0d1aeb9c7b29516ca0d24422981",
       "size": 4346,
-      "offset": 18669440,
+      "offset": 19018400,
       "mode": 420
     },
     {
       "name": "font/font-source.json",
       "sha256": "729bc03c7e82299b2594dd3d5b344fe31e05dfcbd0702e43c83c4d6b550ec78d",
       "size": 850,
-      "offset": 18673786,
+      "offset": 19022746,
       "mode": 420
     },
     {
       "name": "licenses/NOTICE.txt",
       "sha256": "94cc2b5c0364089841d5e126e7f54dc6d787a5d4672ff8e3590dca6a6601f42c",
       "size": 850,
-      "offset": 18674636,
+      "offset": 19023596,
       "mode": 420
     },
     {
       "name": "licenses/core-probe-ABI-LICENSE.txt",
       "sha256": "33fde21f1c1da14841c616e1d668435965efea826626a8cfe1f85968d7b9fbb9",
       "size": 1067,
-      "offset": 18675486,
+      "offset": 19024446,
       "mode": 420
     },
     {
       "name": "licenses/driver-COPYING.txt",
       "sha256": "af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7",
       "size": 18693,
-      "offset": 18676553,
+      "offset": 19025513,
       "mode": 420
     },
     {
       "name": "licenses/gcc-runtime-COPYING.txt",
       "sha256": "6e5031de1c9c6a678cad8d05046ae6d43f6131c72bf97506a15ac930b6b44988",
       "size": 38536,
-      "offset": 18695246,
+      "offset": 19044206,
       "mode": 420
     },
     {
       "name": "licenses/nestopia-COPYING.txt",
       "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
       "size": 15122,
-      "offset": 18733782,
+      "offset": 19082742,
       "mode": 420
     },
     {
       "name": "licenses/netplay-compression-COPYING.txt",
       "sha256": "d3891b7bea9affc9738fcedf0d2cac581f743092f35d5fe5c3de65eecd28cec1",
       "size": 2444,
-      "offset": 18748904,
+      "offset": 19097864,
       "mode": 420
     },
     {
       "name": "licenses/ring-LICENSE.txt",
       "sha256": "5fb6716f68e863ec2fdacbe3aa1d0f16e84e5f29e1ab96182f2b62383a2cef4c",
       "size": 16104,
-      "offset": 18751348,
+      "offset": 19100308,
       "mode": 420
     },
     {
       "name": "licenses/wpa-COPYING.txt",
       "sha256": "b878788aa037728ade1983e7a6c9b425ab077382cc1dc5b48f7bb3771c4aa5c3",
       "size": 1866,
-      "offset": 18767452,
+      "offset": 19116412,
       "mode": 420
     },
     {
       "name": "nearby-gui-build.json",
-      "sha256": "1fa553b8720cc8f0d682e368341cc3afd6824969da8297a32169ee137cd9f5df",
-      "size": 363,
-      "offset": 18769318,
+      "sha256": "ef8f438a377a6dbf83693e7d332bce19c13ee2d568dac97ea7ea20dd924116f6",
+      "size": 660,
+      "offset": 19118278,
       "mode": 420
     },
     {
       "name": "release-sources.json",
-      "sha256": "227c6f4d0c9c52df922338f33b82f01c6c7b934207443a641027d6ed51c4c5e8",
-      "size": 7753,
-      "offset": 18769681,
+      "sha256": "3849cdbfd83fea5eacd7cd9c6ecf2cec37304f58e047dd6c69cc88b3b2e5c716",
+      "size": 8167,
+      "offset": 19118938,
       "mode": 420
     }
   ]

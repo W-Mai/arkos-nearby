@@ -56,20 +56,31 @@ def bundle():
     build_core_probe.artifacts(ASSETS)
     manifest = json.loads((ROOT / "release/manifest.json").read_text())
     manifest["version"] = tomllib.loads(MANIFEST.read_text())["package"]["version"]
-    report = json.loads((ASSETS / "nearby-gui-build.json").read_text())
-    if report["source_sha256"] != gui.source_sha256():
-        raise ValueError("Renderer source differs; build the GUI before bundling")
+    renderer_files = gui.artifacts(ASSETS)
+    report = json.loads(renderer_files["nearby-gui-build.json"])
+    manifest["gui_version"] = report["mirui"]
     contents = bytearray()
     for entry in manifest["files"]:
         data = (ASSETS / entry["name"]).read_bytes()
-        if entry["name"] == "nearby-gui-build.json":
-            data = json.dumps(report).encode()
-        if entry["name"] in {"arkos-nearby-gui", "nearby-gui-build.json"}:
-            if entry["name"] == "arkos-nearby-gui" and sha(data) != report["sha256"]:
-                raise ValueError("Renderer bytes differ from their build report")
+        if entry["name"] in renderer_files:
+            data = renderer_files[entry["name"]]
             entry.update(sha256=sha(data), size=len(data))
         elif sha(data) != entry["sha256"] or len(data) != entry["size"]:
             raise ValueError("Pinned native asset differs: " + entry["name"])
+        if entry["name"] == "release-sources.json":
+            sources = json.loads(data)
+            sources["renderer"] = {
+                "version": report["mirui"],
+                "mirx_version": report["mirx"],
+                "sha256": report["sha256"],
+                "source_sha256": report["source_sha256"],
+                "cargo_lock_sha256": report["cargo_lock_sha256"],
+                "mirui_crate_sha256": report["mirui_crate_sha256"],
+                "mirui_patch_sha256": report["mirui_patch_sha256"],
+                "effective_cargo_lock_sha256": report["effective_cargo_lock_sha256"],
+            }
+            data = json.dumps(sources, indent=2).encode()
+            entry.update(sha256=sha(data), size=len(data))
         entry["offset"] = len(contents)
         contents.extend(data)
     header = json.dumps(manifest, separators=(",", ":")).encode()

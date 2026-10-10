@@ -9,7 +9,7 @@
 ## 准备
 
 ```sh
-python3 scripts/build.py prepare /path/to/arkos-nearby-0.3.1-build-assets.tar.gz
+python3 scripts/build.py prepare /path/to/arkos-nearby-0.3.2-build-assets.tar.gz
 cargo +1.92.0 fetch --locked --manifest-path native/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 ```
@@ -20,7 +20,9 @@ cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarc
 CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path/to/llvm-ar python3 scripts/build.py build
 ```
 
-输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 0.47.0。
+输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.48.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
+
+GUI 通过 `scripts/build_nearby_gui.py` 构建和检查。脚本校验缓存的 mirui crate，在外部目录应用 `gui/nearby/patches/mirui-0.48.0.patch`，然后使用派生锁文件离线编译。补丁提供文字局部失效与 App 布局管理接口；构建记录包含原始 crate、补丁及派生锁文件的摘要。源码格式检查使用仓库中的文件，Clippy 和测试使用同一份应用补丁后的源码。
 
 准备发行归档时，先完成构建和校验，再执行 `python3 scripts/package.py --binary dist/arkos-nearby --expected-sha256 VERIFIED_SHA256`。将 `VERIFIED_SHA256` 替换为构建结果的 SHA-256。程序核对摘要与 ARM64 ELF 类型，打包安装脚本、使用说明和许可证。
 
@@ -52,7 +54,7 @@ python3 scripts/build_nearby_gui.py snapshot --view docs/screenshots/views/room-
 
 `release/provenance.json` 记录源码文件的 SHA-256，`release/manifest.json` 记录嵌入资产。`SHA256SUMS` 和 `build-info.json` 保存发行文件的校验值与构建记录。
 
-发行程序摘要记录在 [provenance.json](../release/provenance.json) 的 `release_build` 字段，实机验证基线记录在 `device_tested_build` 字段；`source_adjustments` 记录发行版本号的调整。GUI 与附属资产摘要记录在 [manifest.json](../release/manifest.json)。
+发行程序摘要记录在 [provenance.json](../release/provenance.json) 的 `release_build` 字段，实机验证基线记录在 `device_validation` 字段；`source_adjustments` 记录发行版本号的调整。GUI 与附属资产摘要记录在 [manifest.json](../release/manifest.json)。
 
 ## 街机载入检查器
 

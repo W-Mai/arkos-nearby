@@ -1,0 +1,567 @@
+--- a/src/ui/view.rs
++++ b/src/ui/view.rs
+@@ -552,6 +552,7 @@
+     /// (e.g. the generic Style stage).
+     component_filter: Option<fn() -> TypeId>,
+     query_dependencies: &'static [fn() -> TypeId],
++    entity_local_queries: bool,
+     output_dependencies: &'static [OutputDependency],
+     /// Component-internal gesture handler selected before authored listeners.
+     /// Returning `true` consumes the input; `false` continues the frozen route.
+@@ -588,6 +589,7 @@
+                 auto_attach: descriptor.attach,
+                 component_filter,
+                 query_dependencies: descriptor.query_dependencies,
++                entity_local_queries: false,
+                 output_dependencies,
+                 internal_gesture: descriptor.gesture,
+                 observe,
+@@ -701,6 +703,15 @@
+         self
+     }
+ 
++    /// Scope framework-owned query reads to the currently painted entity.
++    ///
++    /// Every query in this View must only call `get` with its paint entity.
++    /// Iteration or reading another entity requires ordinary global dependencies.
++    pub(crate) const fn with_entity_local_queries(mut self) -> Self {
++        self.definition.entity_local_queries = true;
++        self
++    }
++
+     /// Select the dirty scope for this View's component and model dependencies.
+     pub const fn with_invalidation(mut self, invalidation: ViewInvalidation) -> Self {
+         self.definition.invalidation = invalidation;
+@@ -800,9 +811,15 @@
+                         world.watch_component_type(type_id);
+                     }
+                     for dependency in view.definition.query_dependencies {
+-                        world.watch_query_dependency_type(dependency());
++                        if view.definition.entity_local_queries {
++                            world.watch_component_type(dependency());
++                        } else {
++                            world.watch_query_dependency_type(dependency());
++                        }
+                     }
+-                    if !view.definition.query_dependencies.is_empty() {
++                    if !view.definition.entity_local_queries
++                        && !view.definition.query_dependencies.is_empty()
++                    {
+                         Self::invalidate_instances(world, view);
+                     }
+                 }
+@@ -859,11 +876,12 @@
+     fn invalidate_pending_queries(&self, world: &mut World) {
+         world.drain_query_dependency_changes(|world, changed| {
+             for view in &self.views {
+-                if view
+-                    .definition
+-                    .query_dependencies
+-                    .iter()
+-                    .any(|dependency| dependency() == changed)
++                if !view.definition.entity_local_queries
++                    && view
++                        .definition
++                        .query_dependencies
++                        .iter()
++                        .any(|dependency| dependency() == changed)
+                 {
+                     Self::invalidate_instances(world, view);
+                 }
+@@ -888,6 +906,22 @@
+     ) {
+         for view in &self.views {
+             if view.component_filter() != Some(change.type_id) {
++                if view.definition.entity_local_queries
++                    && view
++                        .definition
++                        .query_dependencies
++                        .iter()
++                        .any(|dependency| dependency() == change.type_id)
++                    && world.is_alive(change.entity)
++                    && view
++                        .component_filter()
++                        .is_some_and(|kind| world.has_type(change.entity, kind))
++                {
++                    match view.invalidation() {
++                        ViewInvalidation::Visual => world.invalidate_visual(change.entity),
++                        ViewInvalidation::Layout => world.invalidate(change.entity),
++                    }
++                }
+                 continue;
+             }
+             if let Some(relations) = relations.as_deref_mut() {
+@@ -3670,3 +3704,79 @@
+         );
+     }
+ }
++
++#[cfg(test)]
++mod text_entity_scope_regression {
++    use super::*;
++    use crate::ui::dirty::{Dirty, VisualDirty};
++    use crate::ui::widgets::Text;
++
++    fn clear(world: &mut World, entity: Entity) {
++        world.remove::<Dirty>(entity);
++        world.remove::<VisualDirty>(entity);
++    }
++
++    #[test]
++    fn changing_one_text_keeps_an_unrelated_text_clean() {
++        let mut app = crate::app::App::headless(32, 32);
++        app.with_widget(crate::ui::widgets::text::view());
++        let fixed = app.world.spawn_empty();
++        let changing = app.world.spawn_empty();
++        app.world.insert(fixed, Text::new("fixed"));
++        app.world.insert(changing, Text::new("before"));
++        ViewRegistry::reconcile_observations(&mut app.world);
++        clear(&mut app.world, fixed);
++        clear(&mut app.world, changing);
++        app.world.insert(changing, Text::new("after"));
++        ViewRegistry::reconcile_observations(&mut app.world);
++        assert!(app.world.has::<Dirty>(changing));
++        assert!(
++            !app.world.has::<Dirty>(fixed),
++            "unrelated Text was invalidated"
++        );
++        assert!(!app.world.has::<VisualDirty>(fixed));
++    }
++}
++
++#[cfg(test)]
++mod text_optional_dependency_regression {
++    use super::*;
++    use crate::render::path::{Path, PathStore};
++    use crate::text::TextPath;
++    use crate::ui::dirty::{Dirty, VisualDirty};
++    use crate::ui::widgets::Text;
++
++    #[test]
++    fn optional_text_path_insert_write_remove_only_invalidates_its_text() {
++        let mut app = crate::app::App::headless(32, 32);
++        app.with_widget(crate::ui::widgets::text::view());
++        let fixed = app.world.spawn_empty();
++        let changing = app.world.spawn_empty();
++        app.world.insert(fixed, Text::new("fixed"));
++        app.world.insert(changing, Text::new("path"));
++        let mut store = PathStore::new(1).unwrap();
++        let id = store.insert(Path::new()).unwrap();
++        app.world.insert_resource(store);
++        ViewRegistry::reconcile_observations(&mut app.world);
++        for step in 0..3 {
++            for entity in [fixed, changing] {
++                app.world.remove::<Dirty>(entity);
++                app.world.remove::<VisualDirty>(entity);
++            }
++            match step {
++                0 => app.world.insert(changing, TextPath::new(id)),
++                1 => {
++                    *app.world.get_mut::<TextPath>(changing).unwrap() =
++                        TextPath::new(id).with_offset(crate::types::Fixed::ONE);
++                }
++                _ => {
++                    app.world.remove::<TextPath>(changing);
++                }
++            }
++            ViewRegistry::reconcile_observations(&mut app.world);
++            assert!(app.world.has::<Dirty>(changing));
++            assert!(!app.world.has::<Dirty>(fixed));
++            assert!(!app.world.has::<VisualDirty>(fixed));
++        }
++    }
++}
+--- a/src/ui/widgets/text.rs
++++ b/src/ui/widgets/text.rs
+@@ -1465,7 +1465,10 @@
+     });
+ }
+ 
+-pub use text_render::view;
++/// Text painting and path attachment with entity-local component dependencies.
++pub fn view() -> crate::ui::view::View {
++    text_render::view().with_entity_local_queries()
++}
+ 
+ pub use static_glyph_run_render::view as static_glyph_run_view;
+ 
+--- a/src/ui/render_system.rs
++++ b/src/ui/render_system.rs
+@@ -2518,12 +2518,11 @@
+ ) {
+     if *idx < entities.len() {
+         let entity = entities[*idx];
+-        if world
+-            .get::<super::ComputedRect>(entity)
+-            .is_none_or(|rect| rect.0 != node.rect)
+-        {
++        let previous = world.get::<super::ComputedRect>(entity).map(|rect| rect.0);
++        if previous != Some(node.rect) {
+             world.insert(entity, super::ComputedRect(node.rect));
+-            if super::offscreen::config(world, entity).is_some() {
++            // Reflow can move unchanged siblings; retain damage for their old and new bounds.
++            if previous.is_some() || super::offscreen::config(world, entity).is_some() {
+                 world.invalidate_visual(entity);
+             }
+         }
+--- a/src/app/mod.rs
++++ b/src/app/mod.rs
+@@ -887,6 +887,30 @@
+         self.world.reserve_dirty_traversal_stack();
+     }
+ 
++    /// Release the active page, its reactive bindings, named IDs, and retained textures. The surface is painted when a subsequent page renders.
++    pub fn clear_root(&mut self) {
++        let Some(root) = self.root.take() else { return };
++        let _owner_scope = crate::core::reactive::OwnerGuard::enter(&mut self.world);
++        crate::input::event::retire_subtree_interaction(&mut self.world, root);
++        crate::ui::despawn_subtree(&mut self.world, root);
++        self.world.remove_resource::<crate::ui::WidgetRoot>();
++        crate::input::event::sim::clear_sim_root(&mut self.world);
++        ViewRegistry::reconcile_observations(&mut self.world);
++        crate::ui::offscreen::reconcile_texture_outputs(&self.world);
++        if let Some(snapshot) = self.world.resource_mut::<render_system::LayoutSnapshot>() {
++            snapshot.invalidate();
++        }
++        self.dirty_plan.clear();
++        self.needs_full_first_frame = true;
++        let (width, height) = self.backend.viewport().logical_size();
++        self.invalidate_rect(Rect::new(0, 0, width, height));
++    }
++
++    /// Schedule a logical rectangle for repaint while preserving layout. Use this for retained drawing whose changed pixels have known bounds.
++    pub fn invalidate_rect(&mut self, rect: Rect) {
++        self.world.invalidate_rect(rect);
++    }
++
+     /// Reclaim the backend by value, dropping the rest of the `App`.
+     /// Lets a host rebuild a fresh `App` around the same surface (e.g.
+     /// the web gallery swapping demos without recreating the canvas).
+@@ -976,7 +1000,7 @@
+         self.world.reserve_dirty_traversal_stack();
+     }
+ 
+-    fn prepare_render(&mut self, viewport: crate::types::Viewport) {
++    fn prepare_viewport(&mut self, viewport: crate::types::Viewport) {
+         self.prepare_dirty_storage();
+         let viewport_changed = {
+             let current = self
+@@ -1008,14 +1032,40 @@
+         if safe_area_changed {
+             self.world.insert_resource(safe_area);
+         }
+-        for plugin in &mut self.plugins {
+-            plugin.pre_render(&mut self.world);
+-        }
++    }
++
++    fn prepare_bindings(&mut self) {
+         self.flush_event_notifications();
+         self.prepare_dirty_storage();
+         ViewRegistry::reconcile_observations(&mut self.world);
+         crate::core::reactive::flush_signal_dirty(&mut self.world);
+         crate::ui::offscreen::reconcile_texture_outputs(&self.world);
++    }
++
++    fn prepare_render(&mut self, viewport: crate::types::Viewport) {
++        self.prepare_viewport(viewport);
++        for plugin in &mut self.plugins {
++            plugin.pre_render(&mut self.world);
++        }
++        self.prepare_bindings();
++    }
++
++    /// Apply reactive changes and resolve the active page's layout against the current surface. Computed rectangles are ready to read on success; pending repaint regions remain available to the next render. This operation leaves surface pixels and render-plugin callbacks untouched.
++    pub fn prepare_layout(&mut self) -> Result<(), crate::render::RenderError> {
++        let _owner_scope = crate::core::reactive::OwnerGuard::enter(&mut self.world);
++        let Some(root) = self.root else { return Ok(()) };
++        self.prepare_text_layout()
++            .map_err(|_| crate::render::RenderError::TextPreparation)?;
++        let transform = self.backend.viewport();
++        self.prepare_viewport(transform);
++        self.prepare_bindings();
++        if self.text_content_failure(true).is_some() {
++            self.world.mark_subtree_dirty(root);
++            return Err(crate::render::RenderError::TextContent);
++        }
++        self.text_layout_started = true;
++        render_system::try_update_layout(&mut self.world, root, &transform)
++            .map_err(|_| crate::render::RenderError::TextLayout)
+     }
+ 
+     /// Render one frame
+@@ -3356,3 +3406,6 @@
+         assert_eq!(app.root, Some(root));
+     }
+ }
++
++#[cfg(test)]
++mod page_layout_tests;
+--- /dev/null
++++ b/src/app/page_layout_tests.rs
+@@ -0,0 +1,252 @@
++use super::*;
++use crate::core::model::SharedValue;
++use crate::types::Color;
++use crate::ui::dirty::{Dirty, ExactDirtyRegions};
++use crate::ui::render_system::{LastDirtyRegions, LayoutSnapshot};
++use crate::ui::widgets::Text;
++use crate::ui::{ComputedRect, OffscreenRender};
++use alloc::rc::Rc;
++use core::cell::Cell;
++
++#[crate::model]
++struct Reading {
++    #[observe]
++    value: u16,
++}
++
++#[crate::model]
++impl Reading {
++    fn set(&mut self, value: u16) {
++        self.value = value;
++    }
++}
++
++struct CountRender(Rc<Cell<usize>>);
++
++impl<B: Surface, F: RendererFactory<B>> Plugin<B, F> for CountRender {
++    fn build(&mut self, _: &mut App<B, F>) {}
++    fn pre_render(&mut self, _: &mut World) {
++        self.0.set(self.0.get() + 1);
++    }
++}
++
++#[test]
++fn prepare_layout_updates_reactive_text_without_painting_or_consuming_damage() {
++    let flushes = Rc::new(Cell::new(0));
++    let output_flushes = flushes.clone();
++    let backend = crate::surface::framebuf::FramebufSurface::new(128, 48, move |_, _| {
++        output_flushes.set(output_flushes.get() + 1);
++    });
++    let mut app = App::new(backend);
++    let hooks = Rc::new(Cell::new(0));
++    app.with_default_widgets()
++        .add_plugin(CountRender(hooks.clone()));
++    let root = app.spawn_root().id();
++    let state = app.add_model(Reading { value: 7 });
++    let reading = state.share();
++    let text = app.compose(root, |cx| {
++        crate::ui! {
++            Text (text: ${ format_args!("{}", reading.value()) }, text_capacity: 5)
++        }
++    });
++    app.render_dirty().unwrap();
++    let first_width = app.world.get::<ComputedRect>(text).unwrap().0.w;
++    let pixels = app.backend.framebuffer().buf.as_slice().to_vec();
++    let initial_flushes = flushes.get();
++    let initial_hooks = hooks.get();
++    let damage = Rect::new(1, 1, 2, 3);
++    app.invalidate_rect(damage);
++    state.set(12345);
++
++    app.prepare_layout().unwrap();
++
++    assert_eq!(
++        app.world.get::<Text>(text).unwrap().resolve(&app.world),
++        "12345"
++    );
++    assert!(app.world.get::<ComputedRect>(text).unwrap().0.w > first_width);
++    assert!(app.world.has::<Dirty>(text));
++    assert!(
++        !app.world
++            .resource::<ExactDirtyRegions>()
++            .unwrap()
++            .is_empty()
++    );
++    assert_eq!(app.backend.framebuffer().buf.as_slice(), pixels);
++    assert_eq!(flushes.get(), initial_flushes);
++    assert_eq!(hooks.get(), initial_hooks);
++    app.render_dirty().unwrap();
++    assert!(flushes.get() > initial_flushes);
++    assert_eq!(hooks.get(), initial_hooks + 1);
++    assert_ne!(app.backend.framebuffer().buf.as_slice(), pixels);
++}
++
++#[test]
++fn exact_invalidation_preserves_layout_and_paints_only_the_requested_region() {
++    let mut app = App::headless(64, 48);
++    app.with_default_widgets();
++    app.spawn_root().bg_color(Color::rgb(32, 64, 96)).id();
++    app.render_dirty().unwrap();
++    let snapshot = app.world.resource::<LayoutSnapshot>().unwrap() as *const LayoutSnapshot;
++    let rect = Rect::new(2, 4, 3, 8);
++    app.invalidate_rect(rect);
++    app.prepare_layout().unwrap();
++    app.render_dirty().unwrap();
++    assert_eq!(
++        app.world.resource::<LayoutSnapshot>().unwrap() as *const LayoutSnapshot,
++        snapshot
++    );
++    assert_eq!(
++        app.world.resource::<LastDirtyRegions>().unwrap().0.rects,
++        [rect]
++    );
++}
++
++#[test]
++fn prepared_reflow_preserves_old_damage_and_matches_a_full_frame() {
++    let panel = || {
++        let mut app = App::headless(128, 48);
++        app.with_default_widgets();
++        let root = app.spawn_root().bg_color(Color::rgb(24, 48, 72)).id();
++        let state = app.add_model(Reading { value: 7 });
++        let reading = state.share();
++        app.compose(root, |cx| {
++            crate::ui! {
++                Row () {
++                    Text (text: ${ format_args!("{}", reading.value()) }, text_capacity: 5)
++                    Text ("sibling", id: "moving-sibling")
++                }
++            }
++        });
++        app.render_dirty().unwrap();
++        (app, state)
++    };
++    let (mut partial, partial_state) = panel();
++    let (mut full, full_state) = panel();
++    let sibling = partial.world.find_by_id("moving-sibling").unwrap();
++    let initial_x = partial.world.get::<ComputedRect>(sibling).unwrap().0.x;
++    for value in [12345, 1, 999, 0] {
++        partial_state.set(value);
++        full_state.set(value);
++        partial.prepare_layout().unwrap();
++        let sibling_x = partial.world.get::<ComputedRect>(sibling).unwrap().0.x;
++        if value > 9 {
++            assert!(sibling_x > initial_x);
++        } else {
++            assert_eq!(sibling_x, initial_x);
++        }
++        partial.prepare_layout().unwrap();
++        partial.render_dirty().unwrap();
++        full.render().unwrap();
++        let partial_pixels = partial.backend.framebuffer();
++        let full_pixels = full.backend.framebuffer();
++        let first_difference = partial_pixels
++            .buf
++            .as_slice()
++            .iter()
++            .zip(full_pixels.buf.as_slice())
++            .position(|(left, right)| left != right);
++        assert!(
++            first_difference.is_none(),
++            "reflow value {value}: first differing byte {first_difference:?}"
++        );
++    }
++}
++
++#[test]
++fn clearing_a_page_releases_its_bindings_ids_and_textures_and_allows_replacement() {
++    let mut app = App::headless(64, 48);
++    app.with_default_widgets()
++        .with_offscreen_pool_budget(64 * 1024);
++    let outside = app.world.spawn_empty();
++    let root = app.spawn_root().id();
++    let state = app.add_model(Reading { value: 7 });
++    let reading = state.share();
++    let runs = Rc::new(Cell::new(0));
++    let retained = runs.clone();
++    let text = app.compose(root, |cx| {
++        crate::ui! {
++            Text (
++                id: "page-label",
++                text: ${ { retained.set(retained.get() + 1); reading.value().to_string() } }
++            )
++        }
++    });
++    app.world.insert(root, OffscreenRender::default());
++    app.render_dirty().unwrap();
++    assert!(
++        app.world
++            .resource::<Outputs<WidgetTexture>>()
++            .unwrap()
++            .get(root)
++            .is_some()
++    );
++    let calls = runs.get();
++    let pixels = app.backend.framebuffer().buf.as_slice().to_vec();
++    app.world.resource_mut::<FocusState>().unwrap().focused = Some(text);
++    let gestures = app.world.resource_mut::<GestureSystem>().unwrap();
++    gestures.recognizer.update(
++        &InputEvent::PointerDown {
++            id: 0,
++            x: crate::types::Fixed::ONE,
++            y: crate::types::Fixed::ONE,
++        },
++        0,
++        Some(text),
++        &mut gestures.events,
++    );
++    assert_eq!(gestures.recognizer.captured_target(), Some(text));
++
++    app.clear_root();
++    app.clear_root();
++
++    assert_eq!(app.root, None);
++    assert!(app.world.resource::<crate::ui::WidgetRoot>().is_none());
++    assert!(!app.world.is_alive(root));
++    assert!(!app.world.is_alive(text));
++    assert!(app.world.is_alive(outside));
++    assert_eq!(app.world.resource::<FocusState>().unwrap().focused, None);
++    assert_eq!(
++        app.world
++            .resource::<GestureSystem>()
++            .unwrap()
++            .recognizer
++            .captured_target(),
++        None
++    );
++    assert!(
++        app.world
++            .resource::<GestureSystem>()
++            .unwrap()
++            .events
++            .buffer
++            .is_empty()
++    );
++    assert!(app.world.find_by_id("page-label").is_none());
++    assert!(
++        app.world
++            .resource::<Outputs<WidgetTexture>>()
++            .unwrap()
++            .get(root)
++            .is_none()
++    );
++    assert_eq!(Rc::strong_count(&runs), 1);
++    assert_eq!(app.backend.framebuffer().buf.as_slice(), pixels);
++    state.set(42);
++    let replacement = app.spawn_root().bg_color(Color::rgb(160, 32, 48)).id();
++    app.compose(
++        replacement,
++        |cx| crate::ui! { Text ("replacement", id: "page-label") },
++    );
++    app.prepare_layout().unwrap();
++    app.render_dirty().unwrap();
++    assert_eq!(runs.get(), calls);
++    assert_ne!(app.backend.framebuffer().buf.as_slice(), pixels);
++    assert!(app.world.find_by_id("page-label").is_some());
++    let replacement_pixels = app.backend.framebuffer().buf.as_slice().to_vec();
++    state.set(99);
++    app.prepare_layout().unwrap();
++    app.render_dirty().unwrap();
++    assert_eq!(runs.get(), calls);
++    assert_eq!(app.backend.framebuffer().buf.as_slice(), replacement_pixels);
++}
+--- a/src/input/event/sim.rs
++++ b/src/input/event/sim.rs
+@@ -275,6 +275,10 @@
+ /// reads from App's root. Call this once after `set_root` to stash it.
+ pub fn set_sim_root(world: &mut World, root: Entity) {
+     world.insert_resource(SimRootFallback(root));
++}
++
++pub(crate) fn clear_sim_root(world: &mut World) {
++    world.remove_resource::<SimRootFallback>();
+ }
+ 
+ // ─── High-level timeline API ───────────────────────────────────────────

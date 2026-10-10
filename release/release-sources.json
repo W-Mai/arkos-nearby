@@ -1,12 +1,17 @@
 {
   "schema": 1,
-  "runtime_version": "0.3.1",
+  "runtime_version": "0.3.2",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
   "renderer": {
-    "version": "0.47.0",
-    "sha256": "3911d9e202064991930b44962f375f4e7f0e93eb23d8eb4e45f6a915923adb0b",
-    "source_sha256": "c8af57839f15928bcf5b4ca3e853f275b64a75640c73f03bac236ee0850b6998"
+    "version": "0.48.0",
+    "mirx_version": "0.48.0",
+    "sha256": "c9abdc8e863810307dd4395bdc96022180c97c6d25281cfc9c15c2267d97812a",
+    "source_sha256": "5cfb0f6a22e8aff3402bd1292ed1ad3d95621b585c22c8608ae51cf62f9b45ea",
+    "cargo_lock_sha256": "dff6cdde26c204424addf487b2c2101176fedf7b19b45ecbd11c4dbf0ce55537",
+    "mirui_crate_sha256": "1f90999cbfdb4d4b9a9cb9457c8124302c9175909de3828312d11ab93b20d217",
+    "mirui_patch_sha256": "a18f2199c352257b9c0a10b880124b39550d2d49cc4fe3f7b75603cad51c223f",
+    "effective_cargo_lock_sha256": "d0d30bea301ab814b0976c384b29f4424ccad1374a48e462e6f9f837a3105662"
   },
   "driver": {
     "sha256": "e099dcd8f6df0e02749d08c4af201bb1d26ca460a369247630782f0888468965",
