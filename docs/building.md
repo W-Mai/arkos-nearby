@@ -9,7 +9,7 @@
 ## 准备
 
 ```sh
-python3 scripts/build.py prepare /path/to/arkos-nearby-0.2.0-9857e62d-build-assets.tar.gz
+python3 scripts/build.py prepare /path/to/arkos-nearby-0.3.0-build-assets.tar.gz
 cargo +1.92.0 fetch --locked --manifest-path native/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 ```
@@ -52,4 +52,4 @@ python3 scripts/build_nearby_gui.py snapshot --view docs/screenshots/views/room-
 
 `release/provenance.json` 记录源码文件的 SHA-256，`release/manifest.json` 记录嵌入资产。`SHA256SUMS` 和 `build-info.json` 保存发行文件的校验值与构建记录。
 
-当前源码对应的已验证程序摘要记录在 [provenance.json](../release/provenance.json) 的 `tested_executable_sha256` 字段，GUI 与附属资产摘要记录在 [manifest.json](../release/manifest.json)。
+发行程序摘要记录在 [provenance.json](../release/provenance.json) 的 `release_build` 字段，实机验证基线记录在 `device_tested_build` 字段；`source_adjustments` 记录发行版本号的调整。GUI 与附属资产摘要记录在 [manifest.json](../release/manifest.json)。

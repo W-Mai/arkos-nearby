@@ -2,7 +2,7 @@
 
 ## 下载与校验
 
-两台掌机安装同一个版本。下载 [arkos-nearby-0.2.0-arm64.tar.gz](https://github.com/W-Mai/arkos-nearby/releases/download/v0.2.0/arkos-nearby-0.2.0-arm64.tar.gz) 和 [SHA256SUMS](https://github.com/W-Mai/arkos-nearby/releases/download/v0.2.0/SHA256SUMS)。在下载目录执行 `sha256sum --ignore-missing -c SHA256SUMS`；macOS 可使用 `shasum -a 256 -c SHA256SUMS` 并只核对实际下载的文件。
+两台掌机安装同一个版本。下载 [arkos-nearby-0.3.0-arm64.tar.gz](https://github.com/W-Mai/arkos-nearby/releases/download/v0.3.0/arkos-nearby-0.3.0-arm64.tar.gz) 和 [SHA256SUMS](https://github.com/W-Mai/arkos-nearby/releases/download/v0.3.0/SHA256SUMS)。在下载目录执行 `sha256sum --ignore-missing -c SHA256SUMS`；macOS 可使用 `shasum -a 256 -c SHA256SUMS` 并只核对实际下载的文件。
 
 解压后包含 `arkos-nearby`、`Install Nearby Multiplayer.sh`、安装说明、许可证和可执行文件校验值。
 

@@ -18,7 +18,7 @@
     "released_binary_sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e"
   },
   "rust": {
-    "source_archive": "arkos-nearby-0.2.0-rust-sources.tar.gz",
+    "source_archive": "arkos-nearby-0.3.0-rust-sources.tar.gz",
     "locked_crates": 86,
     "included_crates": 81
   },

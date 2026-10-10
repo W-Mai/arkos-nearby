@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
   "gui_version": "0.47.0",
@@ -175,7 +175,7 @@
     },
     {
       "name": "release-sources.json",
-      "sha256": "c89f78dc6eb1b95b22aad5e9502fc4cff985d049a25690a026ffb9c0088e0d73",
+      "sha256": "302faeb5e0de7e87a046c72262b7de3a1b5c09a29d2fa33279d3a933a314a4a4",
       "size": 5919,
       "offset": 18753580,
       "mode": 420

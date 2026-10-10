@@ -2,8 +2,7 @@
   "schema": 1,
   "development_repository": "https://github.com/W-Mai/arkos-nearby-dev",
   "development_commit": "94cc5c925c3151a9c6d63117496e865da7f5dcbb",
-  "version": "0.2.0",
-  "tested_executable_sha256": "9857e62dd1d4aea38888241e5fdd29a5829c862d37cbfb70a83854d9f0cdb16c",
+  "version": "0.3.0",
   "source_files": {
     "gui/nearby/Cargo.lock": "8ef35dca6b45d551d1997aa1e571d3057dfa2e0d8d2ad7986f75890f1c40478e",
     "gui/nearby/Cargo.toml": "f9803727f7880c8a3f77cd0bd3506a43536475811426d859ac01ce7d26d50034",
@@ -19,8 +18,8 @@
     "native/core_inspect/core_inspect.c": "83823e9950db0ece5c44a675f0086954308c0abb8bb4926196354eb376fd9afd",
     "native/core_inspect/runtime-pins.json": "bc7676e9a8513accb320dfcc966352d7df6e3715514b33f95a20572d4eadfc84",
     "native/core_inspect/start32.S": "9fa1116e49ce9e16c680a9258ff311620c6009fda3f047514e5790fe1d6bf277",
-    "native/nearby/Cargo.lock": "6c21a655d5ad5bbd21c7fd19879263671df95c928606c81d4f5a7240628101a4",
-    "native/nearby/Cargo.toml": "05a194069bfcff4748a0a94fc0e16eeb2d1e1c988868f3641bb37882c26078bf",
+    "native/nearby/Cargo.lock": "0abc6e1349f7b85d52715c8097890e1cc7f5812a98e4a0393688716a76de3d34",
+    "native/nearby/Cargo.toml": "b74e6040113e1ec05f6ae12e6c61fc4ecf5ae96300130c02daa4eb4e0a3dde60",
     "native/nearby/src/bundle.rs": "272a534fb1679380fe20fb782130182fe9342a048c7afd6d88062ad71341bd7f",
     "native/nearby/src/catalog.rs": "906a5fcbf9c7563425da0619949adb54e7ec855860a9637a380d3c553ae0ad12",
     "native/nearby/src/compat.rs": "f2479a63bbed345b9bfe6ccc66f6dbaac1dc30882078bf02db74c8db3d219300",
@@ -57,5 +56,26 @@
     "native/owned_cores/nestopia/COPYING": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
     "native/owned_cores/nestopia/source.json": "57d7312182b52c469c27fc7963714e2f976ae05a1c615f9e88603cc15d152eb3",
     "native/owned_cores/nestopia/state-footer.patch": "b83aa47608687b62a18692ec7f750fbd70abd0271069611c525962a30303b8bc"
+  },
+  "device_tested_build": {
+    "version": "0.2.0",
+    "sha256": "9857e62dd1d4aea38888241e5fdd29a5829c862d37cbfb70a83854d9f0cdb16c",
+    "development_commit": "94cc5c925c3151a9c6d63117496e865da7f5dcbb"
+  },
+  "source_adjustments": {
+    "native/nearby/Cargo.toml": {
+      "development_sha256": "05a194069bfcff4748a0a94fc0e16eeb2d1e1c988868f3641bb37882c26078bf",
+      "change": "Package version 0.3.0"
+    },
+    "native/nearby/Cargo.lock": {
+      "development_sha256": "6c21a655d5ad5bbd21c7fd19879263671df95c928606c81d4f5a7240628101a4",
+      "change": "Package version 0.3.0"
+    }
+  },
+  "release_build": {
+    "version": "0.3.0",
+    "target": "aarch64-unknown-linux-musl",
+    "sha256": "a6c6607c6da277d19dc6b3c46576c7c0752d086133490a47992fd4bd8eaaa8a0",
+    "bytes": 8491392
   }
 }

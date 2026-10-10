@@ -4,11 +4,11 @@
 
 **R36S 双机附近联机**
 
-[![Release](https://img.shields.io/badge/release-v0.2.0_preview-a33d2e?style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.2.0) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v0.3.0-a33d2e?style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.3.0) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
 
 选好游戏，创建房间，和身边的朋友一起玩。
 
-[下载安装](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.2.0) · [使用说明](docs/installation.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
+[下载安装](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.3.0) · [使用说明](docs/installation.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
 
 <img src="docs/photos/room-ready.jpg" alt="两台 R36S 准备开始游戏" width="840" />
 
@@ -28,7 +28,7 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 适用配置：**ArkOS4Clone 08262026 · Linux 4.4.189 · RTL8188EU 无线芯片 · 640×480 屏幕**。详细要求见 [设备兼容性](docs/compatibility.md#设备配置)。在两台掌机上安装同一版本：
 
-1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases/download/v0.2.0/arkos-nearby-0.2.0-arm64.tar.gz)。
+1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases/download/v0.3.0/arkos-nearby-0.3.0-arm64.tar.gz)。
 2. 解压，将 `arkos-nearby` 文件夹放入游戏卡的 `ports` 目录。
 3. 在掌机 **Ports** 中打开 **Install Nearby Multiplayer**。
 

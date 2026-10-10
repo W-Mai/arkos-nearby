@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-10
+
 - Faster full-state compression for the verified ARM64 RetroArch build.
 - Bundled Nestopia core with complete input-state restoration and zeroed state padding.
 - FBNeo selection from MAME for verified Final Fight content, restricted to matching 64-bit source and target builds.

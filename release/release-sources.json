@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "runtime_version": "0.2.0",
+  "runtime_version": "0.3.0",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
   "renderer": {

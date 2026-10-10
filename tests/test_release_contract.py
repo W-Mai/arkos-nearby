@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseContract(unittest.TestCase):
-    def test_copied_application_sources_match_the_recorded_development_snapshot(self):
+    def test_application_sources_match_the_recorded_release_snapshot(self):
         record = json.loads((ROOT / "release/provenance.json").read_text())
         for name, expected in record["source_files"].items():
             with self.subTest(name=name):
