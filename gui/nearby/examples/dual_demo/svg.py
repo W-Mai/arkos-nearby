@@ -108,10 +108,10 @@ class Svg:
         changes = [0] + [i for i in range(1, self.count) if active[i] != active[i - 1]]
         return self.css(
             "".join(
-                f"{num(i * 100 / self.count)}%{{display:{'inline' if active[i] else 'none'};animation-timing-function:steps(1,end)}}"
+                f"{num(i * 100 / self.count)}%{{visibility:{'visible' if active[i] else 'hidden'};animation-timing-function:steps(1,end)}}"
                 for i in changes
             )
-            + f"100%{{display:{'inline' if active[-1] else 'none'}}}"
+            + f"100%{{visibility:{'visible' if active[-1] else 'hidden'}}}"
         )
 
     def track(self, name, values, start):
@@ -349,11 +349,10 @@ class Svg:
         for active, bodies in visibility_groups:
             body = "".join(bodies)
             if not all(active):
-                # Omit inactive subtrees from layout and paint while their
-                # shared document-time animation continues to advance.
-                # The initial presentation value must stay inline so Chrome
-                # starts the display animation, including inside use trees.
-                body = f'<g display="inline" class="{self.gate(active)}">{body}</g>'
+                # Hide inactive draw slots without stopping their shared
+                # document-time animations, including inside use trees.
+                # Firefox supports visibility keyframes but not display ones.
+                body = f'<g visibility="visible" class="{self.gate(active)}">{body}</g>'
             output.append(body)
         return "".join(output)
 

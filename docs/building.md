@@ -84,7 +84,7 @@ python3 gui/nearby/examples/dual_demo/export.py --output /tmp/nearby-dual-demo.m
 python3 gui/nearby/examples/dual_demo/svg.py --output /tmp/nearby-dual-demo.svg
 ```
 
-导出器通过 mirui SceneRenderer 捕获两个菜单与宣传场景，保存绘制顺序和裁剪，将像素字形转为共享路径，并生成 CSS 动画时间轴。相邻且互不重叠的静态矩形合并为路径，裁剪范围完全覆盖的矩形省去裁剪层，暂未出现的图形按时间轴退出绘制。中间场景和 PNG 帧默认写入 `/tmp/arkos-nearby-svg`；`--frames` 指定目录，`--reuse-scenes` 复用其中的 `scenes.json`。SVG 的播放开销取决于浏览器对矢量节点和动画的处理能力。
+导出器通过 mirui SceneRenderer 捕获两个菜单与宣传场景，保存绘制顺序和裁剪，将像素字形转为共享路径，并生成 CSS 动画时间轴。相邻且互不重叠的静态矩形合并为路径，裁剪范围完全覆盖的矩形省去裁剪层，暂未出现的图形通过 `visibility` 阶跃动画按时间轴隐藏，兼容 Firefox 并保持内部动画同步。中间场景和 PNG 帧默认写入 `/tmp/arkos-nearby-svg`；`--frames` 指定目录，`--reuse-scenes` 复用其中的 `scenes.json`。SVG 的播放开销取决于浏览器对矢量节点和动画的处理能力。
 
 ## 核心查询器
 

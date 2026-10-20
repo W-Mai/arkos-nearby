@@ -15,7 +15,7 @@
     "gui/nearby/examples/dual_demo/export.py": "23ad3d6ab167f1376b0d9b33aec7f3fda086f5ee0cb186dfd87643a6241d90b7",
     "gui/nearby/examples/dual_demo/scene.rs": "690c8bcf31e5ab196a1be85aafa430f1e88db77ee309232f9de7d97c95e414ff",
     "gui/nearby/examples/dual_demo/story.rs": "74383e080df59cb4e9c657980e0fb20326ea6e2457c4a2daca7f42b4e0fdffbd",
-    "gui/nearby/examples/dual_demo/svg.py": "0f1c04f585b9a5ef6f3c632464d6da77341769fce212ca4d87e22b793ff394b7",
+    "gui/nearby/examples/dual_demo/svg.py": "b00507d5394f8d4ac1f1498b5fc07e8bf464a010d28ce61861c0d5ef042f12a7",
     "gui/nearby/src/dual_demo.rs": "f676a669019892d322324350773213d18667bdf5a9af1a9d4dbb487afd2ff1fe",
     "gui/nearby/src/feedback.rs": "b45c75f96d416438b4a3b2769cb3fd6dbc7c61eac430b0ab4dd9e90b14d87a61",
     "gui/nearby/src/launcher.rs": "9c1713050d23232c2512d2deacda7f30605e97bb9abb2c328109e90fa78967e5",
@@ -115,6 +115,12 @@
     "native/owned_cores/nestopia/COPYING": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
     "native/owned_cores/nestopia/source.json": "57d7312182b52c469c27fc7963714e2f976ae05a1c615f9e88603cc15d152eb3",
     "native/owned_cores/nestopia/state-footer.patch": "b83aa47608687b62a18692ec7f750fbd70abd0271069611c525962a30303b8bc"
+  },
+  "source_adjustments": {
+    "gui/nearby/examples/dual_demo/svg.py": {
+      "development_sha256": "0f1c04f585b9a5ef6f3c632464d6da77341769fce212ca4d87e22b793ff394b7",
+      "change": "Replace display keyframes with stepped visibility keyframes for Firefox SVG compatibility"
+    }
   },
   "release_build": {
     "version": "0.9.0",
