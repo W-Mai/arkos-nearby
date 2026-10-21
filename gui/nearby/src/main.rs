@@ -123,8 +123,10 @@ fn snapshot(
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    let texture = app.backend.framebuffer();
+    let pixels = texture.read_pixels().map_err(|e| format!("{e:?}"))?;
     writer
-        .write_image_data(app.backend.framebuffer().buf.as_slice())
+        .write_image_data(pixels.bytes())
         .map_err(|e| e.to_string())
 }
 
@@ -505,7 +507,8 @@ fn gpu_probe(output: &Path, input: Option<&Path>) -> Result<(), String> {
         .map_err(|e| format!("{e:?}"))?
         .ok_or("No GPU frame captured")?;
     let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-    let bytes = texture.buf.as_slice();
+    let pixels = texture.read_pixels().map_err(|e| format!("{e:?}"))?;
+    let bytes = pixels.bytes();
     let mut encoder = png::Encoder::new(
         BufWriter::new(File::create(output).map_err(|e| e.to_string())?),
         640,
@@ -529,7 +532,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [argument] if argument == "--version" => {
-            println!("arkos-nearby-gui 0.1.0 (mirui 0.50.0)");
+            println!("arkos-nearby-gui 0.1.0 (mirui 0.51.0)");
             Ok(())
         }
         #[cfg(all(target_os = "linux", not(feature = "gpu")))]

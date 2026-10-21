@@ -103,7 +103,7 @@ impl Bundle {
             manifest.schema == 1
                 && manifest.profile == PROFILE
                 && manifest.kernel_sha256 == KERNEL_SHA
-                && manifest.gui_version == "0.50.0"
+                && manifest.gui_version == "0.51.0"
                 && !manifest.version.is_empty(),
             "Unsupported release profile",
         )?;

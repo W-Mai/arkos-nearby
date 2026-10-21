@@ -62,7 +62,7 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     app.with_widget(cache::gpu_layer::view());
     font::install(app)?;
     state::install(app);
-    artwork::install(app);
+    artwork::install(app)?;
     Ok(())
 }
 

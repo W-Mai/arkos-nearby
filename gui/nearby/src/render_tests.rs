@@ -462,12 +462,21 @@ fn settled_content_preserves_pixels_and_survives_viewport_motion() {
     for palette in [crate::theme::Palette::Forest, crate::theme::Palette::Sunset] {
         app.set_theme(palette.theme()).unwrap();
         super::paint_at(&mut app, 1400).unwrap();
-        let cached = app.backend.framebuffer().buf.as_slice().to_vec();
+        let cached = app
+            .backend
+            .framebuffer()
+            .read_pixels()
+            .unwrap()
+            .bytes()
+            .to_vec();
         for &entity in &layers {
             app.world.remove::<OffscreenRender>(entity);
         }
         app.render().unwrap();
-        assert_eq!(cached, app.backend.framebuffer().buf.as_slice());
+        assert_eq!(
+            cached,
+            app.backend.framebuffer().read_pixels().unwrap().bytes()
+        );
     }
     scene.press(1400);
     paint_at(&mut app, &scene, 1416);
@@ -546,8 +555,9 @@ fn shelf_output_reuses_pixels_during_catalog_loading_and_refreshes_content() {
         .get(node)
         .unwrap()
         .texture()
-        .buf
-        .as_slice()
+        .read_pixels()
+        .unwrap()
+        .bytes()
         .to_vec();
     for (step, selected) in [1, 0, 1].into_iter().enumerate() {
         current.selected = selected;
@@ -571,7 +581,7 @@ fn shelf_output_reuses_pixels_during_catalog_loading_and_refreshes_content() {
     let outputs = app.world.resource::<Outputs<WidgetTexture>>().unwrap();
     let updated = outputs.get(node).unwrap();
     assert!(
-        original != updated.texture().buf.as_slice(),
+        original != updated.texture().read_pixels().unwrap().bytes(),
         "Changed content must replace cached pixels"
     );
 }
@@ -1163,10 +1173,17 @@ fn cache_generations(app: &TestApp) -> Vec<(Entity, u32)> {
 }
 
 fn assert_full_frame_matches(app: &mut TestApp, context: &str) {
-    let incremental = app.backend.framebuffer().buf.as_slice().to_vec();
+    let incremental = app
+        .backend
+        .framebuffer()
+        .read_pixels()
+        .unwrap()
+        .bytes()
+        .to_vec();
     app.render().unwrap();
     let full_frame = app.backend.framebuffer();
-    let full = full_frame.buf.as_slice();
+    let full_pixels = full_frame.read_pixels().unwrap();
+    let full = full_pixels.bytes();
     assert_eq!(
         incremental.iter().zip(full).filter(|(a, b)| a != b).count(),
         0,
@@ -1837,8 +1854,13 @@ fn retained_rows_keep_entities_and_update_contents_indices_and_focus() {
         let expected_scene = draw(&mut expected, &next).unwrap();
         paint_at(&mut expected, &expected_scene, 1600);
         assert_eq!(
-            app.backend.framebuffer().buf.as_slice(),
-            expected.backend.framebuffer().buf.as_slice(),
+            app.backend.framebuffer().read_pixels().unwrap().bytes(),
+            expected
+                .backend
+                .framebuffer()
+                .read_pixels()
+                .unwrap()
+                .bytes(),
             "Retained rows must render the same live values as fresh rows"
         );
     }
@@ -1883,7 +1905,12 @@ fn menu_handoffs_animate_without_blank_frames_in_panel_formats() {
                 paint_at(&mut app, &scene, time);
                 for y in (0..480).step_by(16) {
                     for x in (0..640).step_by(16) {
-                        let color = app.backend.framebuffer().get_pixel(x, y);
+                        let color = app
+                            .backend
+                            .framebuffer()
+                            .read_pixels()
+                            .unwrap()
+                            .get_pixel(x, y);
                         assert!(
                             color.r != 0 || color.g != 0 || color.b != 0,
                             "{format:?} {page:?}: black pixel at {x},{y}"

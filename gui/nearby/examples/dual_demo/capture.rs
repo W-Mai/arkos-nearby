@@ -54,6 +54,8 @@ struct Recorder<'a> {
 }
 
 impl Renderer for Recorder<'_> {
+    type TargetState = ();
+
     fn route(&self, request: &DrawRequest<'_, '_>) -> Result<RenderRoute, RenderError> {
         self.inner.route(request)
     }

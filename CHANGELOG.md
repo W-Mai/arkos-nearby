@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-21
+
+- Improve animation performance in the game library, Favorites and multiplayer panels.
+
 ## [0.9.0] - 2026-10-20
 
 - Add Nearby Launcher in Options, opening personal favorites with single-player launch and current-game multiplayer panels.

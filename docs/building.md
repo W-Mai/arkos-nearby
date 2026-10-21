@@ -9,7 +9,7 @@
 ## 准备
 
 ```sh
-python3 scripts/build.py prepare /path/to/arkos-nearby-0.9.0-build-assets.tar.gz
+python3 scripts/build.py prepare /path/to/arkos-nearby-0.9.1-build-assets.tar.gz
 cargo +1.92.0 fetch --locked --manifest-path native/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 ```
@@ -20,7 +20,7 @@ cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarc
 CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path/to/llvm-ar python3 scripts/build.py build
 ```
 
-输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.50.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
+输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.51.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
 
 GUI 通过 `scripts/build_nearby_gui.py` 构建和检查，直接使用 Cargo.lock 锁定的 registry 包。构建记录包含 mirui、mirui-macros、mirx 的 crate 校验和、应用源码摘要和实际锁文件摘要。页面由 PageView 挂载和释放，焦点框通过 FollowBounds 与共享动画调度跟随目标。灰度位图字体的采样外缘使用 PaintInflate 计入重绘覆盖。源码、Clippy、测试和 ARM64 构建使用同一份未修改的框架包。
 

@@ -109,15 +109,15 @@ fn capture(app: &mut SoftwareApp) -> Result<Texture<'static>, String> {
 fn write_png(path: &Path, texture: &Texture<'_>) -> Result<(), Box<dyn std::error::Error>> {
     let mut encoder = png::Encoder::new(
         BufWriter::new(File::create(path)?),
-        u32::from(texture.width),
-        u32::from(texture.height),
+        u32::from(texture.width()),
+        u32::from(texture.height()),
     );
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.set_compression(png::Compression::Fast);
     encoder
         .write_header()?
-        .write_image_data(texture.buf.as_slice())?;
+        .write_image_data(texture.read_pixels().map_err(|e| format!("{e:?}"))?.bytes())?;
     Ok(())
 }
 
@@ -147,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stage = app(scene::WIDTH, scene::HEIGHT)?;
     stage.add_resource(ResourceManager::new(
         MaxSize::Count(2),
-        Texture::owned(1, 1, ColorFormat::RGBA8888),
+        Texture::owned(1, 1, ColorFormat::RGBA8888).map_err(|e| format!("{e:?}"))?,
     ));
     let state = stage
         .add_model(scene::Promo {

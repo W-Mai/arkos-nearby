@@ -118,7 +118,7 @@ impl Loader {
         if entry
             .1
             .as_ref()
-            .is_some_and(|token| textures.resolve(&texture_token(*token)).width == 1)
+            .is_some_and(|token| textures.resolve(&texture_token(*token)).width() == 1)
         {
             if let Some(token) = &entry.1 {
                 textures.remove_token(&texture_token(*token));
@@ -173,7 +173,8 @@ impl Loader {
                 pixels.width,
                 pixels.height,
                 ColorFormat::RGBA8888,
-            )?;
+            )
+            .ok()?;
             self.serial += 1;
             let token = self.serial;
             // Published artwork is immutable. A new admission gets a new
@@ -231,7 +232,9 @@ fn decode(path: &str) -> Option<Pixels> {
     })
 }
 
-pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
+pub(super) fn install<B: Surface, F: RendererFactory<B>>(
+    app: &mut App<B, F>,
+) -> Result<(), String> {
     let (send, jobs) = mpsc::sync_channel::<ArtworkKey>(1);
     let (results, receive) = mpsc::sync_channel(1);
     std::thread::spawn(move || {
@@ -278,12 +281,14 @@ pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
     {
         app.add_resource(ResourceManager::new(
             MaxSize::Bytes(TEXTURE_BUDGET),
-            Texture::owned(1, 1, ColorFormat::RGBA8888),
+            Texture::owned(1, 1, ColorFormat::RGBA8888)
+                .map_err(|error| format!("Artwork texture: {error:?}"))?,
         ));
     }
     let root = app.root.unwrap_or_else(|| app.spawn_root().id());
     let display = app.compose(root, super::state::display_state());
     app.add_system(update::system(display));
+    Ok(())
 }
 
 #[system(order = Animation)]
@@ -440,7 +445,7 @@ where
 fn bitmap(bounds: model!(CoverBounds), token: u64) -> Entity {
     let aspect = res!(ResourceManager<Texture<'static>>).with(|textures| {
         let image = textures.resolve(&texture_token(token));
-        Fixed::from_int(i32::from(image.width)) / Fixed::from_int(i32::from(image.height))
+        Fixed::from_int(i32::from(image.width())) / Fixed::from_int(i32::from(image.height()))
     });
     let height = bounds.clone();
     let horizontal = bounds.clone();
@@ -769,7 +774,7 @@ mod tests {
         super::super::install(&mut app).unwrap();
         let textures = ResourceManager::new(
             MaxSize::Bytes(32),
-            Texture::owned(1, 1, ColorFormat::RGBA8888),
+            Texture::owned(1, 1, ColorFormat::RGBA8888).unwrap(),
         );
         let loader = app.world.resource_mut::<Loader>().unwrap();
         let pixels = || {
