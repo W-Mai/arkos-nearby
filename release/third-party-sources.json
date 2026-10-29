@@ -18,7 +18,7 @@
     "released_binary_sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e"
   },
   "rust": {
-    "source_archive": "arkos-nearby-0.9.1-rust-sources.tar.gz",
+    "source_archive": "arkos-nearby-0.10.0-rust-sources.tar.gz",
     "locked_crates": 191,
     "included_crates": 191
   },
@@ -184,14 +184,14 @@
     "sha256": "cf21e3ec71941dc49019ac639cf3d7d19fabb04961c94f0f02f9b2dee1c87b59"
   },
   "renderer": {
-    "version": "0.48.0",
-    "mirx_version": "0.48.0",
-    "sha256": "fa860bcfba9fefd21b5caf244563cadefa2d9f232b83e21a06961c3c67c7937a",
-    "source_sha256": "d834cb4ff4aeba28e12743b573dccb7c5993c0e8501f11377fbfc956af5287ad",
-    "cargo_lock_sha256": "dff6cdde26c204424addf487b2c2101176fedf7b19b45ecbd11c4dbf0ce55537",
-    "mirui_crate_sha256": "1f90999cbfdb4d4b9a9cb9457c8124302c9175909de3828312d11ab93b20d217",
-    "mirui_patch_sha256": "a18f2199c352257b9c0a10b880124b39550d2d49cc4fe3f7b75603cad51c223f",
-    "effective_cargo_lock_sha256": "d0d30bea301ab814b0976c384b29f4424ccad1374a48e462e6f9f837a3105662"
+    "version": "0.53.0",
+    "mirx_version": "0.53.0",
+    "sha256": "26411e668cb350d9731486239a4537c0383c4251fe8b1e1852fe6cd9542791c8",
+    "source_sha256": "71d36b5485f85866e5e5d8badd9e63b8c452d585d47ea70a46255008db2291bc",
+    "cargo_lock_sha256": "661d799a07cd135047ae157615fdbcdb938848decc7663aa6cbb02ef624a835c",
+    "mirui_crate_sha256": "180a249e0594a77bdfa009eeec97aa01d03d2dcf075ba48cc7d53bddad6c334a",
+    "mirui_macros_crate_sha256": "fad12105b90ff024b2ca3e4396f9a7e605802d3508a4f527c21a6c726e477578",
+    "mirx_crate_sha256": "8002ec721b7a973848fdd1b4d41951776627a5220ddbe6103eccb19555c4811a"
   },
   "sdl2": {
     "version": "2.32.10",

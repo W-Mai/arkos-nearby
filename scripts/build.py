@@ -156,6 +156,22 @@ def native(check):
         )
 
 
+def interface(check):
+    record = ASSETS / "nearby-gui-build.json"
+    if not check and record.is_file():
+        if json.loads(record.read_text()).get("backend") == "sdl-gpu":
+            gui.artifacts(ASSETS)
+            return
+    subprocess.run(
+        [
+            "python3",
+            str(ROOT / "scripts/build_nearby_gui.py"),
+            "check" if check else "build",
+        ],
+        check=True,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("prepare", "build", "check"))
@@ -166,14 +182,7 @@ def main():
             parser.error("prepare requires the downloaded build asset archive")
         prepare(args.archive)
         return
-    subprocess.run(
-        [
-            "python3",
-            str(ROOT / "scripts/build_nearby_gui.py"),
-            "check" if args.action == "check" else "build",
-        ],
-        check=True,
-    )
+    interface(args.action == "check")
     native(args.action == "check")
 
 

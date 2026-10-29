@@ -74,8 +74,13 @@ def build_inputs():
 def artifacts(assets):
     report = json.loads((assets / "nearby-gui-build.json").read_text())
     data = (assets / "arkos-nearby-gui").read_bytes()
+    backend = report.get("backend", "framebuffer")
+    supported = (report["target"], backend) == (TRIPLE, "framebuffer") or (
+        (report["target"], backend) == ("aarch64-unknown-linux-gnu", "sdl-gpu")
+        and report.get("sdl_linkage") == "static"
+    )
     if (
-        report["target"] != TRIPLE
+        not supported
         or any(
             report.get(name) != version
             for name, version in locked_dependencies().items()
@@ -244,6 +249,7 @@ def main():
         report = {
             "schema": 2,
             "target": TRIPLE,
+            "backend": "framebuffer",
             "toolchain": args.toolchain,
             **locked_dependencies(),
             **inputs,

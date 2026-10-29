@@ -74,7 +74,9 @@ pub(super) fn follow(
             })
         }
     });
-    runtime.deck.stage(anchor.is_some());
+    if runtime.deck.actor_stage() != anchor.is_some() {
+        runtime.deck.stage(anchor.is_some());
+    }
     for (entity, _, hidden, bounds) in frames {
         if let Some(target) = target {
             if bounds.is_none_or(|old| old.target != target) {

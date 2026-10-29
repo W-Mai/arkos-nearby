@@ -76,6 +76,9 @@ pub(super) struct Deck {
     slide: Track,
     modal: Track,
     now: u64,
+    pause_background: bool,
+    slide_clock: super::modal::AnimationClock,
+    slide_now: u64,
 }
 impl Default for Deck {
     fn default() -> Self {
@@ -89,6 +92,9 @@ impl Default for Deck {
             slide: Track::new(SLIDE),
             modal: Track::new(PANEL),
             now: 0,
+            pause_background: false,
+            slide_clock: super::modal::AnimationClock::default(),
+            slide_now: 0,
         }
     }
 }
@@ -114,14 +120,21 @@ impl Deck {
         };
         if view.launcher.enabled {
             self.enabled = true;
-            self.slide.set(view.launcher.tab == 1, self.now, SLIDE);
+            self.slide
+                .set(view.launcher.tab == 1, self.slide_now, SLIDE);
         }
         self.modal.set(view.return_to_launcher, self.now, PANEL);
     }
     pub fn tick(&mut self, now: u64) {
         self.now = now;
-        self.expansion = self.slide.value(now);
+        if let Some(local) = self.slide_clock.sample(now, self.pause_background) {
+            self.slide_now = local;
+            self.expansion = self.slide.value(local);
+        }
         self.panel = self.modal.value(now);
+    }
+    pub fn pause_background(&mut self, paused: bool) {
+        self.pause_background = paused;
     }
     pub fn stage(&mut self, value: bool) {
         self.actor_stage = value;

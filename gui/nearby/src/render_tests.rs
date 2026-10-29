@@ -1,6 +1,164 @@
 use super::*;
 
 #[test]
+fn text_output_policy_is_shared_across_library_and_room_pages() {
+    for page in [
+        Page::Mode,
+        Page::Choice,
+        Page::Rooms,
+        Page::Games,
+        Page::Host,
+        Page::Joined,
+    ] {
+        let mut app = app([640, 480]);
+        let mut current = view(page);
+        current.network_only = matches!(page, Page::Host | Page::Joined);
+        let scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let mut count = 0;
+        for (entity, _) in app.world.query::<mirui::ui::widgets::Text>().iter() {
+            assert!(!app.world.has::<cache::GpuLayerCache>(entity));
+            count += 1;
+        }
+        assert!(count > 0);
+    }
+}
+
+#[test]
+fn labels_use_backend_text_retention_without_nested_offscreen_caches() {
+    let mut app = app([640, 480]);
+    let root = app.spawn_root().id();
+    app.compose(
+        root,
+        widgets::caption(
+            || "Nearby".into(),
+            || style::FOREGROUND,
+            12,
+            mirui::ui::widgets::TextAlign::Start,
+            style::LABEL_LEADING,
+        ),
+    );
+    super::paint_at(&mut app, 800).unwrap();
+    let labels: Vec<_> = app
+        .world
+        .query::<mirui::ui::widgets::Text>()
+        .iter()
+        .map(|(entity, _)| entity)
+        .collect();
+    assert_eq!(labels.len(), 1);
+    for label in labels {
+        assert!(!app.world.has::<cache::GpuLayerCache>(label));
+    }
+}
+
+#[test]
+fn retained_pages_own_rows_while_the_primary_model_keeps_shared_context() {
+    let mut app = app([640, 480]);
+    let mut home = view(Page::Games);
+    home.library.kind = crate::model::LibraryKind::Favorites;
+    home.launcher.enabled = true;
+    let mut scene = draw(&mut app, &home).unwrap();
+    paint_at(&mut app, &scene, 800);
+    assert!(scene.state.entries().is_empty());
+    assert!(!scene.shelf.entries().is_empty());
+
+    let mut catalog = view(Page::Games);
+    catalog.launcher.enabled = true;
+    catalog.launcher.tab = 1;
+    catalog.launcher_shelf = Some(Box::new(home));
+    catalog.artwork = "selected.png".into();
+    update(&mut scene, &catalog).unwrap();
+    paint_at(&mut app, &scene, 1600);
+    assert!(scene.state.entries().is_empty());
+    assert!(!scene.catalog.entries().is_empty());
+    assert_eq!(scene.state.artwork(), catalog.artwork);
+    assert!(
+        scene.state.selected_platform()
+            == consoles::Platform::from_id(&catalog.entries[catalog.selected].icon)
+    );
+
+    let mut room = view(Page::Rooms);
+    room.return_to_launcher = true;
+    update(&mut scene, &room).unwrap();
+    paint_at(&mut app, &scene, 2400);
+    assert!(scene.state.rooms().is_empty());
+    assert!(!scene.room.rooms().is_empty());
+
+    catalog.launcher.enabled = false;
+    scene.state.present(&catalog);
+    assert_eq!(scene.state.entries().len(), catalog.entries.len().min(4));
+    room.return_to_launcher = false;
+    scene.state.present(&room);
+    assert_eq!(scene.state.rooms().len(), room.rooms.len().min(4));
+}
+
+#[test]
+fn catalog_slots_keep_bindings_while_game_content_and_window_change() {
+    let mut app = app([640, 480]);
+    let mut home = view(Page::Games);
+    home.library.kind = crate::model::LibraryKind::Favorites;
+    home.launcher.enabled = true;
+    let mut scene = draw(&mut app, &home).unwrap();
+    paint_at(&mut app, &scene, 800);
+    let mut catalog = view(Page::Games);
+    catalog.launcher.enabled = true;
+    catalog.launcher.tab = 1;
+    catalog.launcher_shelf = Some(Box::new(home));
+    catalog.selected = 3;
+    catalog.status.clear();
+    let window = |start| {
+        (start..start + 4)
+            .map(|i| crate::model::GameRow {
+                key: format!("game-{i}"),
+                name: format!("Game {i}"),
+                icon: "gba".into(),
+                available: true,
+                favorite: i % 2 == 0,
+                ..Default::default()
+            })
+            .collect::<Vec<_>>()
+    };
+    catalog.entries = window(0);
+    update(&mut scene, &catalog).unwrap();
+    paint_at(&mut app, &scene, 1600);
+    let members: Vec<_> = scene
+        .catalog
+        .entries()
+        .entries()
+        .map(|(id, _)| id)
+        .collect();
+    for (step, start) in [1, 2, 3, 2, 0, 7].into_iter().enumerate() {
+        catalog.entries = window(start);
+        update(&mut scene, &catalog).unwrap();
+        paint_at(&mut app, &scene, 2400 + step as u64 * 800);
+        assert_eq!(
+            scene
+                .catalog
+                .entries()
+                .entries()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            members
+        );
+        assert_eq!(scene.catalog.entries().len(), 4);
+        for ((_, row), expected) in scene.catalog.entries().entries().zip(&catalog.entries) {
+            assert_eq!(row.label(true), expected.name);
+            assert_eq!(row.favorite(), expected.favorite);
+        }
+        assert_full_frame_matches(&mut app, "Catalog slot content");
+    }
+    catalog.entries.truncate(1);
+    catalog.selected = 0;
+    update(&mut scene, &catalog).unwrap();
+    paint_at(&mut app, &scene, 8000);
+    assert_eq!(scene.catalog.entries().len(), 1);
+    catalog.entries.clear();
+    update(&mut scene, &catalog).unwrap();
+    paint_at(&mut app, &scene, 8800);
+    assert!(scene.catalog.entries().is_empty());
+}
+
+#[test]
 fn modal_input_and_geometry_followers_belong_to_the_active_layer() {
     let mut app = app([640, 480]);
     let mut home = view(Page::Games);
@@ -426,6 +584,15 @@ fn settled_content_preserves_pixels_and_survives_viewport_motion() {
     current.launcher.enabled = true;
     let mut scene = draw(&mut app, &current).unwrap();
     paint_at(&mut app, &scene, 1000);
+    let shelf_frame = app
+        .world
+        .query::<selection::SelectionFrame>()
+        .iter()
+        .find(|(_, frame)| frame.page.library == crate::model::LibraryKind::Favorites)
+        .unwrap()
+        .0;
+    let original_target = app.world.get::<FollowBounds>(shelf_frame).unwrap().target;
+    let original_bounds = app.world.get::<ComputedRect>(original_target).unwrap().0;
     let mut panel = view(Page::Mode);
     panel.return_to_launcher = true;
     update(&mut scene, &panel).unwrap();
@@ -500,22 +667,75 @@ fn settled_content_preserves_pixels_and_survives_viewport_motion() {
         .find(|(_, layer)| layer.state.launcher().view().tab == 0)
         .unwrap()
         .0;
+    assert!(!app.world.has::<OffscreenRender>(shelf));
     assert!(
         app.world
             .resource::<mirui::ui::Outputs<mirui::ui::WidgetTexture>>()
             .unwrap()
             .get(shelf)
-            .is_some()
+            .is_none()
     );
+    assert_eq!(
+        app.world.get::<FollowBounds>(shelf_frame).unwrap().target,
+        original_target
+    );
+    assert_full_frame_matches(&mut app, "Active full shelf after the room panel closes");
+    let home = current.clone();
+    let mut catalog = view(Page::Games);
+    catalog.library.kind = crate::model::LibraryKind::Platforms;
+    catalog.platforms = true;
+    current.launcher_shelf = Some(Box::new(home.clone()));
+    current.launcher_catalog = Some(Box::new(catalog));
     current.launcher.tab = 1;
     update(&mut scene, &current).unwrap();
     paint_at(&mut app, &scene, 2416);
-    assert!(app.world.has::<OffscreenRender>(shelf));
+    assert!(scene.deck.layer() == deck::Layer::Catalog);
+    assert!(!scene.deck.viewport_settled());
+    assert!(!app.world.has::<OffscreenRender>(shelf));
+    let frozen = app
+        .world
+        .resource::<suspension::Runtime>()
+        .unwrap()
+        .model
+        .clone();
+    assert!(!frozen.hidden());
+    paint_at(&mut app, &scene, 2500);
+    assert!(scene.deck.expansion() > Fixed::ZERO && scene.deck.expansion() < Fixed::ONE);
+    assert!(!app.world.has::<OffscreenRender>(shelf));
+    assert!(!frozen.hidden());
+    paint_at(&mut app, &scene, 3100);
+    assert_eq!(scene.deck.expansion(), Fixed::ONE);
+    assert!(scene.deck.viewport_settled());
+    assert!(frozen.hidden() && frozen.paused());
+    let token = frozen
+        .token()
+        .expect("The compressed shelf owns its prepared snapshot");
+    let textures = app.world.resource::<mirui::core::resource::ResourceManager<mirui::render::texture::Texture<'static>>>().unwrap();
+    let picture = textures.resolve(&suspension::texture_token(token));
+    assert!(picture.width() > 0 && picture.height() > 0);
+    assert_full_frame_matches(&mut app, "Compressed shelf snapshot and catalog");
+    update(&mut scene, &home).unwrap();
+    paint_at(&mut app, &scene, 3116);
+    assert!(!frozen.hidden() && frozen.token().is_none());
+    paint_at(&mut app, &scene, 3800);
+    assert_eq!(scene.deck.expansion(), Fixed::ZERO);
+    assert!(!app.world.has::<OffscreenRender>(shelf));
+    assert!(!app.world.has::<mirui::ui::Hidden>(shelf_frame));
+    assert_eq!(
+        app.world.get::<FollowBounds>(shelf_frame).unwrap().target,
+        original_target
+    );
+    assert_eq!(
+        app.world.get::<ComputedRect>(original_target).unwrap().0,
+        original_bounds
+    );
+    assert_full_frame_matches(&mut app, "Restored full shelf and original focus");
 }
 
 #[test]
 fn shelf_output_reuses_pixels_during_catalog_loading_and_refreshes_content() {
-    use mirui::ui::{OffscreenGeneration, OffscreenRender, Outputs, WidgetTexture};
+    use mirui::core::resource::ResourceManager;
+    use mirui::render::texture::Texture;
     let mut app = app([640, 480]);
     let mut shelf = view(Page::Games);
     shelf.library.kind = crate::model::LibraryKind::Favorites;
@@ -529,32 +749,19 @@ fn shelf_output_reuses_pixels_during_catalog_loading_and_refreshes_content() {
     current.launcher_catalog = Some(Box::new(current.clone()));
     let mut scene = draw(&mut app, &current).unwrap();
     paint_at(&mut app, &scene, 1000);
-    let node = app
+    let model = app
         .world
-        .query::<cache::SettledLayerCache>()
-        .iter()
-        .find(|(_, layer)| layer.backdrop)
+        .resource::<suspension::Runtime>()
         .unwrap()
-        .0;
-    assert!(app.world.has::<OffscreenRender>(node));
-    assert!(
-        app.world
-            .resource::<Outputs<WidgetTexture>>()
-            .unwrap()
-            .get(node)
-            .is_some()
-    );
-    let generation = app
-        .world
-        .get::<OffscreenGeneration>(node)
-        .map_or(0, |g| g.0);
+        .model
+        .clone();
+    assert!(model.hidden());
+    let token = model.token().unwrap();
     let original = app
         .world
-        .resource::<Outputs<WidgetTexture>>()
+        .resource::<ResourceManager<Texture<'static>>>()
         .unwrap()
-        .get(node)
-        .unwrap()
-        .texture()
+        .resolve(&suspension::texture_token(token))
         .read_pixels()
         .unwrap()
         .bytes()
@@ -564,24 +771,24 @@ fn shelf_output_reuses_pixels_during_catalog_loading_and_refreshes_content() {
         current.launcher_catalog.as_mut().unwrap().selected = selected;
         update(&mut scene, &current).unwrap();
         paint_at(&mut app, &scene, 1100 + step as u64 * 100);
-        assert!(app.world.has::<OffscreenRender>(node));
-        assert_eq!(
-            app.world
-                .get::<OffscreenGeneration>(node)
-                .map_or(0, |g| g.0),
-            generation
-        );
+        assert!(model.hidden());
+        assert_eq!(model.token(), Some(token));
     }
     current.launcher_shelf.as_mut().unwrap().entries[0].name = "Changed title".into();
     update(&mut scene, &current).unwrap();
     paint_at(&mut app, &scene, 1400);
-    assert!(!app.world.has::<OffscreenRender>(node));
+    assert!(!model.hidden());
     paint_at(&mut app, &scene, 2000);
-    assert!(app.world.has::<OffscreenRender>(node));
-    let outputs = app.world.resource::<Outputs<WidgetTexture>>().unwrap();
-    let updated = outputs.get(node).unwrap();
+    assert!(model.hidden());
+    let updated = model.token().unwrap();
+    assert_ne!(updated, token);
+    let textures = app
+        .world
+        .resource::<ResourceManager<Texture<'static>>>()
+        .unwrap();
+    let output = textures.resolve(&suspension::texture_token(updated));
     assert!(
-        original != updated.texture().read_pixels().unwrap().bytes(),
+        original != output.read_pixels().unwrap().bytes(),
         "Changed content must replace cached pixels"
     );
 }
@@ -1840,16 +2047,9 @@ fn retained_rows_keep_entities_and_update_contents_indices_and_focus() {
                 .to_string()
             )
         );
-        assert!(
-            labels.contains(
-                &if page == Page::Rooms {
-                    "房间已离线，等待重新出现"
-                } else {
-                    "新的说明"
-                }
-                .to_string()
-            )
-        );
+        if page == Page::Rooms {
+            assert!(labels.contains(&"房间已离线，等待重新出现".to_string()));
+        }
         let mut expected = self::app([640, 480]);
         let expected_scene = draw(&mut expected, &next).unwrap();
         paint_at(&mut expected, &expected_scene, 1600);
@@ -1863,6 +2063,21 @@ fn retained_rows_keep_entities_and_update_contents_indices_and_focus() {
                 .bytes(),
             "Retained rows must render the same live values as fresh rows"
         );
+        if page == Page::Games {
+            // Regular game details are hidden. Reveal the retained description
+            // and verify its latest value without replacing the row or focus.
+            next.entries[2].directory = true;
+            update(&mut scene, &next).unwrap();
+            advance_checked(&mut app, &scene, 1800);
+            assert!(targets.iter().all(|(_, node)| app.world.is_alive(*node)));
+            assert!(original_text.iter().all(|node| app.world.is_alive(*node)));
+            assert_eq!(app.world.get::<FollowBounds>(focus).unwrap().target, first);
+            assert!(app.world.query::<Text>().iter().any(|(node, text)| {
+                selection::contains(first, node, |node| {
+                    app.world.get::<mirui::ui::Parent>(node).map(|p| p.0)
+                }) && text.resolve(app.world.resource()) == "新的说明"
+            }));
+        }
     }
 }
 
@@ -2238,4 +2453,721 @@ fn retained_actor_follows_only_the_active_layer_page_and_pane() {
         .world
         .get::<mirui::ui::Parent>(node)
         .map(|parent| parent.0)));
+}
+
+#[test]
+fn modal_snapshot_stays_below_foreground_panel_and_actor() {
+    use mirui::core::resource::ResourceManager;
+    use mirui::render::texture::Texture;
+    use mirui::ui::widgets::image::ImageSource;
+    use mirui::ui::{Children, Parent};
+    let mut app = app([640, 480]);
+    let mut home = view(Page::Games);
+    home.library.kind = crate::model::LibraryKind::Favorites;
+    home.launcher.enabled = true;
+    let mut scene = draw(&mut app, &home).unwrap();
+    super::paint_at(&mut app, 1000).unwrap();
+    let original_layer = app
+        .world
+        .find_by_id("launcher_background_snapshot_layer")
+        .unwrap();
+    let shell = app.world.get::<Parent>(original_layer).unwrap().0;
+    let original_order = app.world.get::<Children>(shell).unwrap().0.clone();
+    let check_order = |app: &TestApp| {
+        assert_eq!(
+            app.world.find_by_id("launcher_background_snapshot_layer"),
+            Some(original_layer)
+        );
+        assert_eq!(app.world.get::<Children>(shell).unwrap().0, original_order);
+        for (node, image) in app.world.query::<mirui::ui::widgets::Image>().iter() {
+            if matches!(&image.src, ImageSource::Texture(token) if token.starts_with("nearby-modal-"))
+            {
+                assert_eq!(app.world.get::<Parent>(node).unwrap().0, original_layer);
+            }
+        }
+    };
+    check_order(&app);
+    let mut panel = view(Page::Lobby);
+    panel.lobby = true;
+    panel.return_to_launcher = true;
+    update(&mut scene, &panel).unwrap();
+    super::paint_at(&mut app, 1016).unwrap();
+    super::paint_at(&mut app, 1500).unwrap();
+    check_order(&app);
+    let layer = app
+        .world
+        .find_by_id("launcher_background_snapshot_layer")
+        .unwrap();
+    let parent = app.world.get::<Parent>(layer).unwrap().0;
+    let children = &app.world.get::<Children>(parent).unwrap().0;
+    let layer_index = children.iter().position(|node| *node == layer).unwrap();
+    let actor = app
+        .world
+        .query::<actor::ActorFrame>()
+        .iter()
+        .next()
+        .unwrap()
+        .0;
+    let actor_index = children.iter().position(|node| *node == actor).unwrap();
+    let mut panel_root = app
+        .world
+        .query::<deck::ActorScope>()
+        .iter()
+        .find_map(|(node, scope)| {
+            matches!(scope, deck::ActorScope::Layer(deck::Layer::Room)).then_some(node)
+        })
+        .unwrap();
+    while app.world.get::<Parent>(panel_root).unwrap().0 != parent {
+        panel_root = app.world.get::<Parent>(panel_root).unwrap().0;
+    }
+    let panel_index = children
+        .iter()
+        .position(|node| *node == panel_root)
+        .unwrap();
+    assert!(layer_index < panel_index && panel_index < actor_index);
+    let image = app
+        .world
+        .query::<mirui::ui::widgets::Image>()
+        .iter()
+        .find_map(|(node, image)| {
+            matches!(&image.src, ImageSource::Texture(token) if token.starts_with("nearby-modal-"))
+                .then_some(node)
+        })
+        .unwrap();
+    assert_eq!(app.world.get::<Parent>(image).unwrap().0, layer);
+    let token = app
+        .world
+        .resource::<modal::Runtime>()
+        .unwrap()
+        .model
+        .token()
+        .unwrap();
+    let source = app
+        .world
+        .resource::<ResourceManager<Texture<'static>>>()
+        .unwrap()
+        .resolve(&modal::texture_token(token));
+    let frozen = source.read_pixels().unwrap();
+    let presented = app
+        .backend
+        .framebuffer()
+        .read_pixels()
+        .unwrap()
+        .bytes()
+        .to_vec();
+    assert_ne!(
+        &presented[..4],
+        &frozen.bytes()[..4],
+        "The foreground dimmer must cover the frozen image"
+    );
+    assert!(presented[0] < frozen.bytes()[0]);
+    let changed = presented
+        .chunks_exact(4)
+        .zip(frozen.bytes().chunks_exact(4))
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(
+        changed > 640 * 480 / 2,
+        "The foreground panel must remain visible over the snapshot"
+    );
+    let bright = presented
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3].iter().all(|channel| *channel > 160))
+        .count();
+    assert!(
+        bright > 640 * 480 / 4,
+        "The foreground content must remain visible inside the dimmer"
+    );
+    app.set_theme(crate::theme::Palette::Sunset.theme())
+        .unwrap();
+    super::paint_at(&mut app, 1516).unwrap();
+    super::paint_at(&mut app, 1532).unwrap();
+    check_order(&app);
+    let next_token = app
+        .world
+        .resource::<modal::Runtime>()
+        .unwrap()
+        .model
+        .token()
+        .unwrap();
+    assert_ne!(token, next_token);
+    update(&mut scene, &home).unwrap();
+    super::paint_at(&mut app, 1548).unwrap();
+    super::paint_at(&mut app, 1900).unwrap();
+    check_order(&app);
+    assert!(
+        app.world
+            .resource::<modal::Runtime>()
+            .unwrap()
+            .model
+            .token()
+            .is_none()
+    );
+    update(&mut scene, &panel).unwrap();
+    super::paint_at(&mut app, 1916).unwrap();
+    super::paint_at(&mut app, 2400).unwrap();
+    check_order(&app);
+    assert!(
+        app.world
+            .resource::<modal::Runtime>()
+            .unwrap()
+            .model
+            .token()
+            .unwrap()
+            > next_token
+    );
+}
+
+#[test]
+fn launcher_overlays_share_one_background_snapshot_until_the_last_overlay_closes() {
+    use mirui::core::resource::ResourceManager;
+    use mirui::render::texture::Texture;
+    use mirui::ui::{Children, Parent};
+
+    let mut app = app([640, 480]);
+    let mut home = view(Page::Games);
+    home.library.kind = crate::model::LibraryKind::Favorites;
+    home.launcher.enabled = true;
+    let mut scene = draw(&mut app, &home).unwrap();
+    super::paint_at(&mut app, 1000).unwrap();
+    let background = app.world.find_by_id("launcher_background").unwrap();
+    let image_layer = app
+        .world
+        .find_by_id("launcher_background_snapshot_layer")
+        .unwrap();
+    let shell = app.world.get::<Parent>(image_layer).unwrap().0;
+    let order = app.world.get::<Children>(shell).unwrap().0.clone();
+    let modal = app
+        .world
+        .resource::<modal::Runtime>()
+        .unwrap()
+        .model
+        .clone();
+    let mut actions = home.clone();
+    actions.launcher.overlay = "系统设置".into();
+    actions.launcher.overlay_kind = "system".into();
+    actions.launcher.items = ["切换主题", "音效开关", "管理直连网络", "返回原系统", "关机"]
+        .into_iter()
+        .map(|name| crate::model::LauncherItem {
+            name: name.into(),
+            enabled: true,
+        })
+        .collect();
+    update(&mut scene, &actions).unwrap();
+    super::paint_at(&mut app, 1016).unwrap();
+    super::paint_at(&mut app, 1032).unwrap();
+    assert_eq!(modal.phase(), modal::Phase::Suspended);
+    assert!(modal.hidden() && modal.paused());
+    assert!(app.world.has::<mirui::ui::Hidden>(background));
+    let token = modal.token().unwrap();
+    let counts = scene.shelf.animation_counts();
+    for now in [1048, 1064, 1080] {
+        super::paint_at(&mut app, now).unwrap();
+        assert_eq!(modal.token(), Some(token));
+    }
+    assert_eq!(scene.shelf.animation_counts().0, counts.0);
+
+    let source = app
+        .world
+        .resource::<ResourceManager<Texture<'static>>>()
+        .unwrap()
+        .resolve(&modal::texture_token(token));
+    let pixels = app
+        .backend
+        .framebuffer()
+        .read_pixels()
+        .unwrap()
+        .bytes()
+        .to_vec();
+    let frozen = source.read_pixels().unwrap();
+    assert!(pixels[0] < frozen.bytes()[0]);
+    let bright = pixels
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3].iter().all(|channel| *channel > 160))
+        .count();
+    assert!(
+        bright > 640 * 480 / 4,
+        "The action panel must remain visible"
+    );
+    let action_root = app
+        .world
+        .query::<deck::ActorScope>()
+        .iter()
+        .find_map(|(node, scope)| {
+            matches!(scope, deck::ActorScope::Layer(deck::Layer::Actions)).then_some(node)
+        })
+        .unwrap();
+    let mut action_layer = action_root;
+    while app.world.get::<Parent>(action_layer).unwrap().0 != shell {
+        action_layer = app.world.get::<Parent>(action_layer).unwrap().0;
+    }
+    let position = |node| order.iter().position(|value| *value == node).unwrap();
+    let actor = app
+        .world
+        .query::<actor::ActorFrame>()
+        .iter()
+        .next()
+        .unwrap()
+        .0;
+    assert!(position(image_layer) < position(action_layer));
+    assert!(position(action_layer) < position(actor));
+
+    let mut room = view(Page::Lobby);
+    room.lobby = true;
+    room.return_to_launcher = true;
+    update(&mut scene, &room).unwrap();
+    super::paint_at(&mut app, 1096).unwrap();
+    super::paint_at(&mut app, 1500).unwrap();
+    assert_eq!(modal.token(), Some(token));
+    assert!(modal.hidden() && modal.paused());
+    actions.launcher.overlay_kind = "game".into();
+    actions.launcher.overlay = "超级马里奥世界".into();
+    update(&mut scene, &actions).unwrap();
+    super::paint_at(&mut app, 1516).unwrap();
+    assert_eq!(modal.token(), Some(token));
+    app.set_theme(crate::theme::Palette::Sunset.theme())
+        .unwrap();
+    super::paint_at(&mut app, 1532).unwrap();
+    super::paint_at(&mut app, 1548).unwrap();
+    assert!(modal.token().unwrap() > token);
+    assert_eq!(app.world.get::<Children>(shell).unwrap().0, order);
+    update(&mut scene, &home).unwrap();
+    super::paint_at(&mut app, 1564).unwrap();
+    super::paint_at(&mut app, 2000).unwrap();
+    assert_eq!(modal.phase(), modal::Phase::Live);
+    assert!(!modal.hidden() && !modal.paused());
+    assert!(modal.token().is_none());
+    assert!(!app.world.has::<mirui::ui::Hidden>(background));
+    assert_eq!(app.world.get::<Children>(shell).unwrap().0, order);
+}
+
+#[test]
+fn compressed_shelf_snapshot_preserves_pixels_and_reopens_current_contents() {
+    fn equivalent(app: &mut TestApp) {
+        let model = app
+            .world
+            .resource::<suspension::Runtime>()
+            .unwrap()
+            .model
+            .clone();
+        let token = model.token().unwrap();
+        let frozen = app
+            .backend
+            .framebuffer()
+            .read_pixels()
+            .unwrap()
+            .bytes()
+            .to_vec();
+        model.publish(false, false, None);
+        app.dirty_regions().unwrap();
+        app.render_dirty().unwrap();
+        let live = app
+            .backend
+            .framebuffer()
+            .read_pixels()
+            .unwrap()
+            .bytes()
+            .to_vec();
+        let changed = frozen
+            .chunks_exact(4)
+            .zip(live.chunks_exact(4))
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(
+            changed, 0,
+            "Compressed shelf pixels must match their retained source"
+        );
+        model.publish(true, true, Some(token));
+        app.dirty_regions().unwrap();
+        app.render_dirty().unwrap();
+    }
+
+    for size in [[480, 320], [640, 480], [800, 480]] {
+        let mut app = app(size);
+        let mut home = view(Page::Games);
+        home.library.kind = crate::model::LibraryKind::Favorites;
+        home.launcher.enabled = true;
+        home.launcher_shelf = Some(Box::new(home.clone()));
+        let mut scene = draw(&mut app, &home).unwrap();
+        super::paint_at(&mut app, 1000).unwrap();
+        let mut library = home.clone();
+        library.launcher.tab = 1;
+        library.library.kind = crate::model::LibraryKind::Platforms;
+        update(&mut scene, &library).unwrap();
+        for now in [1016, 2000, 2016, 2032] {
+            super::paint_at(&mut app, now).unwrap();
+        }
+        let model = app
+            .world
+            .resource::<suspension::Runtime>()
+            .unwrap()
+            .model
+            .clone();
+        assert!(model.hidden() && model.paused());
+        let mut token = model.token().unwrap();
+        equivalent(&mut app);
+        super::paint_at(&mut app, 2048).unwrap();
+        assert_eq!(model.token(), Some(token));
+        let source = app.world.find_by_id("shelf_snapshot_source").unwrap();
+        assert!(app.world.has::<mirui::ui::Hidden>(source));
+
+        let old_cards = scene.shelf.card_motion();
+        library.launcher_shelf.as_mut().unwrap().selected = 1;
+        update(&mut scene, &library).unwrap();
+        assert_eq!(scene.shelf.card_motion(), old_cards);
+        suspension::before_tick(&mut app);
+        assert!(
+            !model.hidden(),
+            "A changed selected row must release a frozen source before the clock advances"
+        );
+        for now in [2050, 2500, 2516, 2532] {
+            super::paint_at(&mut app, now).unwrap();
+        }
+        assert!(model.hidden());
+        assert_ne!(model.token(), Some(token));
+        token = model.token().unwrap();
+        equivalent(&mut app);
+
+        let mut overlay = library.clone();
+        overlay.launcher.overlay = "Settings".into();
+        overlay.launcher.overlay_kind = "system".into();
+        overlay.launcher.items = vec![crate::model::LauncherItem {
+            name: "Back".into(),
+            enabled: true,
+        }];
+        update(&mut scene, &overlay).unwrap();
+        super::paint_at(&mut app, 2548).unwrap();
+        super::paint_at(&mut app, 2564).unwrap();
+        assert_eq!(model.token(), Some(token));
+        update(&mut scene, &library).unwrap();
+        super::paint_at(&mut app, 2580).unwrap();
+        assert_eq!(model.token(), Some(token));
+
+        library.launcher_shelf.as_mut().unwrap().entries[0].name = "Updated favorite".into();
+        library.launcher_shelf.as_mut().unwrap().entries[0].favorite = true;
+        update(&mut scene, &library).unwrap();
+        super::paint_at(&mut app, 2596).unwrap();
+        assert!(!model.hidden());
+        super::paint_at(&mut app, 3284).unwrap();
+        super::paint_at(&mut app, 3300).unwrap();
+        super::paint_at(&mut app, 3316).unwrap();
+        let updated = model.token().unwrap();
+        assert_ne!(updated, token);
+        equivalent(&mut app);
+        app.set_theme(crate::theme::Palette::Sunset.theme())
+            .unwrap();
+        super::paint_at(&mut app, 3332).unwrap();
+        assert!(!model.hidden());
+        super::paint_at(&mut app, 3348).unwrap();
+        assert!(model.token().unwrap() > updated);
+        equivalent(&mut app);
+
+        update(&mut scene, &home).unwrap();
+        super::paint_at(&mut app, 3364).unwrap();
+        assert!(!model.hidden() && !model.paused());
+        assert!(model.token().is_none());
+        assert!(!app.world.has::<mirui::ui::Hidden>(source));
+        update(&mut scene, &library).unwrap();
+        super::paint_at(&mut app, 3380).unwrap();
+        update(&mut scene, &home).unwrap();
+        super::paint_at(&mut app, 3396).unwrap();
+        super::paint_at(&mut app, 4084).unwrap();
+        assert!(model.token().is_none());
+        assert!(!model.hidden() && !model.paused());
+    }
+}
+
+#[test]
+fn inactive_retained_displays_skip_transactions_and_keep_local_time() {
+    let mut direct_app = app([480, 320]);
+    let direct = view(Page::Choice);
+    let direct_scene = draw(&mut direct_app, &direct).unwrap();
+    for step in 1..=8 {
+        super::paint_at(&mut direct_app, step * 16).unwrap();
+    }
+    for state in [
+        &direct_scene.shelf,
+        &direct_scene.catalog,
+        &direct_scene.room,
+    ] {
+        assert_eq!(state.animation_counts(), (0, 8));
+    }
+
+    let mut app = app([480, 320]);
+    let mut home = view(Page::Games);
+    home.library.kind = crate::model::LibraryKind::Favorites;
+    home.launcher.enabled = true;
+    let mut scene = draw(&mut app, &home).unwrap();
+    for step in 1..=8 {
+        super::paint_at(&mut app, step * 16).unwrap();
+    }
+    assert_eq!(scene.shelf.animation_counts(), (8, 0));
+    assert_eq!(scene.catalog.animation_counts(), (0, 8));
+    assert_eq!(scene.room.animation_counts(), (0, 8));
+    let mut catalog = home.clone();
+    catalog.launcher.tab = 1;
+    update(&mut scene, &catalog).unwrap();
+    super::paint_at(&mut app, 144).unwrap();
+    assert_eq!(scene.catalog.animation_counts(), (1, 8));
+    assert_eq!(scene.catalog.card_motion().selection, 0);
+    super::paint_at(&mut app, 160).unwrap();
+    assert_eq!(scene.catalog.card_motion().selection, 16);
+
+    let mut room = view(Page::Mode);
+    room.return_to_launcher = true;
+    update(&mut scene, &room).unwrap();
+    super::paint_at(&mut app, 176).unwrap();
+    assert_eq!(scene.room.animation_counts(), (1, 10));
+    assert_eq!(scene.room.card_motion().selection, 0);
+    scene.press(176);
+    super::paint_at(&mut app, 192).unwrap();
+    assert_eq!(scene.room.card_motion().press, 0);
+    super::paint_at(&mut app, 208).unwrap();
+    assert_eq!(scene.room.card_motion().press, 16);
+    let global_launcher = super::launcher(&mut app);
+    assert_eq!(global_launcher.view(), room.launcher);
+}
+
+#[test]
+fn action_motion_damage_uses_only_the_panel_and_stops_when_settled() {
+    let mut app = app([640, 480]);
+    let mut current = view(Page::Games);
+    current.library.kind = crate::model::LibraryKind::Favorites;
+    current.launcher.enabled = true;
+    current.launcher.overlay = "系统设置".into();
+    current.launcher.overlay_kind = "system".into();
+    current.launcher.key = "owned-game".into();
+    current.launcher.items = (0..6)
+        .map(|index| crate::model::LauncherItem {
+            name: format!("操作 {index}"),
+            enabled: true,
+        })
+        .collect();
+    let mut scene = draw(&mut app, &current).unwrap();
+    super::paint_at(&mut app, 1000).unwrap();
+    current.launcher.selected = 1;
+    update(&mut scene, &current).unwrap();
+    let launcher = scene.state.launcher();
+    launcher.tick(1017);
+    let panel = app
+        .world
+        .query::<actions_damage::ActionsPanel>()
+        .iter()
+        .next()
+        .unwrap()
+        .0;
+    let region = app.world.get::<ComputedRect>(panel).unwrap().0;
+    assert!(region.w < 640.into() && region.h < 480.into());
+    let mut damage = actions_damage::ActionsDamage::default();
+    assert_eq!(damage.region(&app.world), Some(region));
+    assert_eq!(damage.region(&app.world), None);
+    launcher.tick(1034);
+    assert_eq!(damage.region(&app.world), Some(region));
+    assert_eq!(damage.region(&app.world), None);
+    current.launcher.key = "changed-game".into();
+    update(&mut scene, &current).unwrap();
+    assert_eq!(damage.region(&app.world), Some(region));
+    assert_eq!(damage.region(&app.world), None);
+    let shifted = Rect {
+        x: region.x + Fixed::ONE,
+        ..region
+    };
+    app.world.get_mut::<ComputedRect>(panel).unwrap().0 = shifted;
+    launcher.tick(1051);
+    assert_eq!(damage.region(&app.world), Some(region.union(&shifted)));
+    app.world.get_mut::<ComputedRect>(panel).unwrap().0 = region;
+    launcher.tick(1068);
+    assert_eq!(damage.region(&app.world), Some(region.union(&shifted)));
+    launcher.tick(1400);
+    assert_eq!(damage.region(&app.world), Some(region));
+    assert_eq!(damage.region(&app.world), None);
+    launcher.tick(1500);
+    assert_eq!(damage.region(&app.world), None);
+    current.launcher.selected = 2;
+    update(&mut scene, &current).unwrap();
+    launcher.tick(1517);
+    assert_eq!(damage.region(&app.world), Some(region));
+    current.launcher.overlay.clear();
+    update(&mut scene, &current).unwrap();
+    assert_eq!(damage.region(&app.world), Some(region));
+    assert_eq!(damage.region(&app.world), None);
+}
+
+#[test]
+fn static_cartridge_snapshots_follow_content_geometry_and_row_lifetime() {
+    let mut app = app([640, 480]);
+    let mut home = view(Page::Games);
+    home.library.kind = crate::model::LibraryKind::Favorites;
+    home.library.total = 6;
+    home.launcher.enabled = true;
+    home.entries = (0..6)
+        .map(|index| crate::model::GameRow {
+            key: format!("static-{index}"),
+            name: format!("Game {index}"),
+            icon: "nes".into(),
+            ..crate::model::GameRow::default()
+        })
+        .collect();
+    home.selected = 0;
+    home.launcher_shelf = Some(Box::new(home.clone()));
+    let mut scene = draw(&mut app, &home).unwrap();
+    let mut previous = 0;
+    for frame in 0..100 {
+        super::paint_at(&mut app, frame * 17).unwrap();
+        let (count, captures) = static_snapshot::counts(&app.world);
+        assert!(count <= shelf::MAX_VISIBLE);
+        assert!(
+            captures <= previous + 1,
+            "At most one static snapshot per normal tick"
+        );
+        previous = captures;
+    }
+    let pictures: Vec<_> = app
+        .world
+        .query::<static_snapshot::Source>()
+        .iter()
+        .map(|(_, source)| source.row.static_picture())
+        .collect();
+    assert_eq!(pictures.len(), 6);
+    assert!(
+        pictures
+            .iter()
+            .all(|picture| picture.hidden() && picture.token().is_some())
+    );
+    let captured = static_snapshot::counts(&app.world).1;
+    let source = app
+        .world
+        .query::<static_snapshot::Source>()
+        .iter()
+        .next()
+        .unwrap()
+        .0;
+    let wrapper = app.world.get::<mirui::ui::Parent>(source).unwrap().0;
+    let original = app.world.get::<ComputedRect>(wrapper).unwrap().0;
+    assert!(
+        original.w > Fixed::ZERO && original.h > Fixed::ZERO,
+        "Frozen content keeps its layout allocation"
+    );
+    home.selected = 1;
+    home.launcher_shelf.as_mut().unwrap().selected = 1;
+    update(&mut scene, &home).unwrap();
+    for frame in 100..160 {
+        super::paint_at(&mut app, frame * 17).unwrap();
+    }
+    assert_eq!(
+        static_snapshot::counts(&app.world).1,
+        captured,
+        "Selection motion does not recapture static content"
+    );
+    assert_eq!(app.world.get::<ComputedRect>(wrapper).unwrap().0, original);
+    app.set_theme(crate::theme::Palette::Sunset.theme())
+        .unwrap();
+    for frame in 160..220 {
+        super::paint_at(&mut app, frame * 17).unwrap();
+    }
+    assert_eq!(static_snapshot::counts(&app.world).1, captured + 6);
+    app.world
+        .get_mut::<mirui::ui::Style>(wrapper)
+        .unwrap()
+        .layout
+        .max_height = Dimension::px(original.h.to_int() - 4);
+    app.world.invalidate(wrapper);
+    for frame in 220..280 {
+        super::paint_at(&mut app, frame * 17).unwrap();
+    }
+    let resized = app.world.get::<ComputedRect>(wrapper).unwrap().0;
+    assert!(resized.h > Fixed::ZERO && resized.h < original.h);
+    assert_eq!(
+        static_snapshot::counts(&app.world).1,
+        captured + 7,
+        "Only the resized picture is recaptured"
+    );
+    home.entries.truncate(1);
+    home.entries[0].key = "replacement".into();
+    home.library.total = 1;
+    home.selected = 0;
+    home.launcher_shelf = Some(Box::new({
+        let mut shelf = home.clone();
+        shelf.launcher_shelf = None;
+        shelf
+    }));
+    update(&mut scene, &home).unwrap();
+    for frame in 280..360 {
+        super::paint_at(&mut app, frame * 17).unwrap();
+    }
+    assert_eq!(
+        static_snapshot::counts(&app.world).0,
+        1,
+        "Retired members release their snapshots before another member is read"
+    );
+}
+
+#[test]
+fn platform_preview_retains_console_entities_across_selection_changes() {
+    use mirui::ui::{Hidden, Parent};
+    let mut app = app([640, 480]);
+    let mut current = view(Page::Games);
+    current.platforms = true;
+    current.library.kind = crate::model::LibraryKind::Platforms;
+    current.library.total = 4;
+    current.entries = ["nes", "snes", "gba", "psx"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, platform)| crate::model::GameRow {
+            key: format!("retained-{index}"),
+            name: platform.into(),
+            icon: platform.into(),
+            available: true,
+            ..Default::default()
+        })
+        .collect();
+    let mut scene = draw(&mut app, &current).unwrap();
+    super::paint_at(&mut app, 1000).unwrap();
+    let preview = app
+        .world
+        .query::<Style>()
+        .iter()
+        .find_map(|(entity, style)| {
+            let rect = app.world.get::<ComputedRect>(entity)?.0;
+            (rect.w > Fixed::from_int(100)
+                && rect.h > Fixed::from_int(100)
+                && style.bg_color == Some(style::PANEL.into()))
+            .then_some(entity)
+        })
+        .unwrap();
+    let descendants = |app: &TestApp| {
+        app.world
+            .query::<Style>()
+            .iter()
+            .filter_map(|(entity, _)| {
+                selection::contains(preview, entity, |node| {
+                    app.world.get::<Parent>(node).map(|p| p.0)
+                })
+                .then_some(entity)
+            })
+            .collect::<Vec<_>>()
+    };
+    let members = descendants(&app);
+    let layers: Vec<_> = members
+        .iter()
+        .copied()
+        .filter(|entity| {
+            app.world.get::<Style>(*entity).unwrap().layout.position == Position::Absolute
+                && app.world.get::<Parent>(*entity).map(|p| p.0) == Some(preview)
+        })
+        .collect();
+    assert_eq!(layers.len(), 4);
+    for (step, selected) in [1, 2, 3, 0].into_iter().enumerate() {
+        current.selected = selected;
+        update(&mut scene, &current).unwrap();
+        super::paint_at(&mut app, 1016 + step as u64 * 16).unwrap();
+        assert_eq!(descendants(&app), members);
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|node| !app.world.has::<Hidden>(**node))
+                .count(),
+            1
+        );
+    }
 }

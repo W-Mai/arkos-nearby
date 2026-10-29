@@ -1,5 +1,4 @@
 use super::{
-    cache::GpuLayerCache,
     state::{DisplayState, TextField},
     style::*,
 };
@@ -63,7 +62,6 @@ where
             clip_children: true
         ) [
             FONT_PAINT,
-            GpuLayerCache,
         ]
     }
 }

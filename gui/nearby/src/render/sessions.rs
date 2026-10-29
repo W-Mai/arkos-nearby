@@ -160,7 +160,6 @@ fn network_devices(rows: &[crate::model::NetworkPeer], metrics: Metrics) -> Enti
                         clip_children: true
                     ) [
                         FONT_PAINT,
-                        super::cache::GpuLayerCache,
                     ]
                     Text (
                         device.address.clone(),
@@ -173,7 +172,6 @@ fn network_devices(rows: &[crate::model::NetworkPeer], metrics: Metrics) -> Enti
                         paragraph: paragraph(End, 1)
                     ) [
                         FONT_PAINT,
-                        super::cache::GpuLayerCache,
                     ]
                 }
             }

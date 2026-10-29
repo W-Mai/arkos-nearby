@@ -7,6 +7,7 @@ use mirui::ui::widgets::page_view;
 use state::{DisplayHandle, PageKey};
 use style::{ACCENT_DIM, BACKGROUND, Metrics};
 
+mod actions_damage;
 mod actor;
 mod artwork;
 mod cache;
@@ -20,6 +21,7 @@ mod font;
 mod launcher;
 mod library;
 mod lists;
+mod modal;
 pub(crate) mod motion;
 mod pages;
 mod pixel;
@@ -28,7 +30,9 @@ mod selection;
 mod sessions;
 mod shelf;
 mod state;
+mod static_snapshot;
 mod style;
+mod suspension;
 mod widgets;
 
 #[component]
@@ -61,8 +65,13 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     app.with_widget(pixel::scenery::view());
     app.with_widget(cache::gpu_layer::view());
     font::install(app)?;
+    modal::install(app);
+    static_snapshot::install(app);
+    suspension::install(app);
     state::install(app);
     artwork::install(app)?;
+    app.add_plugin(actions_damage::ActionsDamage::default());
+    app.add_plugin(cache::CacheBoundaryPaint::default());
     Ok(())
 }
 
@@ -252,10 +261,15 @@ pub fn paint_at<B: Surface, F: RendererFactory<B>>(
 }
 
 pub fn tick<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result<(), String> {
+    modal::before_tick(app);
+    suspension::before_tick(app);
+    static_snapshot::before_tick(app);
     if app.tick() {
         Err("The display requested shutdown".into())
     } else {
-        Ok(())
+        static_snapshot::after_tick(app);
+        suspension::after_tick(app);
+        modal::after_tick(app)
     }
 }
 

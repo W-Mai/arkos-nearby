@@ -825,34 +825,34 @@
   },
   {
     "name": "mirui",
-    "version": "0.51.0",
+    "version": "0.53.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "3f0289771a66b0d909cc2e1c5ffee88d67332d4ebf0748bc17c051ee65a4b3f1",
+    "checksum": "180a249e0594a77bdfa009eeec97aa01d03d2dcf075ba48cc7d53bddad6c334a",
     "license_files": [
-      "docs/licenses/rust/mirui-0.51.0/LICENSE"
+      "docs/licenses/rust/mirui-0.53.0/LICENSE"
     ],
     "included": true
   },
   {
     "name": "mirui-macros",
-    "version": "0.51.0",
+    "version": "0.53.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "f7f519ed4d179d89a7e31eec296aa8fc425aac60393571db967f20d34bbc8129",
+    "checksum": "fad12105b90ff024b2ca3e4396f9a7e605802d3508a4f527c21a6c726e477578",
     "license_files": [
-      "docs/licenses/rust/mirui-0.51.0/LICENSE"
+      "docs/licenses/rust/mirui-0.53.0/LICENSE"
     ],
     "included": true
   },
   {
     "name": "mirx",
-    "version": "0.51.0",
+    "version": "0.53.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "7426359c11cde390881df841689352ad1e62d31e1982cd9a073f7979e461d480",
+    "checksum": "8002ec721b7a973848fdd1b4d41951776627a5220ddbe6103eccb19555c4811a",
     "license_files": [
-      "docs/licenses/rust/mirui-0.51.0/LICENSE"
+      "docs/licenses/rust/mirui-0.53.0/LICENSE"
     ],
     "included": true
   },

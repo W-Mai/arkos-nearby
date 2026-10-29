@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-30
+
+- Improve browsing responsiveness in Favorites, the game library and multiplayer panels.
+- Keep favorite titles and artwork consistent through selection changes and page returns.
+- Load visible and neighboring artwork asynchronously and share decoded images across pages.
+- Reuse settled cartridge images and reduce repeated menu text rendering.
+- Preserve the installed GPU renderer during manual updates.
+
 ## [0.9.1] - 2026-10-21
 
 - Improve animation performance in the game library, Favorites and multiplayer panels.

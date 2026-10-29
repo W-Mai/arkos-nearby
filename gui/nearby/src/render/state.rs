@@ -7,6 +7,7 @@ use mirui::core::model::ModelList;
 use mirui::prelude::*;
 use mirui::surface::Surface;
 use mirui::ui::widgets::navigation::{PageDirection, PageTransition};
+use std::rc::Rc;
 
 #[derive(Clone, Copy)]
 pub(super) enum TextField {
@@ -31,6 +32,18 @@ struct LibraryPresentation {
     platforms: bool,
     artwork: String,
     artwork_neighbors: Vec<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DisplayRole {
+    Primary,
+    Shelf,
+    Catalog,
+    Room,
+}
+
+fn renders_rows(role: DisplayRole, view: &View) -> bool {
+    role != DisplayRole::Primary || !(view.launcher.enabled || view.return_to_launcher)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -81,6 +94,7 @@ impl Changes {
     )
 )]
 pub(super) struct DisplayState {
+    role: DisplayRole,
     #[observe]
     pub(super) artwork_token: Option<u64>,
     pub(super) cover_bounds: model!(owned super::artwork::CoverBounds),
@@ -89,6 +103,7 @@ pub(super) struct DisplayState {
     pub(super) deck_height: Fixed,
     view: View,
     library: LibraryPresentation,
+    artwork_revision: u64,
     pub(crate) launcher: model!(owned crate::launcher::Launcher),
     pub(crate) settings: model!(owned crate::settings::Settings),
     direction: PageDirection,
@@ -120,6 +135,7 @@ pub(super) struct DisplayState {
     feedback: crate::feedback::Feedback,
     #[observe]
     pub(super) motion: super::motion::Frame,
+    animation_gate: Option<Rc<super::modal::AnimationGate>>,
 }
 
 #[model]
@@ -134,6 +150,8 @@ impl DisplayState {
     }
 
     pub(super) fn present(&mut self, view: &View) -> Changes {
+        let bind_rows = renders_rows(self.role, view);
+        let binding_activated = bind_rows && !renders_rows(self.role, &self.view);
         self.launcher.present(view);
         self.shelf.present(view);
         let mut changes = Changes::NONE;
@@ -209,7 +227,7 @@ impl DisplayState {
                 .iter()
                 .skip(first)
                 .take(4));
-        if rooms_changed {
+        if bind_rows && (rooms_changed || binding_activated) {
             let rows: Vec<_> = view
                 .rooms
                 .iter()
@@ -229,13 +247,16 @@ impl DisplayState {
             } else {
                 4
             };
-            if self
-                .library
-                .entries
-                .iter()
-                .take(limit)
-                .ne(view.entries.iter().take(limit))
+            if bind_rows
+                && (binding_activated
+                    || self
+                        .library
+                        .entries
+                        .iter()
+                        .take(limit)
+                        .ne(view.entries.iter().take(limit)))
             {
+                self.artwork_revision = self.artwork_revision.wrapping_add(1);
                 self.row_revision = self.row_revision.wrapping_add(1);
                 let entries = view
                     .entries
@@ -244,7 +265,25 @@ impl DisplayState {
                     .enumerate()
                     .map(|(i, row)| Row::game(i, row))
                     .collect();
-                rows::reconcile(&mut self.entries, entries, self.row_revision);
+                if self.role == DisplayRole::Catalog
+                    && view.page == Page::Games
+                    && !view.platforms
+                    && view.library.kind == crate::model::LibraryKind::Directory
+                {
+                    rows::reconcile_slots(&mut self.entries, entries, self.row_revision);
+                } else {
+                    rows::reconcile(&mut self.entries, entries, self.row_revision);
+                }
+            }
+            if self.library.artwork != view.artwork
+                || self
+                    .library
+                    .artwork_neighbors
+                    .iter()
+                    .ne(view.artwork_neighbors.iter().take(2))
+                || self.library.detail.kind != view.library.kind
+            {
+                self.artwork_revision = self.artwork_revision.wrapping_add(1);
             }
             self.library = LibraryPresentation {
                 entries: view.entries.iter().take(limit).cloned().collect(),
@@ -408,6 +447,10 @@ impl DisplayState {
         self.library.artwork.clone()
     }
 
+    pub(super) fn artwork_revision(&self) -> u64 {
+        self.artwork_revision
+    }
+
     pub(super) fn artwork_neighbors(&self) -> Vec<String> {
         self.library.artwork_neighbors.clone()
     }
@@ -539,7 +582,23 @@ impl DisplayState {
     }
 
     pub(super) fn press(&mut self, now: u64) -> Changes {
+        let now = self
+            .animation_gate
+            .as_ref()
+            .map_or(now, |gate| gate.local(now));
         self.feedback.press(now);
+        Changes::NONE
+    }
+
+    pub(super) fn animation_counts(&self) -> (u64, u64) {
+        self.animation_gate
+            .as_ref()
+            .map_or((0, 0), |gate| gate.counts())
+    }
+
+    pub(super) fn advance_frame(&mut self, now: u64, theme: &mirui::ui::theme::Theme) -> Changes {
+        self.frame(now, theme);
+        self.launcher.tick(now);
         Changes::NONE
     }
 
@@ -644,13 +703,26 @@ pub(super) struct DisplayRuntime {
     pub catalog: DisplayHandle,
     pub room: DisplayHandle,
     pub deck: super::deck::DeckHandle,
+    animation_gates: [Rc<super::modal::AnimationGate>; 3],
 }
 
 pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
-    let state = register(app, false);
-    let shelf = register(app, true);
-    let catalog = register(app, false);
-    let room = register(app, false);
+    let gates = app
+        .world
+        .resource::<super::modal::Runtime>()
+        .unwrap()
+        .gates
+        .clone();
+    let gates = [
+        gates[0].clone(),
+        gates[1].clone(),
+        Rc::new(super::modal::AnimationGate::default()),
+    ];
+    let state = register(app, DisplayRole::Primary, None);
+    let shelf = register(app, DisplayRole::Shelf, Some(gates[0].clone()));
+    let catalog = register(app, DisplayRole::Catalog, Some(gates[1].clone()));
+    let room = register(app, DisplayRole::Room, Some(gates[2].clone()));
+    app.add_system(advance::system());
     let deck = app.add_model(super::deck::Deck::default()).finish();
     app.add_system(advance_deck::system(deck.clone()));
     app.add_system(super::cache::settled_layer::system());
@@ -663,54 +735,56 @@ pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
         catalog,
         room,
         deck,
+        animation_gates: gates,
     });
 }
 
 fn register<B: Surface, F: RendererFactory<B>>(
     app: &mut App<B, F>,
-    launcher_shelf: bool,
+    role: DisplayRole,
+    animation_gate: Option<Rc<super::modal::AnimationGate>>,
 ) -> DisplayHandle {
-    let state = app
-        .add_model(DisplayState {
-            artwork_token: None,
-            cover_bounds: super::artwork::CoverBounds::default().into(),
-            shelf: super::shelf::Shelf::new(launcher_shelf).into(),
-            deck_height: Fixed::ZERO,
-            view: View::default(),
-            library: LibraryPresentation::default(),
-            query: String::new(),
-            launcher: crate::launcher::Launcher::default().into(),
-            settings: crate::settings::Settings::default().into(),
-            direction: PageDirection::Forward,
-            rooms: ModelList::bounded(4).into(),
-            entries: ModelList::bounded(super::shelf::MAX_VISIBLE).into(),
-            row_revision: 0,
-            devices: Vec::new(),
-            room_name: String::new(),
-            heading: String::new(),
-            subtitle: String::new(),
-            status: String::new(),
-            hint: String::new(),
-            back: String::new(),
-            headline: String::new(),
-            next: String::new(),
-            host_button: String::new(),
-            peer: String::new(),
-            confirm: String::new(),
-            confirm_visible: false,
-            steps: [StepColors {
-                background: PANEL,
-                foreground: DISABLED,
-            }; 3],
-            stamp: app.theme().resolve(ACCENT_DIM),
-            activity: [app.theme().resolve(BACKGROUND); 3],
-            timeline: super::motion::Timeline::default(),
-            feedback: crate::feedback::Feedback::default(),
-            motion: super::motion::Frame::default(),
-        })
-        .finish();
-    app.add_system(advance::system(state.clone()));
-    state
+    app.add_model(DisplayState {
+        role,
+        artwork_token: None,
+        cover_bounds: super::artwork::CoverBounds::default().into(),
+        shelf: super::shelf::Shelf::new(role == DisplayRole::Shelf).into(),
+        deck_height: Fixed::ZERO,
+        view: View::default(),
+        library: LibraryPresentation::default(),
+        artwork_revision: 0,
+        query: String::new(),
+        launcher: crate::launcher::Launcher::default().into(),
+        settings: crate::settings::Settings::default().into(),
+        direction: PageDirection::Forward,
+        rooms: ModelList::bounded(4).into(),
+        entries: ModelList::bounded(super::shelf::MAX_VISIBLE).into(),
+        row_revision: 0,
+        devices: Vec::new(),
+        room_name: String::new(),
+        heading: String::new(),
+        subtitle: String::new(),
+        status: String::new(),
+        hint: String::new(),
+        back: String::new(),
+        headline: String::new(),
+        next: String::new(),
+        host_button: String::new(),
+        peer: String::new(),
+        confirm: String::new(),
+        confirm_visible: false,
+        steps: [StepColors {
+            background: PANEL,
+            foreground: DISABLED,
+        }; 3],
+        stamp: app.theme().resolve(ACCENT_DIM),
+        activity: [app.theme().resolve(BACKGROUND); 3],
+        timeline: super::motion::Timeline::default(),
+        feedback: crate::feedback::Feedback::default(),
+        motion: super::motion::Frame::default(),
+        animation_gate,
+    })
+    .finish()
 }
 
 #[system(order = Animation)]
@@ -727,12 +801,42 @@ pub(super) fn display_state() -> DisplayHandle {
 
 #[system(order = Animation)]
 fn advance(
-    state: model!(DisplayState),
+    runtime: res!(DisplayRuntime),
     clock: res!(optional mirui::ecs::MonoClock),
     theme: res!(mirui::ui::theme::Theme),
+    modal: res!(super::modal::Runtime),
+    suspension: res!(super::suspension::Runtime),
 ) {
     if let Some(clock) = clock {
-        state.frame(clock.now_ns() / 1_000_000, &theme);
-        state.launcher().tick(clock.now_ns() / 1_000_000);
+        let now = clock.now_ns() / 1_000_000;
+        // The primary model owns the live gesture and shared actor even when
+        // retained display layers are hidden or represented by a frozen image.
+        runtime.state.advance_frame(now, &theme);
+        let mut active = display_activity(&runtime.deck, modal.model.paused());
+        active[0] &= !suspension.model.paused();
+        for ((state, gate), active) in [
+            (&runtime.shelf, &runtime.animation_gates[0]),
+            (&runtime.catalog, &runtime.animation_gates[1]),
+            (&runtime.room, &runtime.animation_gates[2]),
+        ]
+        .into_iter()
+        .zip(active)
+        {
+            if let Some(now) = gate.sample(now, !active) {
+                state.advance_frame(now, &theme);
+            }
+        }
     }
+}
+
+fn display_activity(deck: &super::deck::DeckHandle, background_paused: bool) -> [bool; 3] {
+    use super::deck::Layer;
+    if !deck.enabled() {
+        return [false; 3];
+    }
+    [
+        !background_paused,
+        !background_paused && (deck.expansion() > Fixed::ZERO || deck.layer() == Layer::Catalog),
+        deck.panel() > Fixed::ZERO || deck.layer() == Layer::Room,
+    ]
 }

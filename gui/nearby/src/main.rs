@@ -532,7 +532,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [argument] if argument == "--version" => {
-            println!("arkos-nearby-gui 0.1.0 (mirui 0.51.0)");
+            println!("arkos-nearby-gui 0.1.0 (mirui 0.53.0)");
             Ok(())
         }
         #[cfg(all(target_os = "linux", not(feature = "gpu")))]

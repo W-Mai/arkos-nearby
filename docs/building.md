@@ -9,7 +9,7 @@
 ## 准备
 
 ```sh
-python3 scripts/build.py prepare /path/to/arkos-nearby-0.9.1-build-assets.tar.gz
+python3 scripts/build.py prepare /path/to/arkos-nearby-0.10.0-build-assets.tar.gz
 cargo +1.92.0 fetch --locked --manifest-path native/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 ```
@@ -20,7 +20,7 @@ cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarc
 CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path/to/llvm-ar python3 scripts/build.py build
 ```
 
-输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.51.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
+输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.53.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
 
 GUI 通过 `scripts/build_nearby_gui.py` 构建和检查，直接使用 Cargo.lock 锁定的 registry 包。构建记录包含 mirui、mirui-macros、mirx 的 crate 校验和、应用源码摘要和实际锁文件摘要。页面由 PageView 挂载和释放，焦点框通过 FollowBounds 与共享动画调度跟随目标。灰度位图字体的采样外缘使用 PaintInflate 计入重绘覆盖。源码、Clippy、测试和 ARM64 构建使用同一份未修改的框架包。
 
@@ -32,7 +32,7 @@ Options 和主页 FN + X 使用直接入口，游戏启动前的 X 入口携带�
 
 `catalog/metadata.rs` 读取本机游戏列表名称、截图和数量；`catalog/matching.rs` 在客户端取得房间描述后匹配本地内容。候选项以会话内标识选择，准备完成仍需核对模拟器、核心和内容身份。`render/artwork.rs` 异步读取选中游戏的截图，通过资源管理器和 Image 控件显示；过期选择的读取结果会被丢弃，图片保持原始比例。
 
-先执行 `python3 scripts/build_nearby_gui.py build` 生成当前源码对应的 GUI 和来源记录，再执行质量检查。`release/manifest.json` 和 `release/assets.json` 保留已发行安装资产的身份；构建时将当前 GUI、字体许可证及来源记录放入新的本地 bundle。
+准备的发行资产包含静态GLES界面，常规构建核验后复用这份程序。修改GUI源码后，按[GPU构建说明](gpu-rendering.md)重新生成界面到`build/assets/`，再执行构建与质量检查。`release/manifest.json`和`release/assets.json`保留已发行安装资产的身份；构建时将当前GUI、字体许可证及来源记录放入新的本地bundle。
 
 准备发行归档时，先完成构建和校验，再执行 `python3 scripts/package.py --binary dist/arkos-nearby --expected-sha256 VERIFIED_SHA256`。将 `VERIFIED_SHA256` 替换为构建结果的 SHA-256。程序核对摘要与 ARM64 ELF 类型，打包安装脚本、使用说明和许可证。
 

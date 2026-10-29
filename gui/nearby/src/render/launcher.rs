@@ -83,22 +83,57 @@ pub(super) fn deck(
         library: LibraryKind::Favorites,
         network_only: false,
     };
+    let modal = res!(super::modal::Runtime).with(|runtime| runtime.model.clone());
+    let snapshot = modal.clone();
     ui! {
         Column (grow: 1.0, min_height: 0, bg_color: BACKGROUND) {
-            header (route, shelf, metrics)
-            View (height: metrics.rule_height(), shrink: 0.0, bg_color: WARNING)
             Column (
+                id: "launcher_background",
                 grow: 1.0,
                 min_height: 0,
-                padding: metrics.page_padding(),
-                row_gap: metrics.gap
-            ) {
-                backdrop (Margins)
-                Column (id: "launcher_deck", grow: 1.0, min_height: 0, container: true) {
-                    shelf_viewport (shelf, deck, metrics)
-                    catalog_viewport (catalog, deck, metrics)
-                } on SizeChanged { deck.set_height(event.new.height); }
-                footer (route, state, metrics)
+                visible: ${ !modal.hidden() },
+                bg_color: BACKGROUND
+            ) [
+                super::modal::BackgroundRoot,
+            ] {
+                header (route, shelf, metrics)
+                View (height: metrics.rule_height(), shrink: 0.0, bg_color: WARNING)
+                Column (
+                    grow: 1.0,
+                    min_height: 0,
+                    padding: metrics.page_padding(),
+                    row_gap: metrics.gap
+                ) {
+                    backdrop (Margins)
+                    Column (id: "launcher_deck", grow: 1.0, min_height: 0, container: true) {
+                        shelf_viewport (shelf, deck, metrics)
+                        catalog_viewport (catalog, deck, metrics)
+                    } on SizeChanged { deck.set_height(event.new.height); }
+                    footer (route, state, metrics)
+                }
+            }
+            View (
+                id: "launcher_background_snapshot_layer",
+                position: Position::Absolute,
+                left: 0,
+                top: 0,
+                width: Dimension::percent(100),
+                height: Dimension::percent(100)
+            ) [
+                mirui::ui::IgnoreHitTest,
+            ] {
+                walk ${ snapshot.token().into_iter() } with revision by revision {
+                    Image (
+                        position: Position::Absolute,
+                        left: 0,
+                        top: 0,
+                        width: Dimension::percent(100),
+                        height: Dimension::percent(100),
+                        src: super::modal::texture_token(revision)
+                    ) [
+                        mirui::ui::IgnoreHitTest,
+                    ]
+                }
             }
             Column (
                 visible: ${ deck.panel() > Fixed::ZERO },
@@ -108,7 +143,7 @@ pub(super) fn deck(
                 width: Dimension::percent(100),
                 height: Dimension::percent(100),
                 bg_color: ${ Color::rgba(7, 16, 12, (deck.panel() * Fixed::from_int(185)).to_int() as u8) },
-                padding: Padding::all(metrics.gap * 2),
+                padding: metrics.modal_padding(),
                 justify: JustifyContent::Center,
                 align: AlignItems::Stretch
             ) {
@@ -139,7 +174,7 @@ pub(super) fn deck(
                 }
                 shadow (metrics)
             }
-            overlay (state.clone(), metrics)
+            primary_overlay (state.clone(), metrics)
             actor (state, deck)
         }
     }
@@ -149,7 +184,15 @@ pub(super) fn deck(
 pub(super) fn overlay(display: model!(DisplayState), metrics: Metrics) -> Entity {
     let state = display.launcher();
     ui! {
-        graphical_overlay (display, state, metrics)
+        graphical_overlay (display, state, metrics, false)
+    }
+}
+
+#[compose]
+fn primary_overlay(display: model!(DisplayState), metrics: Metrics) -> Entity {
+    let state = display.launcher();
+    ui! {
+        graphical_overlay (display, state, metrics, true)
     }
 }
 
@@ -158,6 +201,7 @@ fn graphical_overlay(
     display: model!(DisplayState),
     state: model!(Launcher),
     metrics: Metrics,
+    primary: bool,
 ) -> Entity {
     ui! {
         View (
@@ -168,6 +212,9 @@ fn graphical_overlay(
             height: Dimension::percent(100)
         ) [
             mirui::ui::IgnoreHitTest,
+            super::actions_damage::ActionsHost {
+                primary,
+            },
         ] {
             if ${ state.view().enabled && !state.view().overlay.is_empty() } {
                 Column (
@@ -176,12 +223,12 @@ fn graphical_overlay(
                     top: 0,
                     width: Dimension::percent(100),
                     height: Dimension::percent(100),
-                    padding: metrics.page_padding(),
+                    padding: metrics.modal_padding(),
                     justify: JustifyContent::Center,
                     bg_color: Color::rgba(7, 16, 12, 185)
                 ) {
                     Column (
-                        height: Dimension::percent(85),
+                        grow: 1.0,
                         min_height: 0,
                         padding: Padding::all(metrics.gap * 2),
                         row_gap: metrics.gap,
@@ -190,6 +237,7 @@ fn graphical_overlay(
                         border_color: DIVIDER
                     ) [
                         ActorScope::Layer(Layer::Actions),
+                        super::actions_damage::ActionsPanel,
                     ] {
                         backdrop (Margins)
                         overlay_label (state, None, metrics)
@@ -443,9 +491,62 @@ fn shelf_viewport(state: model!(DisplayState), deck: model!(Deck), metrics: Metr
     ui! {
         Column (position: Position::Absolute, width: Dimension::percent(100), top: 0, height: ${ Dimension::Percent(shelf_share(deck.expansion()) * Fixed::from_int(100)) }, clip_children: true, min_height: 0, container: true) {
             Column (position: Position::Absolute, top: 0, width: Dimension::percent(100), height: @(id("launcher_deck").height as height) { height }, transform: ${ super::deck::shelf_transform(deck.expansion(), deck.height()) }, padding: Padding::all(metrics.gap), min_height: 0) [ActorScope::Layer(Layer::Shelf)] {
-                library_page (route, state, metrics)
+                shelf_snapshot_page (route, state, metrics)
             }
         }
+    }
+}
+
+#[compose]
+fn shelf_snapshot_page(route: PageKey, state: model!(DisplayState), metrics: Metrics) -> Entity {
+    let frozen = res!(super::suspension::Runtime).with(|runtime| runtime.model.clone());
+    let image = frozen.clone();
+    let body = ui! {
+        Column (
+            id: "shelf_snapshot_surface",
+            grow: 1.0,
+            min_width: 0,
+            min_height: 0,
+            container: true
+        ) {
+            Column (
+                id: "shelf_snapshot_source",
+                grow: 1.0,
+                min_width: 0,
+                min_height: 0,
+                visible: ${ !frozen.hidden() }
+            ) [
+                super::suspension::ShelfSource,
+                super::cache::SettledLayerCache {
+                    state: state.clone(),
+                    backdrop: true,
+                },
+            ] {
+                library (route.library, state, metrics)
+            }
+            View (
+                position: Position::Absolute,
+                left: 0,
+                top: 0,
+                width: Dimension::percent(100),
+                height: Dimension::percent(100)
+            ) [
+                mirui::ui::IgnoreHitTest,
+            ] {
+                walk ${ image.token().into_iter() } with revision by revision {
+                    Image (
+                        width: Dimension::percent(100),
+                        height: Dimension::percent(100),
+                        src: super::suspension::texture_token(revision)
+                    ) [
+                        mirui::ui::IgnoreHitTest,
+                    ]
+                }
+            }
+        }
+    };
+    ui! {
+        focus_frame (body, route, state)
     }
 }
 

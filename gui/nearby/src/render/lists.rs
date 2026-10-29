@@ -173,15 +173,34 @@ pub(super) fn games(state: model!(DisplayState), metrics: Metrics) -> Entity {
                 row_gap: metrics.gap
             ) {
                 if ${ state.platforms() } {
-                    Column (grow: 1.0, min_height: 0, bg_color: PANEL) {
-                        walk ${ std::iter::once(state.selected_platform()) } with platform by platform {
-                            console (platform)
+                    Column (grow: 1.0, min_height: 0, bg_color: PANEL, container: true) {
+                        walk ${ state.entries().entries() } with item by item.0 {
+                            platform_preview_layer (state, item.1)
                         }
                     }
                 } else {
                     preview (state, metrics)
                 }
                 preview_label (state, metrics)
+            }
+        }
+    }
+}
+
+#[compose]
+fn platform_preview_layer(state: model!(DisplayState), row: model!(Row)) -> Entity {
+    let visible = row.clone();
+    ui! {
+        View (
+            position: Position::Absolute,
+            left: 0,
+            top: 0,
+            width: Dimension::percent(100),
+            height: Dimension::percent(100),
+            visible: ${ visible.index() == state.library_selection() }
+        ) {
+            walk ${ std::iter::once(row.platform()) } with platform by platform {
+                console (platform)
             }
         }
     }
@@ -282,7 +301,9 @@ fn row_label(row: model!(Row), size: u16, title: bool, lines: u16) -> Entity {
 #[compose]
 fn platform_icon(row: model!(Row)) -> Entity {
     ui! {
-        View (width: 24, height: 24, shrink: 0.0) {
+        View (width: 24, height: 24, shrink: 0.0) [
+            super::cache::GpuLayerCache,
+        ] {
             walk ${ std::iter::once(row.platform()) } with platform by platform {
                 console (platform)
             }

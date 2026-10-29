@@ -1,7 +1,6 @@
 use super::state::PageKey;
 use super::{
     Section,
-    cache::GpuLayerCache,
     choices::choice,
     chrome::{footer, header},
     library::library,
@@ -70,7 +69,6 @@ pub(super) fn page(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                                 paragraph: paragraph(Start, 1)
                             ) [
                                 FONT_PAINT,
-                                GpuLayerCache,
                             ]
                             Row (
                                 width: if view.page == Page::Lobby { 0 } else { 36 },
@@ -105,7 +103,6 @@ pub(super) fn page(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                         ) [
                             FONT_PAINT,
                             Section::Status,
-                            GpuLayerCache,
                         ]
                     }
                     if view.network_only && matches!(view.page, Page::Host | Page::Joined) {

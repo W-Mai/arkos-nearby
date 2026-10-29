@@ -2,7 +2,6 @@ use super::pixel::Stage::Walker;
 use super::state::PageKey;
 use super::{
     Section,
-    cache::GpuLayerCache,
     pixel::{self, Scenery, art},
     selection::FocusTarget,
     state::DisplayState,
@@ -80,7 +79,6 @@ pub(super) fn choice(view: PageKey, state: model!(DisplayState), metrics: Metric
                                     paragraph: paragraph(Center, 1)
                                 ) [
                                     FONT_PAINT,
-                                    GpuLayerCache,
                                 ]
                             }
                             label (card.1, metrics.title, FOREGROUND, Center)
@@ -96,7 +94,6 @@ pub(super) fn choice(view: PageKey, state: model!(DisplayState), metrics: Metric
                                     paragraph: paragraph(Center, 2)
                                 ) [
                                     FONT_PAINT,
-                                    GpuLayerCache,
                                 ]
                             }
                         }

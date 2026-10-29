@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -54,6 +55,8 @@ mod library_tests {
                 })
                 .collect(),
             selected: 0,
+            offset: 0,
+            total: 5,
         });
         let first = browser.view();
         let rows = first["entries"].as_array().unwrap();
@@ -91,6 +94,8 @@ mod library_tests {
             path: None,
             entries: Vec::new(),
             selected: 0,
+            offset: 0,
+            total: 0,
         });
         browser.personal.favorites.clear();
         browser.favorites();
@@ -174,12 +179,64 @@ mod library_tests {
                 path: None,
                 entries: vec![entry.clone(); 100],
                 selected: 99,
+                offset: 0,
+                total: 100,
             }];
             let view = browser.view();
             let entries = view["entries"].as_array().unwrap();
             assert!(entries.len() <= 4);
             assert!(view["selected"].as_u64().unwrap() < entries.len() as u64);
         }
+    }
+
+    #[test]
+    fn large_directory_keeps_a_window_while_navigation_preserves_position() {
+        let root = std::env::temp_dir().join(format!(
+            "nearby-window-{}",
+            crate::system::random_id().unwrap()
+        ));
+        let platform_path = root.join("nes");
+        std::fs::create_dir_all(&platform_path).unwrap();
+        for index in 0..40 {
+            std::fs::write(platform_path.join(format!("game-{index:02}.nes")), b"game").unwrap();
+        }
+        let root = root.canonicalize().unwrap();
+        let platform_path = root.join("nes");
+        let platform = Entry {
+            path: platform_path.clone(),
+            name: "NES".into(),
+            directory: true,
+            frontend: "retroarch".into(),
+            core: "fceumm".into(),
+            platform: "nes".into(),
+            count: 0,
+            image: None,
+            extensions: String::new(),
+        };
+        let job = IndexJob {
+            roots: vec![root.clone()],
+            platforms: vec![platform],
+            cache: root.join("catalog-index.json"),
+            seed: None,
+        };
+        let mut browser = Browser::with_inventory(job.clone(), true).unwrap();
+        browser.indexed(job.run());
+        browser.dispatch("confirm").unwrap();
+        assert_eq!(browser.view()["library"]["total"], 40);
+        assert_eq!(
+            browser.levels.last().unwrap().entries.len(),
+            DIRECTORY_WINDOW
+        );
+        for _ in 0..20 {
+            browser.dispatch("down").unwrap();
+        }
+        assert_eq!(browser.view()["library"]["position"], 21);
+        assert_eq!(browser.current().unwrap().name(), "game-20.nes");
+        assert_eq!(
+            browser.levels.last().unwrap().entries.len(),
+            DIRECTORY_WINDOW
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 impl Entry {
@@ -248,6 +305,8 @@ struct Level {
     path: Option<Entry>,
     entries: Vec<Entry>,
     selected: usize,
+    offset: usize,
+    total: usize,
 }
 
 pub struct Browser {
@@ -293,6 +352,8 @@ const PLATFORMS: &[(&str, &str)] = &[
     ("gbc", "GBC"),
     ("gba", "GBA"),
 ];
+
+const DIRECTORY_WINDOW: usize = 16;
 
 fn game_file(path: &Path) -> bool {
     path.extension().is_some_and(|extension| {
@@ -356,6 +417,8 @@ impl Browser {
                 path: None,
                 entries: Vec::new(),
                 selected: 0,
+                offset: 0,
+                total: 0,
             });
             browser.favorites();
         }
@@ -421,6 +484,7 @@ impl Browser {
             });
         }
         // Platform visibility is derived from the index, including on a cold start.
+        let entry_total = entries.len();
         let mut browser = Self {
             shelf: shelf::Grid::default(),
             launcher,
@@ -430,6 +494,8 @@ impl Browser {
                 path: None,
                 entries,
                 selected: 0,
+                offset: 0,
+                total: entry_total,
             }],
             busy: false,
             input_epoch: crate::system::monotonic(),
@@ -475,19 +541,17 @@ impl Browser {
         self.index = Some(index.clone());
         self.queries = index::Queries::default();
         self.refresh_platforms();
-        for level in &mut self.levels {
-            if let Some(directory) = &level.path {
-                if let Some(entries) = index.children(&directory.path) {
-                    let selected = level
-                        .entries
-                        .get(level.selected)
-                        .map(|entry| entry.path.clone());
-                    level.selected = selected
-                        .and_then(|path| entries.iter().position(|entry| entry.path == path))
-                        .unwrap_or(0);
-                    level.entries = entries;
-                }
+        for level_index in 0..self.levels.len() {
+            let Some(level) = self.levels.get(level_index) else {
+                continue;
+            };
+            if level.kind == LibraryPage::Directory {
+                let selected = level.offset + level.selected;
+                let _ = self.reload_directory_window(level_index, selected);
             }
+            let Some(level) = self.levels.get_mut(level_index) else {
+                continue;
+            };
             for entry in &mut level.entries {
                 if let Some(count) = index.counts.get(&entry.path) {
                     entry.count = *count;
@@ -551,6 +615,8 @@ impl Browser {
         root.selected = selected
             .and_then(|key| root.entries.iter().position(|entry| entry.key() == key))
             .unwrap_or(root.selected.min(root.entries.len().saturating_sub(1)));
+        root.offset = 0;
+        root.total = root.entries.len();
     }
 
     fn kind(&self) -> LibraryPage {
@@ -568,6 +634,8 @@ impl Browser {
             let level = self.levels.last_mut().expect("Browser root");
             level.entries.clear();
             level.selected = 0;
+            level.offset = 0;
+            level.total = 0;
             return;
         }
         if let Some(ids) = self.queries.get(&query) {
@@ -575,6 +643,8 @@ impl Browser {
             let level = self.levels.last_mut().expect("Browser root");
             level.entries = entries;
             level.selected = 0;
+            level.offset = 0;
+            level.total = level.entries.len();
         } else {
             self.query_due = Some(crate::system::monotonic());
         }
@@ -616,6 +686,8 @@ impl Browser {
         let level = self.levels.last_mut().expect("Browser root");
         level.entries = entries;
         level.selected = 0;
+        level.offset = 0;
+        level.total = level.entries.len();
     }
 
     fn favorites(&mut self) {
@@ -676,6 +748,8 @@ impl Browser {
             })
             .unwrap_or(level.selected.min(entries.len().saturating_sub(1)));
         level.entries = entries;
+        level.offset = 0;
+        level.total = level.entries.len();
     }
 
     fn refresh_recent(&mut self) {
@@ -688,6 +762,8 @@ impl Browser {
             {
                 let selected = level.entries.get(level.selected).map(Entry::key);
                 level.entries = index.recent(&self.personal.recent);
+                level.offset = 0;
+                level.total = level.entries.len();
                 level.selected = selected
                     .and_then(|key| level.entries.iter().position(|entry| entry.key() == key))
                     .unwrap_or(0);
@@ -703,63 +779,135 @@ impl Browser {
         })
     }
 
-    fn children(&self, directory: &Entry) -> Result<Vec<Entry>> {
-        if let Some(entries) = self
-            .index
-            .as_ref()
-            .and_then(|index| index.children(&directory.path))
-        {
-            return Ok(entries);
-        }
-        let mut entries: Vec<_> = fs::read_dir(&directory.path)?
-            .filter_map(|entry| entry.ok())
-            .filter_map(|entry| {
-                let path = entry.path().canonicalize().ok()?;
-                if !self.roots.iter().any(|root| path.starts_with(root))
-                    || !(path.is_dir() || directory.accepts(&path))
-                    || path.is_dir()
-                        && self
-                            .index
-                            .as_ref()
-                            .and_then(|index| index.counts.get(&path))
-                            .copied()
-                            .unwrap_or(0)
-                            == 0
-                {
-                    return None;
-                }
-                let metadata = self
-                    .index
-                    .as_ref()
-                    .and_then(|index| index.metadata.get(&path));
-                let name = metadata
-                    .filter(|value| !value.name.is_empty())
-                    .map(|value| value.name.clone())
-                    .unwrap_or_else(|| crate::flow::label(&entry.file_name().to_string_lossy()));
-                if name.starts_with('.') {
-                    return None;
-                }
-                let count = self
+    fn child_entry(&self, directory: &Entry, entry: fs::DirEntry) -> Option<Entry> {
+        let path = entry.path().canonicalize().ok()?;
+        if !self.roots.iter().any(|root| path.starts_with(root))
+            || !(path.is_dir() || directory.accepts(&path))
+            || path.is_dir()
+                && self
                     .index
                     .as_ref()
                     .and_then(|index| index.counts.get(&path))
                     .copied()
-                    .unwrap_or(0);
-                Some(Entry {
-                    directory: path.is_dir(),
-                    path,
-                    name,
-                    frontend: directory.frontend.clone(),
-                    core: directory.core.clone(),
-                    platform: directory.platform.clone(),
-                    count,
-                    image: metadata.and_then(|value| value.image.clone()),
-                    extensions: directory.extensions.clone(),
-                })
-            })
+                    .unwrap_or(0)
+                    == 0
+        {
+            return None;
+        }
+        let metadata = self
+            .index
+            .as_ref()
+            .and_then(|index| index.metadata.get(&path));
+        let name = metadata
+            .filter(|value| !value.name.is_empty())
+            .map(|value| value.name.clone())
+            .unwrap_or_else(|| crate::flow::label(&entry.file_name().to_string_lossy()));
+        if name.starts_with('.') {
+            return None;
+        }
+        let count = self
+            .index
+            .as_ref()
+            .and_then(|index| index.counts.get(&path))
+            .copied()
+            .unwrap_or(0);
+        Some(Entry {
+            directory: path.is_dir(),
+            path,
+            name,
+            frontend: directory.frontend.clone(),
+            core: directory.core.clone(),
+            platform: directory.platform.clone(),
+            count,
+            image: metadata.and_then(|value| value.image.clone()),
+            extensions: directory.extensions.clone(),
+        })
+    }
+
+    fn children_window(
+        &self,
+        directory: &Entry,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<Entry>, usize)> {
+        if let Some(window) = self
+            .index
+            .as_ref()
+            .and_then(|index| index.children_window(&directory.path, offset, limit))
+        {
+            return Ok(window);
+        }
+        let capacity = offset.saturating_add(limit).max(1);
+        let mut retained = BTreeMap::new();
+        let mut total = 0;
+        for entry in fs::read_dir(&directory.path)?.filter_map(|entry| entry.ok()) {
+            let Some(child) = self.child_entry(directory, entry) else {
+                continue;
+            };
+            total += 1;
+            let key = (
+                !child.directory,
+                child.name.to_lowercase(),
+                child.path.clone(),
+            );
+            retained.insert(key, child);
+            if retained.len() > capacity {
+                if let Some(last) = retained.keys().next_back().cloned() {
+                    retained.remove(&last);
+                }
+            }
+        }
+        let window = retained
+            .into_values()
+            .skip(offset.min(total))
+            .take(limit)
             .collect();
-        entries.sort_by_key(|entry| (!entry.directory, entry.name.to_lowercase()));
-        Ok(entries)
+        Ok((window, total))
+    }
+
+    fn reload_directory_window(&mut self, level_index: usize, selected: usize) -> Result<()> {
+        let directory = self
+            .levels
+            .get(level_index)
+            .filter(|level| level.kind == LibraryPage::Directory)
+            .and_then(|level| level.path.clone())
+            .ok_or("Missing directory level")?;
+        let offset = if let Some(index) = &self.index {
+            let total = index
+                .children_window(&directory.path, 0, 0)
+                .map(|(_, total)| total)
+                .unwrap_or(0);
+            selected
+                .saturating_sub(DIRECTORY_WINDOW / 2)
+                .min(total.saturating_sub(DIRECTORY_WINDOW))
+        } else {
+            self.count_children(&directory)
+                .map(|total| {
+                    selected
+                        .saturating_sub(DIRECTORY_WINDOW / 2)
+                        .min(total.saturating_sub(DIRECTORY_WINDOW))
+                })
+                .unwrap_or(0)
+        };
+        let (entries, total) = self.children_window(&directory, offset, DIRECTORY_WINDOW)?;
+        let level = self
+            .levels
+            .get_mut(level_index)
+            .ok_or("Missing directory level")?;
+        level.offset = offset.min(total);
+        level.total = total;
+        level.entries = entries;
+        level.selected = selected
+            .saturating_sub(level.offset)
+            .min(level.entries.len().saturating_sub(1));
+        Ok(())
+    }
+
+    fn count_children(&self, directory: &Entry) -> Result<usize> {
+        Ok(fs::read_dir(&directory.path)?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| self.child_entry(directory, entry))
+            .count())
     }
 
     pub fn dispatch(&mut self, action: &str) -> Result<Option<Entry>> {
@@ -785,6 +933,8 @@ impl Browser {
                 path: None,
                 entries: Vec::new(),
                 selected: 0,
+                offset: 0,
+                total: 0,
             });
             self.keyboard = true;
             self.changed_query();
@@ -894,8 +1044,16 @@ impl Browser {
             return Ok(None);
         }
         let favorites = self.kind() == LibraryPage::Favorites;
-        let level = self.levels.last_mut().ok_or("Missing game browser level")?;
+        let level_index = self.levels.len().saturating_sub(1);
+        let is_directory = self
+            .levels
+            .get(level_index)
+            .is_some_and(|level| level.kind == LibraryPage::Directory);
         if favorites {
+            let level = self
+                .levels
+                .get_mut(level_index)
+                .ok_or("Missing game browser level")?;
             level.selected = self
                 .shelf
                 .navigate(level.selected, level.entries.len(), action);
@@ -909,10 +1067,36 @@ impl Browser {
             _ => 0,
         };
         if delta != 0 {
-            level.selected = (level.selected as isize + delta)
-                .clamp(0, level.entries.len().saturating_sub(1) as isize)
-                as usize;
+            let (current, offset, total) = {
+                let level = self
+                    .levels
+                    .get(level_index)
+                    .ok_or("Missing game browser level")?;
+                (level.selected, level.offset, level.total)
+            };
+            let length = total;
+            let global = offset + current;
+            let target =
+                (global as isize + delta).clamp(0, length.saturating_sub(1) as isize) as usize;
+            if is_directory {
+                let window_offset = target
+                    .saturating_sub(DIRECTORY_WINDOW / 2)
+                    .min(length.saturating_sub(DIRECTORY_WINDOW));
+                if window_offset != offset
+                    || target >= offset + self.levels[level_index].entries.len()
+                {
+                    self.reload_directory_window(level_index, target)?;
+                } else if let Some(level) = self.levels.get_mut(level_index) {
+                    level.selected = target - offset;
+                }
+            } else if let Some(level) = self.levels.get_mut(level_index) {
+                level.selected = target;
+            }
         }
+        let level = self
+            .levels
+            .get_mut(level_index)
+            .ok_or("Missing game browser level")?;
         if action != "confirm" || level.entries.is_empty() {
             return Ok(None);
         }
@@ -926,6 +1110,8 @@ impl Browser {
                 path: Some(selected),
                 entries: Vec::new(),
                 selected: 0,
+                offset: 0,
+                total: 0,
             });
             self.refresh_recent();
             self.input_epoch = crate::system::monotonic();
@@ -937,6 +1123,8 @@ impl Browser {
                 path: None,
                 entries: Vec::new(),
                 selected: 0,
+                offset: 0,
+                total: 0,
             });
             if let Ok(personal) = library::Library::load(Path::new(context::INSTALL)) {
                 self.personal = personal;
@@ -957,8 +1145,8 @@ impl Browser {
             "Game browser escaped its local roots",
         )?;
         if selected.directory {
-            let entries = match self.children(&selected) {
-                Ok(entries) => entries,
+            let (entries, total) = match self.children_window(&selected, 0, DIRECTORY_WINDOW) {
+                Ok(window) => window,
                 Err(_) => {
                     self.status = "无法读取目录，请返回后重试。".into();
                     return Ok(None);
@@ -969,6 +1157,8 @@ impl Browser {
                 path: Some(selected),
                 entries,
                 selected: 0,
+                offset: 0,
+                total,
             });
             self.input_epoch = crate::system::monotonic();
             Ok(None)
@@ -1061,7 +1251,7 @@ impl Browser {
                 .collect();
         json!({
             "platforms":self.kind()==LibraryPage::Platforms,
-            "library":{"kind":level.kind,"query":self.query,"keyboard":self.keyboard && self.kind()==LibraryPage::Search,"key_selected":self.key_selected,"row_selected":level.selected.saturating_sub(first),"sort":self.personal.favorite_sort,"position":if level.entries.is_empty(){0}else{level.selected+1},"total":level.entries.len()},
+            "library":{"kind":level.kind,"query":self.query,"keyboard":self.keyboard && self.kind()==LibraryPage::Search,"key_selected":self.key_selected,"row_selected":level.selected.saturating_sub(first),"sort":self.personal.favorite_sort,"position":if level.entries.is_empty(){0}else{level.offset+level.selected+1},"total":level.total},
             "artwork":level.entries.get(level.selected).and_then(|entry|entry.image.as_ref()).map(|path|path.to_string_lossy().into_owned()).unwrap_or_default(),
             "artwork_neighbors":artwork_neighbors,
             "page":"games","title":match self.kind() {LibraryPage::Platforms=>"选择游戏平台",LibraryPage::Favorites=>"收藏夹",LibraryPage::Search=>"搜索游戏",LibraryPage::Directory=>"选择游戏"},

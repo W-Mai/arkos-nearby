@@ -5,6 +5,7 @@ use mirui::prelude::*;
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Key {
     Named(String),
+    Slot(usize),
     Anonymous { revision: u64, index: usize },
 }
 
@@ -23,10 +24,15 @@ pub(super) struct Row {
     name: String,
     detail: String,
     room: bool,
+    #[observe]
+    title_revision: u64,
+    #[observe]
+    detail_revision: u64,
     artwork: String,
     #[observe]
     pub artwork_token: Option<u64>,
     pub cover_bounds: model!(owned super::artwork::CoverBounds),
+    pub static_picture: model!(owned super::static_snapshot::Picture),
     #[observe]
     pub index: usize,
     #[observe]
@@ -67,8 +73,12 @@ impl Row {
 
 impl RowHandle {
     pub fn label(&self, title: bool) -> String {
-        self.text_revision();
-        self.available();
+        if title {
+            self.title_revision();
+        } else {
+            self.detail_revision();
+            self.available();
+        }
         self.text_value(title)
     }
 }
@@ -81,9 +91,12 @@ impl Row {
             name: data.name.clone(),
             detail: data.detail.clone(),
             room: true,
+            title_revision: 0,
+            detail_revision: 0,
             artwork: String::new(),
             artwork_token: None,
             cover_bounds: super::artwork::CoverBounds::default().into(),
+            static_picture: super::static_snapshot::Picture::default().into(),
             strength: data.signal,
             available: data.available,
             directory: false,
@@ -99,9 +112,12 @@ impl Row {
             name: data.name.clone(),
             detail: data.detail.clone(),
             room: false,
+            title_revision: 0,
+            detail_revision: 0,
             artwork: data.artwork.clone(),
             artwork_token: None,
             cover_bounds: super::artwork::CoverBounds::default().into(),
+            static_picture: super::static_snapshot::Picture::default().into(),
             strength: 0,
             available: data.available,
             directory: data.directory,
@@ -117,6 +133,14 @@ impl Row {
 }
 
 // Normalize ambiguous transport keys at ingestion; ModelList owns member identities.
+pub(super) fn reconcile_slots(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision: u64) {
+    // Catalog slots own display bindings; game identity stays in the captured View.
+    for row in &mut rows {
+        row.key = Key::Slot(row.index);
+    }
+    reconcile(list, rows, revision);
+}
+
 pub(super) fn reconcile(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision: u64) {
     let ambiguous: Vec<_> = rows
         .iter()
@@ -137,7 +161,16 @@ pub(super) fn reconcile(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision:
         rows,
         |row| row.key.clone(),
         |current, mut incoming| {
+            // Collection merges can notify named watches even when their text
+            // is unchanged. Observe content revisions independently of order.
+            incoming.title_revision = current
+                .title_revision
+                .wrapping_add(u64::from(current.name != incoming.name));
+            incoming.detail_revision = current.detail_revision.wrapping_add(u64::from(
+                current.detail != incoming.detail || current.room != incoming.room,
+            ));
             std::mem::swap(&mut current.cover_bounds, &mut incoming.cover_bounds);
+            std::mem::swap(&mut current.static_picture, &mut incoming.static_picture);
             if current.artwork == incoming.artwork {
                 incoming.artwork_token = current.artwork_token;
             }
@@ -145,4 +178,63 @@ pub(super) fn reconcile(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision:
         },
     )
     .unwrap_or_else(|failure| panic!("Invalid visible row collection: {:?}", failure.error()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mirui::core::reactive::Computed;
+    use std::{cell::Cell, rc::Rc};
+
+    #[compose]
+    fn observed_title(row: model!(Row), count: Rc<Cell<u32>>) -> Computed<String> {
+        Computed::new(move || {
+            count.set(count.get() + 1);
+            row.label(true)
+        })
+    }
+
+    #[test]
+    fn retained_labels_observe_content_independently_of_window_position() {
+        let mut app = App::headless(640, 480);
+        app.with_default_widgets().with_default_systems();
+        crate::render::install(&mut app).unwrap();
+        let state = app
+            .world
+            .resource::<super::super::state::DisplayRuntime>()
+            .unwrap()
+            .state
+            .clone();
+        let mut view = crate::model::View {
+            page: crate::model::Page::Games,
+            entries: ["first", "second"]
+                .map(|key| GameRow {
+                    key: key.into(),
+                    name: key.into(),
+                    available: true,
+                    ..Default::default()
+                })
+                .to_vec(),
+            ..Default::default()
+        };
+        state.present(&view);
+        let row = state.entries().entries().next().unwrap().1;
+        let reads = Rc::new(Cell::new(0));
+        let root = app.spawn_root().id();
+        let title = app.compose(root, observed_title(row, reads.clone()));
+        assert_eq!(title.get(), "first");
+        view.entries.swap(0, 1);
+        state.present(&view);
+        assert_eq!(title.get(), "first");
+        assert_eq!(reads.get(), 1);
+        view.entries[1].favorite = true;
+        view.entries[1].artwork = "changed.png".into();
+        state.present(&view);
+        assert_eq!(title.get(), "first");
+        assert_eq!(reads.get(), 1);
+        view.entries[1].name = "renamed".into();
+        state.present(&view);
+        assert_eq!(title.get(), "renamed");
+        assert_eq!(reads.get(), 2);
+    }
 }

@@ -136,6 +136,10 @@ impl Display {
         let stdout = gui.0.stdout.take().ok_or("GUI has no output channel")?;
         let (sender, receiver) = mpsc::channel();
         let input_sender = sender.clone();
+        // Capture the screen epoch before starting the reader. A GUI or mapper
+        // can emit the first key edge immediately after spawn; recording the
+        // epoch afterwards would classify that valid edge as stale.
+        let input_epoch = monotonic();
         let reader = thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -215,15 +219,21 @@ impl Display {
             stopping: Arc::new(AtomicBool::new(false)),
             signals: Vec::new(),
             screen: 0,
-            input_epoch: monotonic(),
+            input_epoch,
             previous: Value::Null,
             _directory: None,
         })
     }
 
     pub(super) fn begin_screen(&mut self) -> Replies {
+        let first = self.screen == 0;
         self.screen += 1;
-        self.input_epoch = monotonic();
+        // Keep the connection epoch for the first screen so a real edge that
+        // arrives during startup remains actionable; later screens rebase it
+        // to discard input queued for the previous view.
+        if !first {
+            self.input_epoch = monotonic();
+        }
         Replies {
             screen: self.screen,
             sender: self.sender.clone(),
@@ -307,6 +317,54 @@ mod tests {
                 _ => panic!("The GUI did not deliver an event"),
             }
         }
+    }
+
+    #[test]
+    fn first_input_is_kept_when_it_arrives_before_the_first_frame() {
+        let gui = OwnedChild(
+            Command::new("sh")
+                .args([
+                    "-c",
+                    "printf '\"confirm\"\\n'; sleep 0.05; printf '{\"event\":\"frame_ready\"}\\n'; sleep 1",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let mapper = OwnedChild(Command::new("sleep").arg("30").spawn().unwrap());
+        let display = Display::connect(gui, Some(mapper)).unwrap();
+        assert!(matches!(next(&display), Event::Input(action, _) if action == "confirm"));
+        assert!(matches!(next(&display), Event::FrameReady));
+    }
+
+    #[test]
+    fn first_input_is_kept_when_screen_begins_after_reader_start() {
+        let (sender, receiver) = mpsc::channel();
+        let at = monotonic();
+        let mut display = Display {
+            _lock: None,
+            stdin: None,
+            gui: None,
+            mapper: None,
+            reader: None,
+            sender: sender.clone(),
+            receiver,
+            stopping: Arc::new(AtomicBool::new(false)),
+            signals: Vec::new(),
+            screen: 0,
+            input_epoch: at,
+            previous: Value::Null,
+            _directory: None,
+        };
+        sender
+            .send(Delivery {
+                screen: None,
+                event: Event::Input("confirm".into(), at),
+            })
+            .unwrap();
+        display.begin_screen();
+        assert!(matches!(next(&display), Event::Input(action, _) if action == "confirm"));
     }
 
     #[test]

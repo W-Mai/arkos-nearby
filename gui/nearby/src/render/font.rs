@@ -1,7 +1,7 @@
 use super::style::{FONT, TITLE_FONT};
 use mirui::app::RendererFactory;
 use mirui::prelude::*;
-use mirui::render::font::{Font, FontBackend, FontManager, mirx::MirxFontProvider};
+use mirui::render::font::{Font, FontManager, mirx::MirxFontProvider};
 use mirui::surface::Surface;
 use std::rc::Rc;
 const MENU_BYTES: &[u8] = include_bytes!("../../assets/nearby-menu-12.mirx");
@@ -24,7 +24,7 @@ fn load(bytes: &'static [u8], size: u16) -> Result<Font, String> {
     Ok(Font {
         family: "Nearby Pixel",
         size,
-        backend: FontBackend::Custom(Rc::new(provider)),
+        provider: Rc::new(provider),
     })
 }
 

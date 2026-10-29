@@ -154,8 +154,25 @@ impl Index {
     pub(super) fn entry(&self, path: &Path) -> Option<&Entry> {
         self.by_path.get(path).map(|id| &self.records[*id].entry)
     }
+    #[cfg(test)]
     pub(super) fn children(&self, path: &Path) -> Option<Vec<Entry>> {
         self.children.get(path).cloned()
+    }
+    pub(super) fn children_window(
+        &self,
+        path: &Path,
+        offset: usize,
+        limit: usize,
+    ) -> Option<(Vec<Entry>, usize)> {
+        let children = self.children.get(path)?;
+        let total = children.len();
+        let entries = children
+            .iter()
+            .skip(offset.min(total))
+            .take(limit)
+            .cloned()
+            .collect();
+        Some((entries, total))
     }
     fn search(&self, query: &str, candidates: Option<&[usize]>) -> Vec<usize> {
         if query.is_empty() {

@@ -24,14 +24,19 @@ def main():
     parser.add_argument("action", choices=("build", "check"))
     parser.add_argument("--sysroot", type=Path, required=True)
     parser.add_argument("--sdl-library", type=Path, required=True)
+    parser.add_argument("--sdl-linkage", choices=("shared", "static"), default="shared")
     parser.add_argument("--linker", type=Path, required=True)
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/gpu")
     args = parser.parse_args()
     sysroot = args.sysroot.resolve()
     library = args.sdl_library.resolve()
     data = library.read_bytes()
-    if data[:6] != b"\x7fELF\x02\x01" or int.from_bytes(data[18:20], "little") != 183:
+    if args.sdl_linkage == "static":
+        if data[:8] != b"!<arch>\n" or library.name != "libSDL2.a":
+            raise ValueError("Static SDL2 must be a libSDL2.a archive")
+    elif data[:6] != b"\x7fELF\x02\x01" or int.from_bytes(data[18:20], "little") != 183:
         raise ValueError("SDL2 must be a little-endian ARM64 ELF library")
-    if not (library.parent / "libSDL2.so").is_file():
+    if args.sdl_linkage == "shared" and not (library.parent / "libSDL2.so").is_file():
         raise ValueError("The SDL2 library directory needs its libSDL2.so linker name")
     if not (sysroot / "usr/lib/aarch64-linux-gnu/Scrt1.o").is_file():
         raise ValueError("The GNU sysroot needs ARM64 startup objects")
@@ -65,11 +70,12 @@ def main():
     if inputs != gui.build_inputs():
         raise ValueError("GPU sources changed during compilation")
     binary = target / TRIPLE / "release/arkos-nearby-gui"
-    output = ROOT / "dist/gpu"
+    output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(binary, output / "arkos-nearby-gui")
-    (output / "lib").mkdir(exist_ok=True)
-    shutil.copy2(library, output / "lib/libSDL2-2.0.so.0")
+    if args.sdl_linkage == "shared":
+        (output / "lib").mkdir(exist_ok=True)
+        shutil.copy2(library, output / "lib/libSDL2-2.0.so.0")
     shutil.copytree(LICENSES, output / "licenses", dirs_exist_ok=True)
     font_licenses = output / "licenses/font"
     font_licenses.mkdir(exist_ok=True)
@@ -79,11 +85,16 @@ def main():
         "schema": 2,
         "target": TRIPLE,
         "backend": "sdl-gpu",
+        "sdl_linkage": args.sdl_linkage,
         **gui.locked_dependencies(),
         **inputs,
         "sha256": sha(binary),
         "bytes": binary.stat().st_size,
-        "libraries": {"libSDL2-2.0.so.0": sha(library)},
+        **(
+            {"sdl_static_sha256": sha(library)}
+            if args.sdl_linkage == "static"
+            else {"libraries": {"libSDL2-2.0.so.0": sha(library)}}
+        ),
     }
     (output / "nearby-gui-build.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report))

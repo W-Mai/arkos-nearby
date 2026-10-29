@@ -98,7 +98,6 @@ pub(super) fn header(view: PageKey, state: model!(DisplayState), metrics: Metric
                 paragraph: paragraph(Center, 1)
             ) [
                 FONT_PAINT,
-                GpuLayerCache,
             ]
         }
     }

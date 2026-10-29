@@ -88,7 +88,7 @@ fn shelf(
                                     .take(grid.plan().grid.columns)
                                     .collect::<Vec<_>>()
                             } with item by item.0 {
-                                cartridge (state, item.1, grid, metrics)
+                                cartridge (state, item.1, item.0, grid, metrics)
                             }
                         }
                     }
@@ -113,6 +113,7 @@ fn shelf(
 fn cartridge(
     state: model!(DisplayState),
     row: model!(Row),
+    member: mirui::core::model::ModelItemId,
     grid: model!(super::shelf::Shelf),
     metrics: Metrics,
 ) -> Entity {
@@ -143,7 +144,7 @@ fn cartridge(
                 if ${ directory.directory() } {
                     library_icon (metrics)
                 } else {
-                    cartridge_content (row, metrics)
+                    cartridge_content (state.clone(), row, member, metrics)
                 }
                 Row (
                     height: super::shelf::LABEL_HEIGHT,
@@ -332,7 +333,73 @@ pub(super) fn library_icon(metrics: Metrics) -> Entity {
 }
 
 #[compose]
-fn cartridge_content(row: model!(Row), _metrics: Metrics) -> Entity {
+fn cartridge_content(
+    state: model!(DisplayState),
+    row: model!(Row),
+    member: mirui::core::model::ModelItemId,
+    metrics: Metrics,
+) -> Entity {
+    let picture = row.static_picture();
+    let image = picture.clone();
+    let dimensions = picture.clone();
+    ui! {
+        Column (grow: 1.0, min_width: 0, min_height: 0, container: true) {
+            Column (
+                position: Position::Absolute,
+                left: 0,
+                top: 0,
+                width: Dimension::percent(100),
+                height: Dimension::percent(100),
+                min_width: 0,
+                min_height: 0,
+                visible: ${ !picture.hidden() }
+            ) [
+                super::static_snapshot::Source {
+                    row: row.clone(),
+                    state,
+                    member,
+                },
+            ] {
+                cartridge_source (row, metrics)
+            }
+            View (
+                position: Position::Absolute,
+                left: 0,
+                top: 0,
+                width: Dimension::percent(100),
+                height: Dimension::percent(100)
+            ) [
+                mirui::ui::IgnoreHitTest,
+            ] {
+                walk ${ image.token().into_iter() } with token by token {
+                    static_cartridge_image (image.clone(), token)
+                }
+            }
+        } on SizeChanged { dimensions.resize(event.new); }
+    }
+}
+
+#[compose]
+fn static_cartridge_image(picture: model!(super::static_snapshot::Picture), token: u64) -> Entity {
+    let top = picture.clone();
+    let width = picture.clone();
+    let height = picture.clone();
+    ui! {
+        Image (
+            src: super::static_snapshot::texture_token(token),
+            position: Position::Absolute,
+            left: ${ picture.bounds().x },
+            top: ${ top.bounds().y },
+            width: ${ width.bounds().w },
+            height: ${ height.bounds().h }
+        ) [
+            mirui::ui::IgnoreHitTest,
+        ]
+    }
+}
+
+#[compose]
+fn cartridge_source(row: model!(Row), _metrics: Metrics) -> Entity {
     let platform = row.clone();
     ui! {
         Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: 0) {
@@ -373,7 +440,6 @@ fn cartridge_content(row: model!(Row), _metrics: Metrics) -> Entity {
                     ) {
                         cover (
                             row.cover_bounds(),
-                            move || row.artwork_token(),
                             move || platform.platform()
                         )
                     }

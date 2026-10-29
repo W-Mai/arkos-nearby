@@ -140,6 +140,25 @@ impl Metrics {
             right: self.sized(16, 16, 24).into(),
         }
     }
+    pub fn modal_padding(self) -> Padding {
+        let horizontal = Dimension::Percent(if self.compact {
+            Fixed::from_ratio(5, 2)
+        } else {
+            Fixed::from_ratio(15, 4)
+        });
+        let vertical = Dimension::Percent(if self.compact {
+            Fixed::from_ratio(5, 2)
+        } else {
+            Fixed::from_ratio(20, 3)
+        });
+        Padding {
+            top: vertical,
+            bottom: vertical,
+            left: horizontal,
+            right: horizontal,
+        }
+    }
+
     pub fn page_padding(self) -> Padding {
         Padding {
             top: self.sized(8, 8, 12).into(),

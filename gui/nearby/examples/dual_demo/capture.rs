@@ -2,6 +2,7 @@
 
 use super::SoftwareApp;
 use mirui::prelude::*;
+use mirui::render::PreparedDraw;
 use mirui::render::backends::scene::SceneRenderer;
 use mirui::render::font::{Font, GlyphId, GlyphKind};
 use mirui::render::path::{Path, PathCmd};
@@ -60,9 +61,9 @@ impl Renderer for Recorder<'_> {
         self.inner.route(request)
     }
 
-    fn submit(&mut self, request: &DrawRequest<'_, '_>) -> Result<(), RenderError> {
+    fn submit(&mut self, request: &PreparedDraw<'_>) -> Result<(), RenderError> {
         self.inner.submit(request)?;
-        self.clips.push(request.clip);
+        self.clips.push(request.request().clip);
         Ok(())
     }
 
