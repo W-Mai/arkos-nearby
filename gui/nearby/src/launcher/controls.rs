@@ -70,6 +70,16 @@ pub(super) fn button(code: u16) -> Option<Action> {
     })
 }
 
+pub(super) fn button_for(code: u16, launcher: bool) -> Option<Action> {
+    button(code).map(|action| {
+        if !launcher && action == Action::LauncherHome {
+            Action::Back
+        } else {
+            action
+        }
+    })
+}
+
 pub(super) fn axis(code: u16, value: i32, min: i32, max: i32) -> Option<Action> {
     let center = (i64::from(min) + i64::from(max)) / 2;
     let deadzone = (i64::from(max) - i64::from(min)) / 4;
@@ -113,5 +123,17 @@ mod tests {
         assert_eq!(axis(3, 0, 0, 4095), Some(Action::Left));
         assert_eq!(button(704), Some(Action::LauncherHome));
         assert_eq!(button(308), Some(Action::Theme));
+    }
+
+    #[test]
+    fn room_and_launcher_share_physical_controls_with_entry_scoped_select() {
+        for code in 0..768 {
+            if code == 704 {
+                assert_eq!(button_for(code, false), Some(Action::Back));
+                assert_eq!(button_for(code, true), Some(Action::LauncherHome));
+            } else {
+                assert_eq!(button_for(code, false), button_for(code, true));
+            }
+        }
     }
 }

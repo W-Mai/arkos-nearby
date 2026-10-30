@@ -18,7 +18,7 @@
     "released_binary_sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e"
   },
   "rust": {
-    "source_archive": "arkos-nearby-0.10.0-rust-sources.tar.gz",
+    "source_archive": "arkos-nearby-0.10.1-rust-sources.tar.gz",
     "locked_crates": 191,
     "included_crates": 191
   },
@@ -138,7 +138,7 @@
   },
   "core_probe": {
     "schema": 1,
-    "source_sha256": "811453aad9badbf6cd097221f9172b381cf75eb84e617ec69d6930ad7b352f18",
+    "source_sha256": "e7d628f4cf0e600fe41a30ceb11741f999c37e85fe11231c334957332d3ee7a5",
     "mode": "load-only-rollback",
     "target": "aarch64-linux-gnu",
     "loader": "/lib/ld-linux-aarch64.so.1",
@@ -181,13 +181,13 @@
       }
     },
     "bytes": 13240,
-    "sha256": "cf21e3ec71941dc49019ac639cf3d7d19fabb04961c94f0f02f9b2dee1c87b59"
+    "sha256": "b19a9387a7e52ea9bcedd0d39a08d55fb48c253f30e28656c9ef921b4d5fbc94"
   },
   "renderer": {
     "version": "0.53.0",
     "mirx_version": "0.53.0",
-    "sha256": "26411e668cb350d9731486239a4537c0383c4251fe8b1e1852fe6cd9542791c8",
-    "source_sha256": "71d36b5485f85866e5e5d8badd9e63b8c452d585d47ea70a46255008db2291bc",
+    "sha256": "81ed37c1eea15939263c18c19adaa8fc213a19539270e8af429f0b1278899934",
+    "source_sha256": "b71f0ca1ba95731e7610a819f2da0f7460c92265e7c5c0bd8c268df13feaf9ee",
     "cargo_lock_sha256": "661d799a07cd135047ae157615fdbcdb938848decc7663aa6cbb02ef624a835c",
     "mirui_crate_sha256": "180a249e0594a77bdfa009eeec97aa01d03d2dcf075ba48cc7d53bddad6c334a",
     "mirui_macros_crate_sha256": "fad12105b90ff024b2ca3e4396f9a7e605802d3508a4f527c21a6c726e477578",

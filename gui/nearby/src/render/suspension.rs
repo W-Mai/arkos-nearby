@@ -203,10 +203,14 @@ impl Controller {
     }
 
     fn restore(&mut self) {
-        self.publish(false, None);
+        self.unpublish();
         if let Some(image) = self.held.take() {
             self.retired.push(image);
         }
+    }
+
+    fn unpublish(&mut self) {
+        self.publish(false, None);
         if let Some(image) = self.pending.take() {
             self.retired.push(image);
         }
@@ -222,7 +226,7 @@ impl Controller {
         let current = stamp(app);
         if !wanted(app) || current.is_none() {
             self.resuming |= self.model.hidden();
-            self.restore();
+            self.unpublish();
             if let Some(capture) = self.capturing.take() {
                 capture.release(app);
             }
@@ -240,11 +244,10 @@ impl Controller {
                 self.attempted = None;
             }
         }
-        if self
-            .held
-            .as_ref()
-            .is_some_and(|image| image.stamp == current)
-        {
+        if self.held.as_ref().is_some_and(|image| {
+            image.stamp == current && image._handle.get().cache_revision == image.revision
+        }) {
+            self.publish(true, self.held.as_ref().map(|image| image.revision));
             return;
         }
         self.restore();
@@ -353,6 +356,56 @@ mod tests {
     use mirui::render::texture::ColorFormat;
     use mirui::surface::framebuf::FramebufSurface;
     use std::cell::Cell;
+
+    #[test]
+    fn unchanged_library_round_trips_reuse_the_prepared_shelf() {
+        let surface = FramebufSurface::with_format(480, 320, ColorFormat::RGBA8888, |_, _| {});
+        let mut app = App::new(surface);
+        app.with_default_widgets().with_default_systems();
+        super::super::install(&mut app).unwrap();
+        let mut home = View {
+            page: Page::Games,
+            entries: (0..4)
+                .map(|index| GameRow {
+                    key: format!("game-{index}"),
+                    name: format!("Game {index}"),
+                    icon: "nes".into(),
+                    available: true,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        home.library.kind = LibraryKind::Favorites;
+        home.launcher.enabled = true;
+        home.launcher_shelf = Some(Box::new(home.clone()));
+        let mut library = home.clone();
+        library.launcher.tab = 1;
+        library.library.kind = LibraryKind::Platforms;
+        let mut scene = super::super::draw(&mut app, &home).unwrap();
+        super::super::paint_at(&mut app, 1000).unwrap();
+        let mut original = None;
+        for cycle in 0..8 {
+            let at = 2000 + cycle * 3000;
+            super::super::update(&mut scene, &library).unwrap();
+            for now in [at, at + 700, at + 716, at + 732] {
+                super::super::paint_at(&mut app, now).unwrap();
+            }
+            let model = app.world.resource::<Runtime>().unwrap().model.clone();
+            assert!(model.hidden());
+            if let Some(revision) = original {
+                assert_eq!(model.token(), Some(revision));
+            } else {
+                original = model.token();
+            }
+            super::super::update(&mut scene, &home).unwrap();
+            for now in [at + 1000, at + 1700] {
+                super::super::paint_at(&mut app, now).unwrap();
+            }
+            assert!(!model.hidden());
+            assert_eq!(model.token(), None);
+        }
+    }
 
     struct RenderCount(Rc<Cell<usize>>);
 

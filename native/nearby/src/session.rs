@@ -627,6 +627,12 @@ pub fn status_for(intent: &SessionIntent) -> Result<Value> {
             value["game_title"] = summary["title"].clone();
             value["game_core"] = summary["core"].clone();
         }
+        if state.purpose == SessionPurpose::Game {
+            if let Ok(context) = read::<Context>(&state.root().join("context.json")) {
+                value["game_core"] = context.core_label().into();
+                value["game_core_origin"] = json!(context.origin());
+            }
+        }
         value["context_matches"] =
             (state.purpose == intent.purpose() && state.context_key == intent.key()).into();
         if matches!(state.step.as_str(), "resolving_game" | "selecting_game") {
@@ -1020,7 +1026,7 @@ pub fn worker(id: &str) -> Result<()> {
                 state.claim = Some(claim);
             })?;
             write(&local.root().join("context.json"), &matched)?;
-            if matched.core_id == "fbneo" && matched.core_elf_bits == 64 {
+            if crate::arcade::requires_probe(&matched) {
                 progress(id, None, "checking", "正在检查街机 ROM 与 BIOS...")?;
             }
             let settings = crate::arcade::client(&local, &matched)?;

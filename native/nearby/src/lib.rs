@@ -14,6 +14,7 @@ pub mod home;
 pub mod http;
 pub mod identity;
 pub mod installer;
+pub mod launch;
 pub mod launcher;
 pub mod manual;
 pub mod menu;

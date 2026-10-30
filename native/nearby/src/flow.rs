@@ -786,12 +786,7 @@ impl Flow {
         } else {
             self.context
                 .as_ref()
-                .map(|context| {
-                    format!(
-                        "{} {}",
-                        context.identity.core.name, context.identity.core.version
-                    )
-                })
+                .map(|context| context.core_label())
                 .unwrap_or_default()
         };
         let ids = self.order();

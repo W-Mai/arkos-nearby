@@ -196,12 +196,7 @@ fn visible_images_share_framework_values_and_survive_reorder_and_page_return() {
             .resolve(&original[0].2)
     ));
     assert_eq!(
-        app.world
-            .resource::<ArtworkPlan>()
-            .unwrap()
-            .model
-            .assets()
-            .len(),
+        app.world.resource::<ArtworkPlan>().unwrap().requests.len(),
         6
     );
 }
@@ -225,13 +220,13 @@ fn debounce_prefetch_and_late_results_keep_current_selection() {
     view.artwork = "second".into();
     crate::render::update(&mut scene, &view).unwrap();
     crate::render::paint_at(&mut app, 51).unwrap();
-    assert!(scene.state.artwork_token().is_none());
+    assert!(scene.state.cover_bounds().token().is_none());
     control.finish(&first.1, false);
     crate::render::paint_at(&mut app, 68).unwrap();
-    assert!(scene.state.artwork_token().is_none());
+    assert!(scene.state.cover_bounds().token().is_none());
     app.world.resource_mut::<ArtworkPlan>().unwrap().changed -= DEBOUNCE;
     pump(&mut app, &control, 85);
-    assert!(scene.state.artwork_token().is_some());
+    assert!(scene.state.cover_bounds().token().is_some());
     assert!(scene.state.cover_bounds().source().contains("second"));
     assert!(
         app.world
@@ -239,14 +234,14 @@ fn debounce_prefetch_and_late_results_keep_current_selection() {
             .unwrap()
             .requests
             .iter()
-            .any(|entry| entry.key.0 == "neighbor" && entry.state.ready())
+            .any(|entry| entry.key.0 == "neighbor" && entry.ready.get())
     );
     let before = control.count.get();
     view.artwork = "neighbor".into();
     view.artwork_neighbors.clear();
     crate::render::update(&mut scene, &view).unwrap();
     crate::render::paint_at(&mut app, 400).unwrap();
-    assert!(scene.state.artwork_token().is_some());
+    assert!(scene.state.cover_bounds().token().is_some());
     assert_eq!(
         control.count.get(),
         before,
@@ -266,7 +261,7 @@ fn image_property_retains_entity_and_reacts_to_resource_replacement() {
     crate::render::paint_at(&mut app, 1).unwrap();
     app.world.resource_mut::<ArtworkPlan>().unwrap().changed -= DEBOUNCE;
     pump(&mut app, &control, 17);
-    assert!(scene.state.artwork_token().is_some());
+    assert!(scene.state.cover_bounds().token().is_some());
     let source = scene.state.cover_bounds().source();
     let entity = app
         .world
@@ -277,14 +272,14 @@ fn image_property_retains_entity_and_reacts_to_resource_replacement() {
         )
         .unwrap()
         .0;
-    let first = scene.state.artwork_token();
+    let first = scene.state.cover_bounds().token();
     app.world
         .resource::<ResourceManager<Texture<'static>>>()
         .unwrap()
         .remove_token(&source);
     pump(&mut app, &control, 300);
-    assert!(scene.state.artwork_token().is_some());
-    assert_ne!(first, scene.state.artwork_token());
+    assert!(scene.state.cover_bounds().token().is_some());
+    assert_ne!(first, scene.state.cover_bounds().token());
     view.artwork = "second".into();
     crate::render::update(&mut scene, &view).unwrap();
     crate::render::paint_at(&mut app, 580).unwrap();
@@ -321,12 +316,7 @@ fn failures_release_admission_and_visible_sources_remain_bounded() {
     crate::render::update(&mut scene, &next).unwrap();
     crate::render::paint_at(&mut app, 300).unwrap();
     assert_eq!(
-        app.world
-            .resource::<ArtworkPlan>()
-            .unwrap()
-            .model
-            .assets()
-            .len(),
+        app.world.resource::<ArtworkPlan>().unwrap().requests.len(),
         0
     );
 }
@@ -379,12 +369,7 @@ fn completion_after_row_retirement_does_not_touch_expired_models() {
     control.finish_all();
     crate::render::paint_at(&mut app, 34).unwrap();
     assert_eq!(
-        app.world
-            .resource::<ArtworkPlan>()
-            .unwrap()
-            .model
-            .assets()
-            .len(),
+        app.world.resource::<ArtworkPlan>().unwrap().requests.len(),
         0
     );
 }

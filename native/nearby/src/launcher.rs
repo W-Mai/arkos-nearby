@@ -65,6 +65,24 @@ impl Controller {
     pub fn browser(&mut self) -> &mut Browser {
         &mut self.browsers[self.tab.min(1)]
     }
+
+    pub(crate) fn indexed(&mut self, index: std::sync::Arc<crate::catalog::Index>) {
+        for browser in &mut self.browsers {
+            browser.accept_index(index.clone());
+        }
+    }
+
+    fn sync_personal(&mut self) {
+        for browser in &mut self.browsers {
+            browser.refresh_personal();
+        }
+    }
+
+    fn reopen(&mut self) {
+        for browser in &mut self.browsers {
+            browser.reopen();
+        }
+    }
     fn game(&self) -> Option<Entry> {
         self.browsers[self.tab.min(1)].game()
     }
@@ -148,7 +166,7 @@ impl Controller {
     fn tab(&mut self, value: usize) -> Option<Intent> {
         self.tab = value;
         self.changed_tab = true;
-        self.browser().reopen();
+        self.browser().resume();
         None
     }
     pub fn gesture(&mut self, action: &str, key: &str) -> Result<Option<Intent>> {
@@ -217,7 +235,7 @@ impl Controller {
                 }
                 (Overlay::Game, 2) => {
                     self.browser().dispatch("refresh")?;
-                    self.browsers[0].reopen();
+                    self.sync_personal();
                     Ok(None)
                 }
                 (Overlay::System, 2) => Ok(Some(Intent::Network)),
@@ -258,7 +276,7 @@ impl Controller {
         }
         if action == "auxiliary" && self.tab == 1 && self.game().is_some() {
             self.browser().dispatch("refresh")?;
-            self.browsers[0].reopen();
+            self.sync_personal();
             return Ok(None);
         }
         if action == "confirm" {
@@ -385,7 +403,7 @@ pub fn run() -> Result<i32> {
                 crate::menu::log(json!({"launcher_error":error.to_string()}))?;
             }
         }
-        controller.browser().reopen();
+        controller.reopen();
     }
 }
 

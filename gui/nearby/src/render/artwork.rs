@@ -4,12 +4,13 @@ mod tests;
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
+use std::{cell::Cell, rc::Rc};
 
 use mirui::app::{RendererFactory, plugins::ImageResourcesPlugin};
 use mirui::core::cache::MaxSize;
-use mirui::core::model::{ModelHandle, ModelMap};
+use mirui::core::model::ModelHandle;
 use mirui::core::reactive::Effect;
-use mirui::core::resource::ResourceManager;
+use mirui::core::resource::{ResourceHandle, ResourceManager};
 use mirui::prelude::*;
 use mirui::render::texture::{ColorFormat, Texture, TextureMeta};
 use mirui::surface::Surface;
@@ -32,10 +33,10 @@ pub(super) struct CoverBounds {
     #[observe]
     pub size: LayoutSize,
     #[observe]
-    pub aspect: Fixed,
-    #[observe]
-    pub token: Option<u64>,
-    pub source: String,
+    binding_revision: u64,
+    source: String,
+    resource: Option<ResourceHandle<Texture<'static>>>,
+    signal: Option<Rc<mirui::core::reactive::Signal<()>>>,
 }
 
 impl Default for CoverBounds {
@@ -45,9 +46,10 @@ impl Default for CoverBounds {
                 width: Fixed::ZERO,
                 height: Fixed::ZERO,
             },
-            aspect: Fixed::ONE,
-            token: None,
+            binding_revision: 0,
             source: String::new(),
+            resource: None,
+            signal: None,
         }
     }
 }
@@ -58,21 +60,55 @@ impl CoverBounds {
         self.size = size;
     }
 
-    pub fn set_source(&mut self, token: Option<u64>, aspect: Fixed, source: String) {
-        self.token = token;
-        self.aspect = aspect;
+    fn bind(
+        &mut self,
+        source: String,
+        resource: Option<ResourceHandle<Texture<'static>>>,
+        signal: Option<Rc<mirui::core::reactive::Signal<()>>>,
+    ) {
+        if self.source == source {
+            return;
+        }
         self.source = source;
+        self.resource = resource;
+        self.signal = signal;
+        self.binding_revision = self.binding_revision.wrapping_add(1);
     }
 
     fn source_value(&self) -> String {
         self.source.clone()
     }
+
+    fn resolved(&self) -> Option<Rc<Texture<'static>>> {
+        self.signal.as_ref()?.get();
+        let texture = self.resource.as_ref()?.get();
+        (texture.cache_revision != 0).then_some(texture)
+    }
 }
 
 impl CoverBoundsHandle {
+    fn image(&self) -> Option<Rc<Texture<'static>>> {
+        self.binding_revision();
+        self.resolved()
+    }
+
+    pub(super) fn token(&self) -> Option<u64> {
+        self.image().map(|texture| texture.cache_revision)
+    }
+
+    fn aspect(&self) -> Fixed {
+        self.image().map_or(Fixed::ONE, |texture| {
+            Fixed::from_int(i32::from(texture.width()))
+                / Fixed::from_int(i32::from(texture.height()))
+        })
+    }
+
     fn source(&self) -> String {
-        self.token();
-        self.source_value()
+        if self.token().is_some() {
+            self.source_value()
+        } else {
+            String::new()
+        }
     }
 }
 
@@ -97,57 +133,6 @@ fn source_key(path: String) -> ArtworkKey {
     (path, stamp)
 }
 
-#[model]
-struct ReadyImage {
-    #[observe]
-    ready: bool,
-    #[observe]
-    token: Option<u64>,
-    #[observe]
-    aspect: Fixed,
-    source: String,
-    targets: Vec<ArtworkTarget>,
-}
-
-impl Default for ReadyImage {
-    fn default() -> Self {
-        Self {
-            ready: false,
-            token: None,
-            aspect: Fixed::ONE,
-            source: String::new(),
-            targets: Vec::new(),
-        }
-    }
-}
-
-#[model]
-impl ReadyImage {
-    fn complete(&mut self, token: Option<u64>, aspect: Fixed) {
-        self.ready = true;
-        self.token = token;
-        self.aspect = aspect;
-        self.publish();
-    }
-
-    fn bind(&mut self, source: String, targets: Vec<ArtworkTarget>) {
-        self.source = source;
-        self.targets = targets;
-        self.publish();
-    }
-
-    fn publish(&self) {
-        let source = if self.token.is_some() {
-            self.source.as_str()
-        } else {
-            ""
-        };
-        for target in &self.targets {
-            target.publish(self.token, self.aspect, source);
-        }
-    }
-}
-
 #[derive(Clone)]
 enum Target {
     Display(super::state::DisplayHandle),
@@ -161,47 +146,35 @@ struct ArtworkTarget {
 }
 
 impl ArtworkTarget {
-    fn publish(&self, token: Option<u64>, aspect: Fixed, source: &str) {
-        // A completion may outlive a collection member or its selected source.
-        match &self.target {
+    fn bind(&self, source: Option<&Lease>, textures: &ResourceManager<Texture<'static>>) {
+        let bounds = match &self.target {
             Target::Display(display)
                 if display.callback_ready() && display.artwork() == self.path =>
             {
-                display
-                    .cover_bounds()
-                    .set_source(token, aspect, source.into());
-                display.set_artwork_token(token);
+                display.cover_bounds()
             }
             Target::Row(row) if row.callback_ready() && row.artwork() == self.path => {
-                row.cover_bounds().set_source(token, aspect, source.into());
-                row.set_artwork_token(token);
+                row.cover_bounds()
             }
-            _ => {}
-        }
+            _ => return,
+        };
+        match source {
+            Some(source) => bounds.bind(
+                source.source.clone(),
+                Some(source.resource.clone()),
+                Some(textures.subscribe(&source.source)),
+            ),
+            None => bounds.bind(String::new(), None, None),
+        };
     }
 }
-
-#[model]
-struct Artwork {
-    assets: model!(owned ModelMap<String, ReadyImage>),
-}
-
-impl Default for Artwork {
-    fn default() -> Self {
-        Self {
-            assets: ModelMap::with_capacity(CACHE_ENTRIES).into(),
-        }
-    }
-}
-
-#[model]
-impl Artwork {}
 
 // Active demand and presentation only; decoded pixels reside in ResourceManager.
 struct Lease {
     key: ArtworkKey,
     source: String,
-    state: ReadyImageHandle,
+    resource: ResourceHandle<Texture<'static>>,
+    ready: Rc<Cell<bool>>,
     version_checked: bool,
     _subscription: Effect,
 }
@@ -213,7 +186,6 @@ struct DisplayArtwork {
 }
 
 struct ArtworkPlan {
-    model: ArtworkHandle,
     requests: Vec<Lease>,
     path: String,
     key: ArtworkKey,
@@ -242,7 +214,7 @@ impl ArtworkPlan {
     fn loading(&self) -> usize {
         self.requests
             .iter()
-            .filter(|entry| !entry.state.ready())
+            .filter(|entry| !entry.ready.get())
             .count()
     }
 
@@ -254,44 +226,25 @@ impl ArtworkPlan {
             return false;
         }
         let source = resources::token(&key);
-        let assets = self.model.assets();
-        if assets.len() == assets.capacity() {
-            assets
-                .reserve(CACHE_ENTRIES)
-                .expect("artwork demand capacity");
-        }
-        assets
-            .try_insert(source.clone(), ReadyImage::default())
-            .unwrap_or_else(|(error, _, _)| panic!("artwork model insertion: {error:?}"));
-        let state = assets
-            .get(source.as_str())
-            .expect("registered artwork state");
         let resource = textures.load(source.clone());
         let signal = textures.subscribe(&source);
-        let state_changed = state.clone();
-        let expected = key.clone();
-        let initialized = std::cell::Cell::new(false);
+        let ready = Rc::new(Cell::new(false));
+        let completed = ready.clone();
+        let demand = resource.clone();
+        let initialized = Cell::new(false);
         let subscription = Effect::new(move || {
             signal.get();
-            let image = resource.get();
+            let image = demand.get();
             let notified = initialized.replace(true);
             if image.cache_revision != 0 || notified {
-                let token = (image.cache_revision != 0
-                    && source_key(expected.0.clone()) == expected)
-                    .then_some(image.cache_revision);
-                let aspect = if token.is_some() {
-                    Fixed::from_int(i32::from(image.width()))
-                        / Fixed::from_int(i32::from(image.height()))
-                } else {
-                    Fixed::ONE
-                };
-                state_changed.complete(token, aspect);
+                completed.set(true);
             }
         });
         self.requests.push(Lease {
             key,
             source,
-            state,
+            resource,
+            ready,
             version_checked: false,
             _subscription: subscription,
         });
@@ -302,7 +255,7 @@ impl ArtworkPlan {
     fn refresh_sources(&mut self) {
         let mut changed = Vec::new();
         for entry in &mut self.requests {
-            if !entry.version_checked && entry.state.ready() {
+            if !entry.version_checked && entry.ready.get() {
                 entry.version_checked = true;
                 let current = source_key(entry.key.0.clone());
                 if current != entry.key {
@@ -320,49 +273,24 @@ impl ArtworkPlan {
                 self.key = current;
                 self.pending = true;
             }
-            let mut retired = None;
-            self.requests.retain(|entry| {
-                if entry.key == old {
-                    retired = Some(entry.source.clone());
-                    false
-                } else {
-                    true
-                }
-            });
-            if let Some(token) = retired {
-                self.model
-                    .assets()
-                    .remove(token.as_str())
-                    .expect("retire changed artwork");
-            }
+            self.requests.retain(|entry| entry.key != old);
             self.bindings_dirty = true;
         }
     }
 
     fn retire(&mut self) {
-        let mut retired = Vec::new();
         self.requests.retain(|entry| {
-            let keep = entry.key == self.key
+            entry.key == self.key
                 || self.visible.contains(&entry.key)
                 || self.neighbors.contains(&entry.key.0)
                 || self
                     .displays
                     .iter()
-                    .any(|display| display.path == entry.key.0);
-            if !keep {
-                retired.push(entry.source.clone());
-            }
-            keep
+                    .any(|display| display.path == entry.key.0)
         });
-        let assets = self.model.assets();
-        for token in retired {
-            assets.remove(token.as_str()).expect("retire artwork model");
-        }
     }
 
-    fn bind_targets(&mut self) {
-        let mut targets: Vec<Vec<ArtworkTarget>> =
-            (0..self.requests.len()).map(|_| Vec::new()).collect();
+    fn bind_targets(&mut self, textures: &ResourceManager<Texture<'static>>) {
         for display in &self.displays {
             let visible = ArtworkTarget {
                 target: Target::Display(display.display.clone()),
@@ -373,20 +301,8 @@ impl ArtworkPlan {
                 path: path.clone(),
             });
             for target in std::iter::once(visible).chain(rows) {
-                if let Some(source) = self.source(&target.path) {
-                    let index = self
-                        .requests
-                        .iter()
-                        .position(|entry| entry.key == source.key)
-                        .expect("active artwork demand");
-                    targets[index].push(target);
-                } else {
-                    target.publish(None, Fixed::ONE, "");
-                }
+                target.bind(self.source(&target.path), textures);
             }
-        }
-        for (entry, targets) in self.requests.iter().zip(targets) {
-            entry.state.bind(entry.source.clone(), targets);
         }
         self.bindings_dirty = false;
     }
@@ -410,9 +326,7 @@ pub(super) fn install<B: Surface, F: RendererFactory<B>>(
                 images.add_probed_loader(resources::ArtworkDecoder::new());
             }),
     );
-    let model = app.add_model(Artwork::default()).finish();
     app.add_resource(ArtworkPlan {
-        model,
         requests: Vec::new(),
         path: String::new(),
         key: (String::new(), None),
@@ -526,7 +440,7 @@ fn update(
         }
     }
     if loader.bindings_dirty {
-        loader.bind_targets();
+        loader.bind_targets(&textures);
     }
 }
 

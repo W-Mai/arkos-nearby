@@ -95,8 +95,6 @@ impl Changes {
 )]
 pub(super) struct DisplayState {
     role: DisplayRole,
-    #[observe]
-    pub(super) artwork_token: Option<u64>,
     pub(super) cover_bounds: model!(owned super::artwork::CoverBounds),
     pub(super) shelf: model!(owned super::shelf::Shelf),
     #[observe]
@@ -140,10 +138,6 @@ pub(super) struct DisplayState {
 
 #[model]
 impl DisplayState {
-    pub(super) fn set_artwork_token(&mut self, token: Option<u64>) -> Changes {
-        self.artwork_token = token;
-        Changes::NONE
-    }
     pub(super) fn set_deck_height(&mut self, height: Fixed) -> Changes {
         self.deck_height = height;
         Changes::NONE
@@ -746,7 +740,6 @@ fn register<B: Surface, F: RendererFactory<B>>(
 ) -> DisplayHandle {
     app.add_model(DisplayState {
         role,
-        artwork_token: None,
         cover_bounds: super::artwork::CoverBounds::default().into(),
         shelf: super::shelf::Shelf::new(role == DisplayRole::Shelf).into(),
         deck_height: Fixed::ZERO,

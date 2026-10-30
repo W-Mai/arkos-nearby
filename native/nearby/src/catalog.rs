@@ -36,6 +36,30 @@ mod library_tests {
     use super::*;
 
     #[test]
+    fn returning_between_browsers_retains_one_compatible_index() {
+        let directory = std::env::temp_dir().join(format!(
+            "nearby-shared-index-{}",
+            crate::system::random_id().unwrap()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let mut job = IndexJob::local().unwrap();
+        job.cache = directory.join("index.json");
+        let mut first = Browser::with_inventory(job.clone(), true).unwrap();
+        let mut second = Browser::with_inventory(job.clone(), true).unwrap();
+        let index = job.run();
+        first.accept_index(index.clone());
+        second.accept_index(index.clone());
+        for _ in 0..32 {
+            for browser in [&mut first, &mut second] {
+                browser.resume();
+                assert!(!browser.indexing);
+                assert!(Arc::ptr_eq(browser.index.as_ref().unwrap(), &index));
+            }
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn visible_favorites_export_each_games_local_artwork() {
         let mut browser = Browser::with_inventory(IndexJob::local().unwrap(), true).unwrap();
         browser.levels.push(Level {
@@ -270,9 +294,7 @@ impl Entry {
         })
     }
     pub fn prepare(&self) -> Result<Context> {
-        let library = context::config(&self.frontend)?
-            .join("cores")
-            .join(format!("{}_libretro.so", self.core));
+        let library = context::resolve_core(&self.frontend, &self.core)?;
         context::parse(
             &self.frontend,
             &[
@@ -390,10 +412,8 @@ impl Browser {
         }
     }
     pub fn reopen(&mut self) {
+        self.resume();
         self.indexing = true;
-        self.input_epoch = crate::system::monotonic();
-        self.search_running = false;
-        self.exit = false;
         if let Ok(personal) = library::Library::load(Path::new(context::INSTALL)) {
             self.personal = personal;
         }
@@ -402,8 +422,30 @@ impl Browser {
         }
         self.refresh_platforms();
         self.refresh_recent();
+    }
+
+    pub fn resume(&mut self) {
+        self.input_epoch = crate::system::monotonic();
+        self.search_running = false;
+        self.exit = false;
         if self.kind() == LibraryPage::Search {
             self.changed_query();
+        }
+    }
+
+    pub(crate) fn accept_index(&mut self, index: Arc<Index>) {
+        if index.matches(&self.roots, &self.inventory.platforms) {
+            self.indexed(index);
+        }
+    }
+
+    pub(crate) fn refresh_personal(&mut self) {
+        if let Ok(personal) = library::Library::load(Path::new(context::INSTALL)) {
+            self.personal = personal;
+            if self.kind() == LibraryPage::Favorites {
+                self.favorites();
+            }
+            self.refresh_recent();
         }
     }
     pub fn new() -> Result<Self> {
@@ -1282,24 +1324,17 @@ fn local_platforms() -> Result<(Vec<PathBuf>, Vec<Entry>)> {
                 if let Some(core) = crate::handheld_link::preferred(&directory.join("game.zip")) {
                     Some(("retroarch", core))
                 } else {
-                    crate::core_choice::candidates(&directory.join("game.zip"))
+                    crate::core_choice::core_order(&directory.join("game.zip"))
                         .iter()
                         .find(|choice| {
-                            context::config(choice.frontend).is_ok_and(|root| {
-                                root.join("cores")
-                                    .join(format!("{}_libretro.so", choice.id))
-                                    .is_file()
-                            })
+                            context::resolve_core(choice.frontend, choice.id)
+                                .is_ok_and(|path| path.is_file())
                         })
                         .map(|choice| (choice.frontend, choice.id))
                 };
             let (frontend, core) = choice
                 .filter(|(frontend, core)| {
-                    context::config(frontend).is_ok_and(|root| {
-                        root.join("cores")
-                            .join(format!("{core}_libretro.so"))
-                            .is_file()
-                    })
+                    context::resolve_core(frontend, core).is_ok_and(|path| path.is_file())
                 })
                 .unwrap_or(("", ""));
             entries.push(Entry {

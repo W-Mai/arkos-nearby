@@ -228,8 +228,10 @@ int main(int argc, char **argv) {
     FN(bool, retro_unserialize, (const void *, size_t));
     struct retro_system_info info = {0};
     retro_get_system_info(&info);
-    if (!info.library_name || strcmp(info.library_name, "FinalBurn Neo") || !info.need_fullpath || !info.block_extract) {
-        fail("Expected a full-path FinalBurn Neo core"); dlclose(library); return 6;
+    if (!info.library_name ||
+        (strcmp(info.library_name, "FinalBurn Neo") && strcmp(info.library_name, "MAME")) ||
+        !info.need_fullpath || !info.block_extract) {
+        fail("Expected a full-path FBNeo or MAME arcade core"); dlclose(library); return 6;
     }
     retro_set_environment(environment);
     retro_set_video_refresh(video);

@@ -62,6 +62,14 @@ fn run(args: &[String]) -> Result<i32> {
             arkos_nearby::launcher::recipes::finish()?;
             Ok(0)
         }
+        Some("resolve-launch") if args.len() >= 4 && args[1] == "--frontend" && args[3] == "--" => {
+            arkos_nearby::launch::resolve(&args[2], &args[4..])?;
+            Ok(0)
+        }
+        Some("launch-end") if args.len() == 2 => {
+            arkos_nearby::launch::finish(&args[1])?;
+            Ok(0)
+        }
         Some("launcher-open") if args.len() == 2 => {
             arkos_nearby::home::open_launcher(args[1].parse()?)?;
             Ok(0)

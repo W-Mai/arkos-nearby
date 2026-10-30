@@ -223,7 +223,7 @@ fn find(state: &State, room: &VerifiedRoom, profile: &Profile) -> Result<Vec<Can
                 &state.id,
                 None,
                 "selecting_game",
-                "已发现本地候选，仍在查找其他版本...",
+                "已发现本地游戏，仍在查找其他版本...",
             )?;
         }
     }

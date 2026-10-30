@@ -8,6 +8,22 @@ pub const ROOT: &str = "/opt/arkos-nearby/cores";
 pub const STOCK_NESTOPIA_SHA: &str =
     "dcf01334577a81d5a1f4331b2d4aac9fba2a3308a5442ec0818d7599e624c086";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    Optimized,
+    Device,
+}
+
+impl Origin {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Optimized => "工具优化",
+            Self::Device => "设备原有",
+        }
+    }
+}
+
 pub struct Entry {
     pub id: &'static str,
     pub frontend: &'static str,

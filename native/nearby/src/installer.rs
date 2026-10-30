@@ -16,7 +16,8 @@ use crate::{Result, require};
 pub const ORIGINAL_SHA: &str = "4d36f0cbab754991eb002b47ba719b9f0986f6ab0f9e66d6830ff8a2e159ab44";
 const START: &[u8] = b"if [ \"$?\" -eq \"10\" ]; then\n";
 const END: &[u8] = b"if [ -f \"/boot/rk3566.dtb\" ]";
-pub const BLOCK:&[u8]=b"if [ \"$?\" -eq \"10\" ]; then\n  # ARKOS_NEARBY_X_BEGIN\n  sudo -n /opt/arkos-nearby/arkos-nearby menu --frontend \"$emulator\" -- \"$@\"\n  result=$?\n  if [ \"$result\" -ne \"230\" ]; then\n    exit \"$result\"\n  fi\n  # ARKOS_NEARBY_X_END\nfi\n\n";
+pub const LEGACY_BLOCK:&[u8]=b"if [ \"$?\" -eq \"10\" ]; then\n  # ARKOS_NEARBY_X_BEGIN\n  sudo -n /opt/arkos-nearby/arkos-nearby menu --frontend \"$emulator\" -- \"$@\"\n  result=$?\n  if [ \"$result\" -ne \"230\" ]; then\n    exit \"$result\"\n  fi\n  # ARKOS_NEARBY_X_END\nfi\n\n";
+pub const BLOCK: &[u8] = include_bytes!("launch-wrapper.sh");
 pub const ENTRY: &[u8] = b"#!/bin/sh\nexec sudo -n /opt/arkos-nearby/arkos-nearby manual\n";
 const ENTRY_PATH: &str = "opt/system/Nearby Multiplayer.sh";
 const LAUNCHER_PATH: &str = "opt/system/Nearby Launcher.sh";
@@ -46,7 +47,11 @@ pub fn patched(original: &[u8]) -> Result<Vec<u8>> {
     let (start, end) = parts(original)?;
     let mut bytes = original[..start].to_vec();
     bytes.extend_from_slice(BLOCK);
-    bytes.extend_from_slice(&original[end..]);
+    bytes.extend_from_slice(
+        String::from_utf8(original[end..].to_vec())?
+            .replace("/opt/retroarch/bin/${emulator}", "nearby_launch_frontend")
+            .as_bytes(),
+    );
     Ok(bytes)
 }
 pub fn owned_launcher(original: &[u8], current: &[u8]) -> Result<()> {
@@ -58,11 +63,11 @@ pub fn owned_launcher(original: &[u8], current: &[u8]) -> Result<()> {
         return Ok(());
     }
     let (start, end) = parts(original)?;
-    let (cur_start, cur_end) = parts(current)?;
+    let mut legacy = original[..start].to_vec();
+    legacy.extend_from_slice(LEGACY_BLOCK);
+    legacy.extend_from_slice(&original[end..]);
     require(
-        original[..start] == current[..cur_start]
-            && original[end..] == current[cur_end..]
-            && current[cur_start..cur_end] == *BLOCK,
+        current == legacy || current == patched(original)?,
         "Launcher contains unrelated modifications",
     )
 }

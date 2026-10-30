@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-30
+
+- Use the same core selection for single-player and multiplayer across game launch entries.
+- Fix Super Bomberman 5 startup when creating from the game launcher and joining through FN+X or Select.
+- Check installed FBNeo, FBNeo Plus and MAME for arcade compatibility, and launch MAME archives in ROM mode.
+- Fix controller input in multiplayer panels opened from the home shortcut, Options and game launch.
+- Improve repeated navigation between Favorites and the game library, preserving selection and artwork.
+
+- Read handheld controls directly in multiplayer panels opened from the home shortcut, Options and game launch.
+
 ## [0.10.0] - 2026-10-30
 
 - Improve browsing responsiveness in Favorites, the game library and multiplayer panels.

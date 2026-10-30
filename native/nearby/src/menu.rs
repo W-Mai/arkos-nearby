@@ -87,6 +87,7 @@ pub struct MenuSession {
     display: display::Display,
     lobby_flow: Option<Flow>,
     launcher: bool,
+    index_task: Option<thread::JoinHandle<Arc<crate::catalog::Index>>>,
 }
 
 impl MenuSession {
@@ -107,6 +108,7 @@ impl MenuSession {
             display: display::Display::open_launcher()?,
             lobby_flow: None,
             launcher: true,
+            index_task: None,
         })
     }
     pub fn choose_launcher(
@@ -114,16 +116,27 @@ impl MenuSession {
         controller: &mut crate::launcher::Controller,
     ) -> Result<crate::launcher::Intent> {
         let mut sender = self.display.begin_screen();
-        let job = controller.browser().index_job();
-        let replies = sender.clone();
-        thread::spawn(move || replies.send(Event::Indexed(job.run())));
         while !self.display.stopped() {
             if controller.changed_tab {
                 controller.changed_tab = false;
                 sender = self.display.begin_screen();
+            }
+            if self
+                .index_task
+                .as_ref()
+                .is_some_and(|task| task.is_finished())
+            {
+                let index = self
+                    .index_task
+                    .take()
+                    .unwrap()
+                    .join()
+                    .map_err(|_| "Library indexing failed")?;
+                controller.indexed(index);
+            }
+            if self.index_task.is_none() && controller.browser().indexing {
                 let job = controller.browser().index_job();
-                let replies = sender.clone();
-                thread::spawn(move || replies.send(Event::Indexed(job.run())));
+                self.index_task = Some(thread::spawn(move || job.run()));
             }
             if let Some(job) = controller.browser().search_job() {
                 let replies = sender.clone();
@@ -138,7 +151,7 @@ impl MenuSession {
                     None
                 }
                 Ok(Some(Event::Indexed(index))) => {
-                    controller.browser().indexed(index);
+                    controller.indexed(index);
                     None
                 }
                 Ok(Some(Event::Searched(result))) => {
@@ -166,6 +179,7 @@ impl MenuSession {
             display: display::Display::open()?,
             lobby_flow: None,
             launcher: false,
+            index_task: None,
         })
     }
     pub fn run_with_fallback(

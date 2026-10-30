@@ -29,8 +29,6 @@ pub(super) struct Row {
     #[observe]
     detail_revision: u64,
     artwork: String,
-    #[observe]
-    pub artwork_token: Option<u64>,
     pub cover_bounds: model!(owned super::artwork::CoverBounds),
     pub static_picture: model!(owned super::static_snapshot::Picture),
     #[observe]
@@ -55,11 +53,6 @@ impl Row {
         self.artwork.clone()
     }
 
-    pub fn set_artwork_token(&mut self, token: Option<u64>) -> TextChanged {
-        self.artwork_token = token;
-        TextChanged(false)
-    }
-
     fn text_value(&self, title: bool) -> String {
         if title {
             self.name.clone()
@@ -72,6 +65,10 @@ impl Row {
 }
 
 impl RowHandle {
+    pub fn artwork_token(&self) -> Option<u64> {
+        self.cover_bounds().token()
+    }
+
     pub fn label(&self, title: bool) -> String {
         if title {
             self.title_revision();
@@ -94,7 +91,6 @@ impl Row {
             title_revision: 0,
             detail_revision: 0,
             artwork: String::new(),
-            artwork_token: None,
             cover_bounds: super::artwork::CoverBounds::default().into(),
             static_picture: super::static_snapshot::Picture::default().into(),
             strength: data.signal,
@@ -115,7 +111,6 @@ impl Row {
             title_revision: 0,
             detail_revision: 0,
             artwork: data.artwork.clone(),
-            artwork_token: None,
             cover_bounds: super::artwork::CoverBounds::default().into(),
             static_picture: super::static_snapshot::Picture::default().into(),
             strength: 0,
@@ -171,9 +166,6 @@ pub(super) fn reconcile(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision:
             ));
             std::mem::swap(&mut current.cover_bounds, &mut incoming.cover_bounds);
             std::mem::swap(&mut current.static_picture, &mut incoming.static_picture);
-            if current.artwork == incoming.artwork {
-                incoming.artwork_token = current.artwork_token;
-            }
             *current = incoming;
         },
     )

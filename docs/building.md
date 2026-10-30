@@ -9,7 +9,7 @@
 ## 准备
 
 ```sh
-python3 scripts/build.py prepare /path/to/arkos-nearby-0.10.0-build-assets.tar.gz
+python3 scripts/build.py prepare /path/to/arkos-nearby-0.10.1-build-assets.tar.gz
 cargo +1.92.0 fetch --locked --manifest-path native/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 ```

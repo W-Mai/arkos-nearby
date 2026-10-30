@@ -330,22 +330,9 @@ pub(crate) fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Re
         .collect();
     require(games.len() == 1, "Launch must select one local game")?;
     let game_path = games[0].clone();
-    if adapt
-        && let Some(id) = crate::handheld_link::preferred(&game_path)
-        && (core.identity.id != id || frontend != "retroarch")
-    {
-        let path = config("retroarch")?
-            .join("cores")
-            .join(format!("{id}_libretro.so"));
-        core = inspect(&path, "retroarch")?;
-        frontend = "retroarch".into();
-        args = replace_core(&args, &path);
-    }
-    if adapt && !core.supported {
-        for choice in crate::core_choice::candidates(&game_path) {
-            let path = config(choice.frontend)?
-                .join("cores")
-                .join(format!("{}_libretro.so", choice.id));
+    if adapt {
+        for choice in crate::core_choice::core_order(&game_path) {
+            let path = resolve_core(choice.frontend, choice.id)?;
             if let Ok(candidate) = inspect(&path, choice.frontend)
                 && candidate.supported
             {
@@ -412,6 +399,18 @@ pub(crate) fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Re
 }
 
 impl Context {
+    pub fn core_label(&self) -> String {
+        format!("{} · {}", self.identity.core.name, self.origin().label())
+    }
+
+    pub fn origin(&self) -> crate::owned_core::Origin {
+        if crate::owned_core::by_path(&self.core_path, &self.frontend).is_some() {
+            crate::owned_core::Origin::Optimized
+        } else {
+            crate::owned_core::Origin::Device
+        }
+    }
+
     pub fn with_core(&self, choice: crate::core_choice::Choice) -> Result<Self> {
         let path = resolve_core(choice.frontend, choice.id)?;
         let args = replace_core(&self.argv, &path);
@@ -420,7 +419,7 @@ impl Context {
             selected.supported
                 && selected.game_path == self.game_path
                 && selected.identity.content.same_bytes(&self.identity.content),
-            "Candidate interprets different local content or lacks Netplay support",
+            "Selected core interprets different local content or lacks Netplay support",
         )?;
         Ok(selected)
     }

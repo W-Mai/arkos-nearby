@@ -19,6 +19,14 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def copy_license(source, destination):
+    source, destination = Path(source), Path(destination)
+    data = source.read_bytes()
+    if not destination.is_file() or destination.read_bytes() != data:
+        destination.write_bytes(data)
+    return str(destination)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("build", "check"))
@@ -76,7 +84,9 @@ def main():
     if args.sdl_linkage == "shared":
         (output / "lib").mkdir(exist_ok=True)
         shutil.copy2(library, output / "lib/libSDL2-2.0.so.0")
-    shutil.copytree(LICENSES, output / "licenses", dirs_exist_ok=True)
+    shutil.copytree(
+        LICENSES, output / "licenses", dirs_exist_ok=True, copy_function=copy_license
+    )
     font_licenses = output / "licenses/font"
     font_licenses.mkdir(exist_ok=True)
     for name in ("OFL.txt", "font-source.json"):

@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::context::{Context, INSTALL};
 use crate::game::{Settings, settings};
-use crate::session::{State, best, current};
+use crate::session::{State, best, current, progress};
 use crate::system::{command, mkdir, monotonic, private_write, write};
 use crate::{Result, require};
 
@@ -45,11 +45,11 @@ fn probe_report(output: &str) -> Result<Value> {
 }
 
 pub fn stop(state: &State) -> Result<()> {
-    best(&[
-        "systemctl",
-        "stop",
-        &format!("{}-probe.service", state.unit()),
-    ]);
+    stop_probe(&state.unit(), &state.root())
+}
+
+fn stop_probe(unit: &str, root: &Path) -> Result<()> {
+    best(&["systemctl", "stop", &format!("{unit}-probe.service")]);
     let active = command(
         "systemctl",
         &[
@@ -57,7 +57,7 @@ pub fn stop(state: &State) -> Result<()> {
             "-p",
             "ActiveState",
             "--value",
-            &format!("{}-probe.service", state.unit()),
+            &format!("{unit}-probe.service"),
         ],
         8,
         false,
@@ -66,36 +66,74 @@ pub fn stop(state: &State) -> Result<()> {
         matches!(active.trim(), "" | "inactive" | "failed"),
         "Arcade load check is still stopping",
     )?;
-    let directory = state.root().join("core-probe");
+    let directory = root.join("core-probe");
     if directory.exists() {
         fs::remove_dir_all(directory)?;
     }
     Ok(())
 }
 
-fn probe(state: &State, context: &Context, settings: &Settings) -> Result<()> {
+pub fn stop_launch(root: &Path, id: &str) -> Result<()> {
+    stop_probe(&format!("arkos-nearby-launch-{id}"), root)
+}
+
+struct Scope<'a> {
+    state: Option<&'a State>,
+    root: PathBuf,
+    unit: String,
+    id: String,
+}
+
+impl<'a> Scope<'a> {
+    fn room(state: &'a State) -> Self {
+        Self {
+            state: Some(state),
+            root: state.root(),
+            unit: state.unit(),
+            id: state.id.clone(),
+        }
+    }
+    fn check(&self) -> Result<()> {
+        if let Some(state) = self.state {
+            current(&state.id)?;
+        }
+        Ok(())
+    }
+
+    fn settings(&self, context: &Context) -> Result<Settings> {
+        if self.state.is_some() {
+            settings(context)
+        } else {
+            crate::game::solo_settings(context)
+        }
+    }
+}
+
+pub fn requires_probe(context: &Context) -> bool {
+    context.frontend == "retroarch"
+        && crate::core_choice::arcade_family(&context.core_id)
+        && context.core_elf_bits == 64
+}
+
+fn probe(scope: &Scope<'_>, context: &Context, settings: &Settings) -> Result<()> {
     require(
-        context.frontend == "retroarch"
-            && context.core_id == "fbneo"
-            && context.core_elf_bits == 64,
-        "Arcade load check requires the installed ARM64 FBNeo core",
+        requires_probe(context),
+        "Arcade load check requires an installed ARM64 arcade core",
     )?;
-    current(&state.id)?;
-    let directory = state.root().join("core-probe");
+    scope.check()?;
+    let directory = scope.root.join("core-probe");
     mkdir(&directory)?;
     let saves = directory.join("saves");
     mkdir(&saves)?;
     let options = directory.join("core-options.cfg");
     private_write(&options, &settings.options)?;
     let system = system_directory(&settings.base)?;
-    let arguments = vec![
+    let mut arguments = vec![
         "--collect".into(),
         "--wait".into(),
         "--pipe".into(),
         "--quiet".into(),
-        format!("--unit={}-probe", state.unit()),
-        format!("--property=BindsTo={}.service", state.unit()),
-        format!("--property=After={}.service", state.unit()),
+        format!("--unit={}-probe", scope.unit),
         "--property=RuntimeMaxSec=45".into(),
         "--property=TimeoutStopSec=2".into(),
         "--property=MemoryMax=512M".into(),
@@ -109,13 +147,23 @@ fn probe(state: &State, context: &Context, settings: &Settings) -> Result<()> {
         format!("--property=ReadWritePaths={}", directory.display()),
         format!("--property=WorkingDirectory={}", directory.display()),
         format!("--setenv=HOME={}", directory.display()),
+    ];
+    if scope.state.is_some() {
+        arguments.push(format!("--property=BindsTo={}.service", scope.unit));
+        arguments.push(format!("--property=After={}.service", scope.unit));
+    }
+    if let Some(runtime) = crate::core_runtime::directory(&context.core_id, context.core_elf_bits)?
+    {
+        arguments.push(format!("--setenv=LD_LIBRARY_PATH={runtime}"));
+    }
+    arguments.extend([
         format!("{INSTALL}/core-probe64"),
         context.core_path.to_string_lossy().into_owned(),
         context.game_path.to_string_lossy().into_owned(),
         system.to_string_lossy().into_owned(),
         saves.to_string_lossy().into_owned(),
         options.to_string_lossy().into_owned(),
-    ];
+    ]);
     let started = monotonic();
     let outcome = command(
         "systemd-run",
@@ -124,13 +172,13 @@ fn probe(state: &State, context: &Context, settings: &Settings) -> Result<()> {
         true,
     )
     .and_then(|text| probe_report(&text));
-    stop(state)?;
-    current(&state.id)?;
-    let record = json!({"session_id":state.id,"role":state.role,"core_id":context.core_id,
+    stop_probe(&scope.unit, &scope.root)?;
+    scope.check()?;
+    let record = json!({"session_id":scope.id,"role":scope.state.map_or("single_player",|state| state.role.as_str()),"core_id":context.core_id,
         "core_sha256":context.core_sha256,"content_sha256":context.identity.content.sha256,
         "elapsed_ms":(monotonic()-started)*1000.0,"result":outcome.as_ref().ok(),
         "error":outcome.as_ref().err().map(|error| error.to_string().chars().take(4096).collect::<String>())});
-    write(&state.root().join("core-probe.json"), &record)?;
+    write(&scope.root.join("core-probe.json"), &record)?;
     mkdir(&Path::new(INSTALL).join("logs"))?;
     write(
         &Path::new(INSTALL).join("logs/last-core-probe.json"),
@@ -140,34 +188,80 @@ fn probe(state: &State, context: &Context, settings: &Settings) -> Result<()> {
 }
 
 pub fn host(state: &State, original: &Context) -> Result<(Context, Settings)> {
-    if let Some(choice) =
-        crate::core_choice::arcade_candidate(&original.game_path, &original.core_id)
-    {
+    select(&Scope::room(state), original)
+}
+
+pub fn single_player(root: &Path, id: &str, original: &Context) -> Result<(Context, Settings)> {
+    select(
+        &Scope {
+            state: None,
+            root: root.into(),
+            unit: format!("arkos-nearby-launch-{id}"),
+            id: id.into(),
+        },
+        original,
+    )
+}
+
+fn select(scope: &Scope<'_>, original: &Context) -> Result<(Context, Settings)> {
+    let choices = crate::core_choice::arcade_order(&original.game_path);
+    if choices.is_empty() || original.frontend != "retroarch" {
+        let snapshot = scope.settings(original)?;
+        if requires_probe(original) && scope.state.is_some() {
+            probe(scope, original, &snapshot)?;
+        }
+        return Ok((original.clone(), snapshot));
+    }
+    let mut attempts = Vec::new();
+    for choice in choices {
+        scope.check()?;
+        let name = match choice.id {
+            "fbneo" => "FBNeo",
+            "fbneo_plus" => "FBNeo Plus",
+            _ => "MAME",
+        };
+        if let Some(state) = scope.state {
+            progress(
+                &state.id,
+                None,
+                "creating",
+                &format!("正在检查 {name} 游戏兼容性..."),
+            )?;
+        }
         let selected = (|| -> Result<(Context, Settings)> {
-            let context = original.with_core(choice)?;
-            let snapshot = settings(&context)?;
-            probe(state, &context, &snapshot)?;
+            let context = if original.core_id == choice.id {
+                original.clone()
+            } else {
+                original.with_core(*choice)?
+            };
+            let snapshot = scope.settings(&context)?;
+            probe(scope, &context, &snapshot)?;
             Ok((context, snapshot))
         })();
+        scope.check()?;
+        attempts.push(json!({"core_id":choice.id,"loaded":selected.is_ok(),
+            "error":selected.as_ref().err().map(|error|error.to_string().chars().take(4096).collect::<String>())}));
+        let record = json!({"session_id":scope.id,"attempts":attempts,"origin":selected.as_ref().ok().map(|(context,_)|context.origin())});
+        write(&scope.root.join("core-selection.json"), &record)?;
+        mkdir(&Path::new(INSTALL).join("logs"))?;
+        write(
+            &Path::new(INSTALL).join("logs/last-core-selection.json"),
+            &record,
+        )?;
         match selected {
             Ok(value) => return Ok(value),
             Err(error) => {
-                current(&state.id)?;
-                eprintln!(
-                    "Arcade candidate unavailable; retaining {}: {error}",
-                    original.core_id
-                );
+                eprintln!("Arcade core {} unavailable: {error}", choice.id);
             }
         }
     }
-    let snapshot = client(state, original)?;
-    Ok((original.clone(), snapshot))
+    Err("本机街机核心均无法加载这份 ROM，请检查游戏文件与 BIOS".into())
 }
 
 pub fn client(state: &State, context: &Context) -> Result<Settings> {
     let snapshot = settings(context)?;
-    if context.core_id == "fbneo" && context.core_elf_bits == 64 {
-        probe(state, context, &snapshot)?;
+    if requires_probe(context) {
+        probe(&Scope::room(state), context, &snapshot)?;
     }
     Ok(snapshot)
 }

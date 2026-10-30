@@ -14,6 +14,7 @@ pub struct Input {
     file: File,
     x: bool,
     function: bool,
+    launcher: bool,
     dropped: bool,
     controls: Controls,
     axes: Vec<(u16, i32, i32)>,
@@ -21,9 +22,11 @@ pub struct Input {
 
 impl Input {
     pub fn open() -> io::Result<Option<Self>> {
-        if std::env::var("ARKOS_NEARBY_LAUNCHER_INPUT").as_deref() != Ok("1") {
-            return Ok(None);
-        }
+        let launcher = match std::env::var("ARKOS_NEARBY_LAUNCHER_INPUT").as_deref() {
+            Ok("1") => true,
+            Ok("0") => false,
+            _ => return Ok(None),
+        };
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NONBLOCK)
@@ -32,6 +35,7 @@ impl Input {
             file,
             x: false,
             function: false,
+            launcher,
             dropped: false,
             controls: Controls::default(),
             axes: Vec::new(),
@@ -126,14 +130,14 @@ impl Input {
                     self.function = value == 1;
                     if self.function {
                         state.cancel();
-                        if self.x {
+                        if self.x && self.launcher {
                             actions.push(Action::LauncherHome);
                         }
                     }
                 }
                 X => {
                     if value == 1 && !self.x {
-                        if self.function {
+                        if self.function && self.launcher {
                             state.cancel();
                             actions.push(Action::LauncherHome);
                         } else {
@@ -151,7 +155,7 @@ impl Input {
                     actions.extend(self.controls.update(
                         code,
                         if value == 1 {
-                            controls::button(code)
+                            controls::button_for(code, self.launcher)
                         } else {
                             None
                         },

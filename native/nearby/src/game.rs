@@ -140,6 +140,14 @@ pub struct Settings {
 }
 
 pub fn settings(context: &Context) -> Result<Settings> {
+    settings_for(context, true)
+}
+
+pub fn solo_settings(context: &Context) -> Result<Settings> {
+    settings_for(context, false)
+}
+
+fn settings_for(context: &Context, multiplayer: bool) -> Result<Settings> {
     let configuration = config(&context.frontend)?;
     let source = confined(
         &configuration.join("retroarch.cfg"),
@@ -151,8 +159,12 @@ pub fn settings(context: &Context) -> Result<Settings> {
     } else {
         vec![]
     };
-    let options = if let Some(mode) = context.link_mode {
+    let options = if let Some(mode) = context.link_mode.filter(|_| multiplayer) {
         isolated(&String::from_utf8(bytes)?, mode.options()).into_bytes()
+    } else if let Some(overrides) =
+        crate::core_choice::arcade_options(&context.game_path, &context.core_id)
+    {
+        isolated(&String::from_utf8(bytes)?, overrides).into_bytes()
     } else {
         bytes
     };

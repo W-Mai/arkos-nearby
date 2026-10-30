@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{
     Arc,
@@ -14,17 +14,8 @@ use serde_json::{Value, json};
 
 use super::{Event, OwnedChild, log};
 use crate::context::INSTALL;
-use crate::system::{mkdir, monotonic, private_write, random_id};
+use crate::system::{mkdir, monotonic};
 use crate::{Result, require};
-
-const KEYS: &str = "a = enter\nb = esc\nback = esc\nx = r\ny = y\nstart = tab\nup = up\ndown = down\nleft = left\nright = right\nl1 = pageup\nr1 = pagedown\nl2 = pageup\nr2 = pagedown\nleft_analog_up = up\nleft_analog_down = down\nleft_analog_left = left\nleft_analog_right = right\nright_analog_up = up\nright_analog_down = down\nright_analog_left = left\nright_analog_right = right\ndeadzone_triggers = 32767\n";
-
-struct Temporary(PathBuf);
-impl Drop for Temporary {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 struct Delivery {
     screen: Option<u64>,
@@ -50,7 +41,6 @@ pub(super) struct Display {
     _lock: Option<crate::system::Lock>,
     stdin: Option<ChildStdin>,
     gui: Option<OwnedChild>,
-    mapper: Option<OwnedChild>,
     reader: Option<JoinHandle<()>>,
     sender: mpsc::Sender<Delivery>,
     receiver: mpsc::Receiver<Delivery>,
@@ -59,7 +49,6 @@ pub(super) struct Display {
     screen: u64,
     input_epoch: f64,
     previous: Value,
-    _directory: Option<Temporary>,
 }
 
 impl Display {
@@ -73,36 +62,9 @@ impl Display {
         let root = Path::new("/run/arkos-nearby-rust/ui");
         mkdir(root)?;
         let lock = crate::system::Lock::try_acquire(&root.join("interface.lock"))?;
-        let directory = Temporary(root.join(random_id()?));
-        mkdir(&directory.0)?;
-        let keys = directory.0.join("keys.gptk");
-        let mapping = if launcher {
-            KEYS.replace("x = r\n", "").replace("back = esc\n", "")
-        } else {
-            KEYS.into()
-        };
-        private_write(&keys, mapping.as_bytes())?;
         let logs = Path::new(INSTALL).join("logs");
         mkdir(&logs)?;
         log(json!({"phase":"gui-spawn"}))?;
-        let mapper = if launcher {
-            None
-        } else {
-            Some(OwnedChild(
-                Command::new("/opt/inttools/gptokeyb")
-                    .args(["-c", keys.to_str().ok_or("Invalid key mapping path")?])
-                    .env("TERM", "linux")
-                    .env("LANG", "C.UTF-8")
-                    .env("LC_ALL", "C.UTF-8")
-                    .env(
-                        "SDL_GAMECONTROLLERCONFIG_FILE",
-                        "/opt/inttools/gamecontrollerdb.txt",
-                    )
-                    .stdout(Stdio::from(File::create(logs.join("native-mapper.log"))?))
-                    .stderr(Stdio::null())
-                    .spawn()?,
-            ))
-        };
         let gui = OwnedChild(
             Command::new(format!("{INSTALL}/arkos-nearby-gui"))
                 .env(
@@ -119,9 +81,8 @@ impl Display {
                 .stderr(Stdio::from(File::create(logs.join("native-gui.log"))?))
                 .spawn()?,
         );
-        let mut display = Self::connect(gui, mapper)?;
+        let mut display = Self::connect(gui)?;
         display._lock = Some(lock);
-        display._directory = Some(directory);
         for signal in [libc::SIGTERM, libc::SIGHUP] {
             display.signals.push(signal_hook::flag::register(
                 signal,
@@ -131,12 +92,12 @@ impl Display {
         Ok(display)
     }
 
-    fn connect(mut gui: OwnedChild, mapper: Option<OwnedChild>) -> Result<Self> {
+    fn connect(mut gui: OwnedChild) -> Result<Self> {
         let stdin = gui.0.stdin.take().ok_or("GUI has no input channel")?;
         let stdout = gui.0.stdout.take().ok_or("GUI has no output channel")?;
         let (sender, receiver) = mpsc::channel();
         let input_sender = sender.clone();
-        // Capture the screen epoch before starting the reader. A GUI or mapper
+        // Capture the screen epoch before starting the reader. The GUI
         // can emit the first key edge immediately after spawn; recording the
         // epoch afterwards would classify that valid edge as stale.
         let input_epoch = monotonic();
@@ -212,7 +173,6 @@ impl Display {
             _lock: None,
             stdin: Some(stdin),
             gui: Some(gui),
-            mapper,
             reader: Some(reader),
             sender,
             receiver,
@@ -221,7 +181,6 @@ impl Display {
             screen: 0,
             input_epoch,
             previous: Value::Null,
-            _directory: None,
         })
     }
 
@@ -245,12 +204,6 @@ impl Display {
     }
 
     pub(super) fn present(&mut self, view: Value) -> Result<()> {
-        if let Some(mapper) = &mut self.mapper {
-            require(
-                mapper.0.try_wait()?.is_none(),
-                "The owned gamepad mapper stopped",
-            )?;
-        }
         let gui = self.gui.as_mut().ok_or("The graphical interface stopped")?;
         require(
             gui.0.try_wait()?.is_none(),
@@ -302,8 +255,7 @@ mod tests {
     fn display() -> Display {
         let gui = OwnedChild(Command::new("sh").args(["-c", "printf '{\"event\":\"frame_ready\"}\\n'; while IFS= read -r line; do printf '\"confirm\"\\n'; done"])
             .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap());
-        let mapper = OwnedChild(Command::new("sleep").arg("30").spawn().unwrap());
-        let display = Display::connect(gui, Some(mapper)).unwrap();
+        let display = Display::connect(gui).unwrap();
         assert!(matches!(next(&display), Event::FrameReady));
         display
     }
@@ -332,8 +284,7 @@ mod tests {
                 .spawn()
                 .unwrap(),
         );
-        let mapper = OwnedChild(Command::new("sleep").arg("30").spawn().unwrap());
-        let display = Display::connect(gui, Some(mapper)).unwrap();
+        let display = Display::connect(gui).unwrap();
         assert!(matches!(next(&display), Event::Input(action, _) if action == "confirm"));
         assert!(matches!(next(&display), Event::FrameReady));
     }
@@ -346,7 +297,6 @@ mod tests {
             _lock: None,
             stdin: None,
             gui: None,
-            mapper: None,
             reader: None,
             sender: sender.clone(),
             receiver,
@@ -355,7 +305,6 @@ mod tests {
             screen: 0,
             input_epoch: at,
             previous: Value::Null,
-            _directory: None,
         };
         sender
             .send(Delivery {
@@ -368,25 +317,21 @@ mod tests {
     }
 
     #[test]
-    fn screen_handoffs_keep_both_processes_and_close_them_at_session_end() {
+    fn screen_handoffs_keep_the_gui_and_close_it_at_session_end() {
         let mut display = display();
         let gui = display.gui.as_ref().unwrap().0.id();
-        let mapper = display.mapper.as_ref().unwrap().0.id();
         for page in ["mode", "games", "choice", "host", "rooms", "mode"] {
             display.begin_screen();
             display.present(json!({"page":page})).unwrap();
             assert!(matches!(next(&display), Event::Input(action, _) if action == "confirm"));
             assert_eq!(display.gui.as_ref().unwrap().0.id(), gui);
-            assert_eq!(display.mapper.as_ref().unwrap().0.id(), mapper);
         }
         drop(display);
-        for pid in [gui, mapper] {
-            assert_eq!(unsafe { libc::kill(pid as libc::pid_t, 0) }, -1);
-            assert_eq!(
-                std::io::Error::last_os_error().raw_os_error(),
-                Some(libc::ESRCH)
-            );
-        }
+        assert_eq!(unsafe { libc::kill(gui as libc::pid_t, 0) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
     }
 
     #[test]
