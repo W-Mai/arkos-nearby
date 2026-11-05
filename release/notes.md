@@ -18,3 +18,5 @@
 适用配置：**ArkOS4Clone 08262026 · Linux ARM64 4.4.189 · RTL8188EU · 640×480 屏幕**。
 
 [安装与更新](https://github.com/W-Mai/arkos-nearby/blob/v0.11.0/docs/installation.md) · [游戏兼容性](https://github.com/W-Mai/arkos-nearby/blob/v0.11.0/docs/compatibility.md)
+
+组件源码：[固定 BSP 内核源码](https://github.com/W-Mai/arkos-nearby/releases/download/v0.10.0/arkos-kernel-c6b78a0.tar.gz)。该归档的校验值列在本版 `SHA256SUMS` 中。
