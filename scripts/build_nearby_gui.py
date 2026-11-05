@@ -103,13 +103,24 @@ def source_paths():
     paths = [MANIFEST, MANIFEST.with_name("Cargo.lock")]
     paths.extend(sorted((package / "src").rglob("*.rs")))
     paths.extend(sorted((package / "assets").iterdir()))
+    paths.extend(menu_sources())
     return paths
+
+
+def menu_sources():
+    package = ROOT / "native/nearby-menu"
+    return [package / "Cargo.toml", *sorted((package / "src").rglob("*.rs"))]
 
 
 def source_sha256():
     digest = hashlib.sha256()
     for path in source_paths():
-        digest.update(path.relative_to(MANIFEST.parent).as_posix().encode() + b"\0")
+        relative = (
+            path.relative_to(MANIFEST.parent)
+            if path.is_relative_to(MANIFEST.parent)
+            else path.relative_to(ROOT)
+        )
+        digest.update(relative.as_posix().encode() + b"\0")
         digest.update(path.read_bytes())
     return digest.hexdigest()
 

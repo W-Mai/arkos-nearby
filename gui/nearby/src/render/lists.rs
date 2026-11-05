@@ -1,6 +1,7 @@
 use super::artwork::preview;
 use super::choices::choice;
 use super::consoles::console;
+use super::library::search_icon;
 use super::pixel::Stage::Search;
 use super::selection::FocusTarget;
 use super::{
@@ -19,6 +20,8 @@ use mirui::ui::widgets::{Image, Text};
 const DECK_PEEK: Fixed = Fixed::from_ratio(14, 100);
 const DECK_FULL: Fixed = Fixed::from_ratio(86, 100);
 const DECK_MIN_SCALE: Fixed = Fixed::from_ratio(44, 100);
+const ROW_ACTOR_SHARE: i32 = 18;
+const ROW_ACTOR_MIN_WIDTH: i32 = 32;
 
 fn sheet_scale(expansion: Fixed) -> Fixed {
     DECK_MIN_SCALE + (Fixed::ONE - DECK_MIN_SCALE) * expansion
@@ -238,6 +241,7 @@ fn preview_label(state: model!(DisplayState), metrics: Metrics) -> Entity {
 
 #[compose]
 pub(super) fn game_rows(state: model!(DisplayState), metrics: Metrics) -> Entity {
+    let empty = state.clone();
     ui! {
         Column (
             grow: 1.0,
@@ -252,24 +256,70 @@ pub(super) fn game_rows(state: model!(DisplayState), metrics: Metrics) -> Entity
                         grow: 1.0,
                         bg_color: PANEL,
                         justify: JustifyContent::Center,
+                        align: AlignItems::Center,
+                        row_gap: metrics.gap * 2,
                         padding: Padding::all(metrics.inset)
                     ) {
-                        label (
-                            "没有可选游戏",
-                            metrics.title,
-                            FOREGROUND,
-                            Center
+                        Row (
+                            height: 48,
+                            width: 96,
+                            shrink: 0.0,
+                            column_gap: metrics.gap,
+                            align: AlignItems::Center,
+                            justify: JustifyContent::Center
+                        ) {
+                            search_icon (32)
+                            View (width: 32, height: 48, shrink: 0.0) [
+                                super::deck::ActorAnchor(Search),
+                            ]
+                        }
+                        caption (
+                            move || empty.library_placeholder().title().into(),
+                            || SECONDARY,
+                            metrics.body,
+                            Center,
+                            LABEL_LEADING
                         )
+                        Row (height: 4, column_gap: metrics.gap, justify: JustifyContent::Center) {
+                            walk 0..3 with index {
+                                View (
+                                    width: 4,
+                                    height: 4,
+                                    bg_color: ${
+                                        if matches!(
+                                            state.library_placeholder(), super::state::LibraryPlaceholder::Searching |
+                                            super::state::LibraryPlaceholder::Loading |
+                                            super::state::LibraryPlaceholder::Preparing
+                                        ) {
+                                            state.activity()[index]
+                                        } else {
+                                            Color::rgba(0, 0, 0, 0)
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     }
                     shadow (metrics)
                 }
             } else {
                 Column (grow: 1.0, min_height: 0, row_gap: metrics.gap) {
-                    walk ${ state.entries().entries() } with item by item.0 {
+                    walk ${
+                        let rows = state.list_layout().rows();
+                        let first = state
+                            .library_selection()
+                            .saturating_sub(rows - 1)
+                            .min(state.entries().len().saturating_sub(rows));
+                        state.entries().entries().skip(first).take(rows).collect::<Vec<_>>()
+                    } with item by item.0 {
                         list_row (state, item.1, metrics, false)
                     }
                 }
             }
+        } on SizeChanged {
+            state
+                .list_layout()
+                .resize(event.new.height, metrics.library_row_min_height(), metrics.gap);
         }
     }
 }
@@ -327,8 +377,12 @@ fn list_row(
     ui! {
         Column (
             grow: 1.0,
-            min_height: metrics.row_min_height(),
-            max_height: if has_signal { metrics.row_height() } else { metrics.library_row_height() },
+            min_height: if has_signal { metrics.row_min_height() } else { metrics.library_row_min_height() },
+            max_height: if has_signal {
+                metrics.row_height()
+            } else {
+                metrics.library_row_height().max(metrics.library_row_min_height())
+            },
             min_width: 0,
             transform: ${ state.card_motion().card_transform(transform_index.index()) }
         ) {
@@ -364,9 +418,9 @@ fn list_row(
                 Column (grow: 1.0, min_width: 0, justify: JustifyContent::Center) {
                     row_label (
                         item.clone(),
-                        metrics.row_title,
+                        if has_signal { metrics.row_title } else { TITLE_SIZE },
                         true,
-                        if has_signal { 1 } else { 2 }
+                        1
                     )
                     if ${
                         has_signal || state.platforms() || item.directory() || !item.available()
@@ -389,6 +443,11 @@ fn list_row(
                         color: WARNING
                     )
                 }
+                View (
+                    width: Dimension::percent(ROW_ACTOR_SHARE),
+                    min_width: ROW_ACTOR_MIN_WIDTH,
+                    shrink: 0.0
+                )
                 if has_signal {
                     row_signal (state, item, metrics)
                 }

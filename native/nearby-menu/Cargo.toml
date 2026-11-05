@@ -1,0 +1,9 @@
+[package]
+name = "nearby-menu"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

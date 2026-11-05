@@ -16,6 +16,7 @@ dependencies = [
  "libc",
  "mirui",
  "mirx",
+ "nearby-menu",
  "png",
  "serde",
  "serde_json",
@@ -635,6 +636,13 @@ checksum = "8002ec721b7a973848fdd1b4d41951776627a5220ddbe6103eccb19555c4811a"
 dependencies = [
  "ttf-parser",
  "wide",
+]
+
+[[package]]
+name = "nearby-menu"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

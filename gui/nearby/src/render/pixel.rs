@@ -59,6 +59,7 @@ pub(super) struct WalkerSprite {
 #[component]
 pub(super) struct ActorSprite {
     pub state: model!(DisplayState),
+    pub actions: model!(crate::launcher::Launcher),
 }
 
 #[component]
@@ -558,17 +559,15 @@ pub(super) fn walker_sprite(
     state: model!(component.state, watch(walker_motion)),
     paint: paint!(),
     theme: res!(Theme),
-    runtime: res!(super::state::DisplayRuntime),
 ) {
-    if runtime.deck.enabled() {
-        return;
-    }
+    let mut frame = state.walker_motion();
+    frame.external_actor = true;
     let rect = paint.rect();
     draw(
         Kind::Walker,
         rect.w.to_int(),
         rect.h.to_int(),
-        state.walker_motion(),
+        frame,
         &theme,
         |command| {
             draw_in_view(paint, command);
@@ -581,11 +580,9 @@ pub(super) fn session_sprite(
     state: model!(component.state, watch(session_motion)),
     paint: paint!(),
     theme: res!(Theme),
-    runtime: res!(super::state::DisplayRuntime),
 ) {
     let rect = paint.rect();
-    let mut frame = state.session_motion();
-    frame.external_actor = runtime.deck.enabled();
+    let frame = state.session_motion();
     draw(
         Kind::Session,
         rect.w.to_int(),
@@ -601,11 +598,16 @@ pub(super) fn session_sprite(
 #[view(component = ActorSprite, priority = 60)]
 pub(super) fn actor_sprite(
     state: model!(component.state, watch(actor_motion)),
+    actions: model!(component.actions, watch(menu_selection, selection_age)),
     paint: paint!(),
     theme: res!(Theme),
 ) {
     let rect = paint.rect();
-    let frame = state.actor_motion();
+    let frame = cursor_frame(
+        state.actor_motion(),
+        actions.menu_selection(),
+        actions.selection_age,
+    );
     let session = matches!(frame.page, Page::Host | Page::Joined | Page::Leaving);
     let celebrate = session
         && (frame.ready || frame.connected)
@@ -647,6 +649,15 @@ pub(super) fn actor_sprite(
             frame.selected == Some(0)
         },
     );
+}
+
+pub(super) fn cursor_frame(mut frame: Frame, selected: Option<usize>, age: u16) -> Frame {
+    if let Some(selected) = selected {
+        frame.selected = Some(selected);
+        frame.selection = age;
+        frame.walking = frame.selection < timing::TRAVEL.duration_ms;
+    }
+    frame
 }
 
 #[view(component = SignalSprite, priority = 60)]
@@ -820,21 +831,23 @@ fn draw(
         }
         Kind::Walker => {
             let x = stage_position(w, frame.walker);
-            p.person(
-                x,
-                h - 38
-                    + if frame.selection >= timing::TRAVEL.duration_ms {
-                        motion::hop(
-                            frame.selection - timing::TRAVEL.duration_ms,
-                            (h - 38).min(4) as f32,
-                        )
-                    } else {
-                        0
-                    },
-                false,
-                if frame.walking { frame.selection } else { 0 },
-                frame.selected == Some(0),
-            );
+            if !frame.external_actor {
+                p.person(
+                    x,
+                    h - 38
+                        + if frame.selection >= timing::TRAVEL.duration_ms {
+                            motion::hop(
+                                frame.selection - timing::TRAVEL.duration_ms,
+                                (h - 38).min(4) as f32,
+                            )
+                        } else {
+                            0
+                        },
+                    false,
+                    if frame.walking { frame.selection } else { 0 },
+                    frame.selected == Some(0),
+                );
+            }
             p.dust(
                 x,
                 h - 4,

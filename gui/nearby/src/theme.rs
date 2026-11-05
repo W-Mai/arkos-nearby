@@ -38,6 +38,13 @@ pub enum Palette {
 }
 
 impl Palette {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Forest => "森林",
+            Self::Sunset => "落日",
+            Self::Night => "夜色",
+        }
+    }
     pub const ALL: [Self; 3] = [Self::Forest, Self::Sunset, Self::Night];
 
     pub fn id(self) -> &'static str {

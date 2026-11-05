@@ -126,6 +126,17 @@ impl Property for ArtworkSource {
     }
 }
 
+pub(super) fn save_source(
+    path: String,
+    revision: Option<(u64, Option<std::time::SystemTime>)>,
+) -> String {
+    if path.is_empty() {
+        String::new()
+    } else {
+        resources::token(&(path, revision))
+    }
+}
+
 fn source_key(path: String) -> ArtworkKey {
     let stamp = std::fs::metadata(&path)
         .ok()

@@ -215,6 +215,7 @@ pub enum LibraryKind {
 #[serde(default, deny_unknown_fields)]
 pub struct LibraryView {
     pub kind: LibraryKind,
+    pub load: nearby_menu::LibraryLoad,
     pub query: String,
     pub keyboard: bool,
     pub key_selected: usize,
@@ -234,13 +235,59 @@ pub struct LauncherView {
     pub netplay: bool,
     pub overlay: String,
     pub overlay_kind: String,
+    pub notice: String,
     pub items: Vec<LauncherItem>,
     pub selected: usize,
     pub retained: bool,
+    pub details: Option<nearby_menu::details::View>,
+    pub wifi: Option<nearby_menu::wifi::View>,
+    pub configuration: Option<nearby_menu::configuration::View>,
+    pub saves: Option<nearby_menu::saves::View>,
 }
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct LauncherItem {
-    pub name: String,
-    pub enabled: bool,
+pub use nearby_menu::{MenuAction, MenuItem as LauncherItem};
+
+impl LauncherView {
+    #[cfg(any(target_os = "linux", test))]
+    pub fn selected_action(&self) -> Option<MenuAction> {
+        self.items
+            .get(self.selected)
+            .filter(|item| self.enabled && !self.overlay.is_empty() && item.enabled())
+            .map(|item| item.action)
+    }
+}
+
+#[cfg(test)]
+mod menu_contract_tests {
+    use super::*;
+
+    #[test]
+    fn menu_identity_and_availability_survive_wire_round_trip_and_reordering() {
+        let items = [
+            LauncherItem::available(MenuAction::ToggleSound, "音效开关"),
+            LauncherItem::unavailable(MenuAction::ManageNetwork, "管理直连网络", "未保留直连网络"),
+            LauncherItem::available(MenuAction::CycleTheme, "切换主题"),
+        ];
+        let mut view = LauncherView {
+            enabled: true,
+            overlay: "设置".into(),
+            items: items.to_vec(),
+            ..Default::default()
+        };
+        for _ in 0..items.len() {
+            let round_trip: LauncherView =
+                serde_json::from_value(serde_json::to_value(&view).unwrap()).unwrap();
+            for (index, item) in round_trip.items.iter().enumerate() {
+                let mut selected = round_trip.clone();
+                selected.selected = index;
+                assert_eq!(
+                    selected.selected_action(),
+                    item.enabled().then_some(item.action)
+                );
+                assert_eq!(item.enabled(), item.reason().is_empty());
+            }
+            view.items.rotate_left(1);
+        }
+        view.overlay.clear();
+        assert_eq!(view.selected_action(), None);
+    }
 }

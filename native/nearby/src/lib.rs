@@ -2,6 +2,7 @@ pub mod arcade;
 pub mod bundle;
 pub mod catalog;
 pub mod compat;
+pub mod configuration;
 pub mod content;
 pub mod context;
 pub mod core_choice;
@@ -26,8 +27,10 @@ pub mod protocol;
 pub mod purpose;
 pub mod radio;
 pub mod readiness;
+pub mod saves;
 pub mod session;
 pub mod system;
+pub mod wifi;
 
 #[cfg(test)]
 mod contracts;

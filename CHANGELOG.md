@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-05
+
+- Configure Wi-Fi from the launcher with scanning, password input, connection status and network recovery.
+- Edit game, core and frontend settings with inherited values, save previews and transactional writes.
+- Browse and load save states, back up game progress and restore verified backups.
+- Show game details with core sources, BIOS declarations and resolved configuration and save paths.
+- Adjust volume and brightness with pixel sliders and current-value feedback.
+- Show filesystem capacity, available space and mount details in system tools.
+- Add restart confirmation with room cleanup and Wi-Fi recovery.
+- Animate Favorites page markers and adapt shelf navigation to the available screen space.
+- Preserve menu focus and character placement across settings, game details and save management.
+- Speed up save-manager loading and keep room observations available when Wi-Fi rescans fail.
+- Distinguish configured save slots, explicit state loads and startup slot selection.
+- Keep menu rows stable after returning from save management.
+- Include configuration punctuation and direction symbols in the pixel fonts.
+
 ## [0.10.1] - 2026-10-30
 
 - Use the same core selection for single-player and multiplayer across game launch entries.

@@ -221,7 +221,7 @@ impl Controller {
             let existing = self.entries.iter().position(|entry| entry.entity == entity);
             let index = match existing {
                 Some(index) => index,
-                None if self.entries.len() < super::shelf::MAX_VISIBLE
+                None if self.entries.len() < super::shelf::WINDOW_BUDGET
                     && allowed(app, entity, &state) =>
                 {
                     self.entries.push(Entry {

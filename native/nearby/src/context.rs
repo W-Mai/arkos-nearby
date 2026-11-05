@@ -60,7 +60,10 @@ pub fn flags(path: &Path) -> Result<std::collections::HashMap<String, String>> {
         if let Some((key, value)) = line.split_once('=') {
             let key = key.trim();
             let value = value.trim();
-            if key.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+            if !key.is_empty()
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
                 && value.starts_with('"')
                 && value.ends_with('"')
                 && value.len() >= 2
@@ -234,12 +237,12 @@ pub fn library_argument(args: &[String]) -> Result<String> {
     Ok(paths.remove(0))
 }
 
-pub fn frontend_version(frontend: &str, executable: &Path) -> Result<String> {
+fn frontend_revision(executable: &Path, boot: &str) -> Result<Value> {
     use std::os::unix::fs::MetadataExt;
     let info = fs::metadata(executable)?;
-    let key = json!([
+    Ok(json!([
         executable,
-        fs::read_to_string("/proc/sys/kernel/random/boot_id")?.trim(),
+        boot,
         info.dev(),
         info.ino(),
         info.size(),
@@ -247,7 +250,58 @@ pub fn frontend_version(frontend: &str, executable: &Path) -> Result<String> {
         info.mtime_nsec(),
         info.ctime(),
         info.ctime_nsec()
-    ]);
+    ]))
+}
+
+fn frontend_key(executable: &Path) -> Result<Value> {
+    frontend_revision(
+        executable,
+        fs::read_to_string("/proc/sys/kernel/random/boot_id")?.trim(),
+    )
+}
+
+fn cached_frontend_digest(saved: &Value, key: &Value, reuse: bool) -> Option<String> {
+    let digest = saved["sha256"].as_str()?;
+    (reuse && saved["key"] == *key && crate::protocol::hex(digest, 64)).then(|| digest.to_owned())
+}
+
+fn frontend_digest(
+    frontend: &str,
+    executable: &Path,
+    version: &str,
+    key: &Value,
+    reuse: bool,
+) -> Result<String> {
+    use std::os::unix::fs::MetadataExt;
+    require(
+        frontend_key(executable)? == *key,
+        "Frontend changed while reading",
+    )?;
+    let root = Path::new("/run/arkos-nearby-x/frontend-versions");
+    let path = root.join(format!("{frontend}-native.json"));
+    if let Ok(info) = path.metadata()
+        && info.uid() == 0
+        && info.mode() & 0o022 == 0
+        && let Ok(saved) = read::<Value>(&path)
+        && let Some(digest) = cached_frontend_digest(&saved, key, reuse)
+    {
+        return Ok(digest);
+    }
+    let sha256 = digest(executable)?;
+    require(
+        frontend_key(executable)? == *key,
+        "Frontend changed while reading",
+    )?;
+    if reuse && unsafe { libc::geteuid() } == 0 {
+        mkdir(root)?;
+        write(&path, &json!({"key":key,"version":version,"sha256":sha256}))?;
+    }
+    Ok(sha256)
+}
+
+pub fn frontend_version(frontend: &str, executable: &Path) -> Result<String> {
+    use std::os::unix::fs::MetadataExt;
+    let key = frontend_key(executable)?;
     let root = Path::new("/run/arkos-nearby-x/frontend-versions");
     let path = root.join(format!("{frontend}-native.json"));
     if let Ok(info) = path.metadata() {
@@ -367,7 +421,10 @@ pub(crate) fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Re
         frontend_path.parent() == Some(frontend_root.as_path()),
         "Frontend is outside the installed registry",
     )?;
+    let frontend_key = frontend_key(&frontend_path)?;
     let version = frontend_version(&frontend, &frontend_path)?;
+    let frontend_sha256 =
+        frontend_digest(&frontend, &frontend_path, &version, &frontend_key, adapt)?;
     let link_mode = crate::handheld_link::select(&core.identity.id);
     let supported = core.supported
         && (!(crate::handheld_link::preferred(&game_path).is_some()
@@ -382,7 +439,7 @@ pub(crate) fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Re
     require(configuration.is_dir(), "Missing installed configuration")?;
     Ok(Context {
         frontend,
-        frontend_sha256: digest(&frontend_path)?,
+        frontend_sha256,
         frontend_path,
         core_id: core.identity.id,
         core_path: core.path,
@@ -464,5 +521,51 @@ impl Context {
             "Corresponding installed game, core or frontend differs",
         )?;
         Ok(matched)
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn frontend_digest_reuse_requires_the_same_file_revision_and_boot() {
+        let root = std::env::temp_dir().join(format!(
+            "nearby-frontend-{}",
+            crate::system::random_id().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        let file = root.join("frontend");
+        fs::write(&file, b"first").unwrap();
+        let original = frontend_revision(&file, "boot-a").unwrap();
+        let sha = digest(&file).unwrap();
+        let saved = json!({"key":original,"sha256":sha});
+        assert_eq!(cached_frontend_digest(&saved, &original, true), Some(sha));
+        assert!(cached_frontend_digest(&saved, &original, false).is_none());
+        assert!(
+            cached_frontend_digest(&saved, &frontend_revision(&file, "boot-b").unwrap(), true)
+                .is_none()
+        );
+        fs::write(&file, b"other").unwrap();
+        assert!(
+            cached_frontend_digest(&saved, &frontend_revision(&file, "boot-a").unwrap(), true)
+                .is_none()
+        );
+        let replacement = root.join("replacement");
+        fs::write(&replacement, b"first").unwrap();
+        fs::rename(&replacement, &file).unwrap();
+        assert!(
+            cached_frontend_digest(&saved, &frontend_revision(&file, "boot-a").unwrap(), true)
+                .is_none()
+        );
+        assert!(
+            cached_frontend_digest(&json!({"key":original,"version":"1.22.2"}), &original, true)
+                .is_none()
+        );
+        assert!(
+            cached_frontend_digest(&json!({"key":original,"sha256":"invalid"}), &original, true)
+                .is_none()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

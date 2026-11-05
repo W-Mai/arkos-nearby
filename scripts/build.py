@@ -116,6 +116,11 @@ def native(check):
         "release-bundle",
     ]
     if check:
+        menu = ROOT / "native/nearby-menu/Cargo.toml"
+        gui.run(
+            [str(cargo), "fmt", "--manifest-path", str(menu), "--check"],
+            environment,
+        )
         gui.run(
             [str(cargo), "fmt", "--manifest-path", str(MANIFEST), "--check"],
             environment,
@@ -125,6 +130,19 @@ def native(check):
             environment,
         )
         gui.run([str(cargo), "test", *common], environment)
+        gui.run(
+            [
+                str(cargo),
+                "test",
+                "--manifest-path",
+                str(MANIFEST),
+                "--locked",
+                "--offline",
+                "-p",
+                "nearby-menu",
+            ],
+            environment,
+        )
         gui.run(
             [
                 str(cargo),

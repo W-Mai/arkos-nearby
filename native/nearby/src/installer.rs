@@ -359,7 +359,17 @@ fn install_at(
         } else {
             current.clone()
         };
-        owned_launcher(&original, &current)?;
+        if previous
+            .as_ref()
+            .is_some_and(|record| record.wrappers.get(name) == Some(&hash(&current)))
+        {
+            require(
+                hash(&original) == ORIGINAL_SHA,
+                "Original launcher backup differs",
+            )?;
+        } else {
+            owned_launcher(&original, &current)?;
+        }
         if !backup.exists() {
             changes.push(Change {
                 target: format!("{ROOT}/original-launch/{name}"),
@@ -596,7 +606,7 @@ fn uninstall_at(layout: &Layout) -> Result<Value> {
     });
     transact(layout, changes)?;
     Ok(
-        json!({"action":"uninstall","launchers_restored":true,"retained":["device.json","pair.json","identity.json","identity.pk8","friends.json","logs/","original-launch/","python-migration-backup/"],"network_changed":false}),
+        json!({"action":"uninstall","launchers_restored":true,"retained":["device.json","pair.json","identity.json","identity.pk8","friends.json","logs/","original-launch/","python-migration-backup/","saves/"],"network_changed":false}),
     )
 }
 pub fn uninstall() -> Result<Value> {

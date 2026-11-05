@@ -114,10 +114,14 @@ fn snapshot(
             .map_err(|error| format!("Theme: {error:?}"))?;
     }
     let scene = render::draw(&mut app, &view)?;
-    if let Some(now) = time_ms {
+    if time_ms.is_some() {
         scene.press(0);
-        render::paint_at(&mut app, now)?;
     }
+    let now = time_ms.unwrap_or(800);
+    for frame in (0..=now.min(800)).step_by(17) {
+        render::paint_at(&mut app, frame)?;
+    }
+    render::paint_at(&mut app, now)?;
     let file = BufWriter::new(File::create(output).map_err(|e| e.to_string())?);
     let mut encoder = png::Encoder::new(file, u32::from(size[0]), u32::from(size[1]));
     encoder.set_color(png::ColorType::Rgba);
@@ -291,15 +295,42 @@ fn live() -> Result<(), String> {
     let preferences = sound::install(&mut app);
     let sound = sound::register(&mut app)?;
     let launcher = render::launcher(&mut app);
+    let input_sound = sound.clone();
+    launcher
+        .on_effect(move |_: &launcher::InvalidInput| input_sound.invalid_input())
+        .map_err(|error| format!("Keyboard feedback: {error:?}"))?;
     let intents = Rc::new(RefCell::new(Vec::new()));
     let pending = Rc::clone(&intents);
     launcher
         .on_effect(move |intent: &launcher::Intent| pending.borrow_mut().push(intent.clone()))
         .map_err(|error| format!("Launcher effects: {error:?}"))?;
+    let pending = Rc::clone(&intents);
+    launcher
+        .configuration()
+        .on_effect(move |request: &nearby_menu::configuration::Request| {
+            pending
+                .borrow_mut()
+                .push(launcher::Intent::Configuration(request.clone()))
+        })
+        .map_err(|error| format!("Configuration effects: {error:?}"))?;
+    let pending = Rc::clone(&intents);
+    launcher
+        .saves()
+        .on_effect(move |request: &nearby_menu::saves::Request| {
+            pending
+                .borrow_mut()
+                .push(launcher::Intent::Saves(request.clone()))
+        })
+        .map_err(|e| format!("Save effects: {e:?}"))?;
     let shelf_layouts = Rc::new(RefCell::new(Vec::new()));
     let pending_layouts = Rc::clone(&shelf_layouts);
     render::subscribe_shelf_layout(&app, move |request| {
         pending_layouts.borrow_mut().push(*request)
+    })?;
+    let list_layouts = Rc::new(RefCell::new(Vec::new()));
+    let pending_lists = Rc::clone(&list_layouts);
+    render::subscribe_list_layout(&app, move |request| {
+        pending_lists.borrow_mut().push(*request)
     })?;
     let mut gamepad = launcher::input::Input::open().map_err(|error| error.to_string())?;
     let settings = render::settings(&mut app);
@@ -378,6 +409,12 @@ fn live() -> Result<(), String> {
             writeln!(output).map_err(|e| e.to_string())?;
             output.flush().map_err(|e| e.to_string())?;
         }
+        for request in list_layouts.borrow_mut().drain(..) {
+            let mut output = io::stdout().lock();
+            serde_json::to_writer(&mut output, &request).map_err(|e| e.to_string())?;
+            writeln!(output).map_err(|e| e.to_string())?;
+            output.flush().map_err(|e| e.to_string())?;
+        }
         let mut actions = terminal.poll().map_err(|e| e.to_string())?;
         if !actions.is_empty() {
             launcher.cancel();
@@ -392,6 +429,36 @@ fn live() -> Result<(), String> {
         for intent in intents.borrow_mut().drain(..) {
             match intent {
                 launcher::Intent::Action(action) => actions.push(action),
+                launcher::Intent::Configuration(request) => {
+                    let mut output = io::stdout().lock();
+                    serde_json::to_writer(
+                        &mut output,
+                        &serde_json::json!({"event":"configuration","request":request}),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    writeln!(output).map_err(|e| e.to_string())?;
+                    output.flush().map_err(|e| e.to_string())?;
+                }
+                launcher::Intent::Saves(request) => {
+                    let mut output = io::stdout().lock();
+                    serde_json::to_writer(
+                        &mut output,
+                        &serde_json::json!({"event":"saves","request":request}),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    writeln!(output).map_err(|e| e.to_string())?;
+                    output.flush().map_err(|e| e.to_string())?;
+                }
+                launcher::Intent::Wifi(request) => {
+                    let mut output = io::stdout().lock();
+                    serde_json::to_writer(
+                        &mut output,
+                        &serde_json::json!({"event":"wifi","request":request}),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    writeln!(output).map_err(|e| e.to_string())?;
+                    output.flush().map_err(|e| e.to_string())?;
+                }
                 launcher::Intent::Game { key, multiplayer } => {
                     sound.input(model::Action::Confirm, render::now(&app));
                     if let Some(scene) = &scene {
@@ -405,13 +472,37 @@ fn live() -> Result<(), String> {
             }
         }
         for mut action in actions {
+            if launcher.saves().active() {
+                if action == model::Action::Theme {
+                    action = model::Action::Auxiliary;
+                }
+                sound.input(action, render::now(&app));
+                let previous = launcher.menu_selection();
+                launcher.saves_input(action);
+                sound.focus_changed(previous, launcher.menu_selection(), render::now(&app));
+                continue;
+            }
+            if launcher.configuration().active() {
+                if action == model::Action::Theme {
+                    action = model::Action::Auxiliary;
+                }
+                sound.input(action, render::now(&app));
+                let previous = launcher.menu_selection();
+                launcher.configuration_input(action);
+                sound.focus_changed(previous, launcher.menu_selection(), render::now(&app));
+                continue;
+            }
+            let wifi = view.as_ref().is_some_and(|v| v.launcher.wifi.is_some());
+            if wifi && matches!(action, model::Action::Theme) {
+                action = model::Action::Auxiliary;
+            }
             let library = view
                 .as_ref()
                 .is_some_and(|view| view.page == model::Page::Games);
             if action == model::Action::Theme && library {
                 action = model::Action::Auxiliary;
             }
-            if action == model::Action::Start && !library {
+            if action == model::Action::Start && !library && !wifi {
                 action = model::Action::Confirm;
             }
             if matches!(action, model::Action::Theme) {
@@ -422,15 +513,15 @@ fn live() -> Result<(), String> {
             }
             if action == model::Action::Confirm
                 && let Some(current) = &view
-                && current.launcher.overlay_kind == "system"
+                && let Some(menu_action) = current.launcher.selected_action()
             {
-                match current.launcher.selected {
-                    0 => {
+                match menu_action {
+                    model::MenuAction::CycleTheme => {
                         settings.cycle_theme();
                         app.set_theme(settings.palette().theme())
                             .map_err(|e| format!("Theme: {e:?}"))?;
                     }
-                    1 => {
+                    model::MenuAction::ToggleSound => {
                         let mut preferences = settings.sound();
                         preferences.enabled = !preferences.enabled;
                         settings.set_sound(preferences);
@@ -439,6 +530,24 @@ fn live() -> Result<(), String> {
                 }
             }
             sound.input(action, render::now(&app));
+            if launcher.wifi_keyboard()
+                && matches!(
+                    action,
+                    model::Action::Up
+                        | model::Action::Down
+                        | model::Action::Left
+                        | model::Action::Right
+                        | model::Action::Confirm
+                        | model::Action::Refresh
+                        | model::Action::Auxiliary
+                        | model::Action::Start
+                )
+            {
+                let previous = launcher.menu_selection();
+                launcher.wifi_input(action);
+                sound.focus_changed(previous, launcher.menu_selection(), render::now(&app));
+                continue;
+            }
             if let Some(scene) = scene.as_ref() {
                 match action {
                     model::Action::Back => scene.navigation_intent(true),

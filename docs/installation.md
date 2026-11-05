@@ -2,7 +2,7 @@
 
 ## 下载与校验
 
-两台掌机安装同一个版本。下载 [arkos-nearby-0.10.1-arm64.tar.gz](https://github.com/W-Mai/arkos-nearby/releases/download/v0.10.1/arkos-nearby-0.10.1-arm64.tar.gz) 和 [SHA256SUMS](https://github.com/W-Mai/arkos-nearby/releases/download/v0.10.1/SHA256SUMS)。在下载目录执行 `sha256sum --ignore-missing -c SHA256SUMS`；macOS 可使用 `shasum -a 256 -c SHA256SUMS` 并只核对实际下载的文件。
+两台掌机安装同一个版本。下载 [arkos-nearby-0.11.0-arm64.tar.gz](https://github.com/W-Mai/arkos-nearby/releases/download/v0.11.0/arkos-nearby-0.11.0-arm64.tar.gz) 和 [SHA256SUMS](https://github.com/W-Mai/arkos-nearby/releases/download/v0.11.0/SHA256SUMS)。在下载目录执行 `sha256sum --ignore-missing -c SHA256SUMS`；macOS 可使用 `shasum -a 256 -c SHA256SUMS` 并只核对实际下载的文件。
 
 解压后包含 `arkos-nearby`、`Install Nearby Multiplayer.sh`、安装说明、许可证和可执行文件校验值。
 
@@ -24,9 +24,15 @@
 
 ## 启动器
 
-Options → Nearby Launcher 直接打开个人收藏。横向卡带按可用空间排成一排或两排，方向键移动选择，在同排边缘继续按左右可翻页。选中收藏末尾的游戏库图标，按 A 展开游戏库，收藏架缩小并保留在上方；B 逐级返回，恢复原来的选中卡片。SELECT 打开附近联机面板。
+Options → Nearby Launcher 直接打开个人收藏。横向卡带按可用空间排成多行，方向键跨行、跨页选择，底部页码随翻页伸缩。选中收藏末尾的游戏库图标，按 A 或下键展开游戏库，收藏架缩小并保留在上方；B 逐级返回，恢复原来的选中卡片。在收藏页按 B 回到第一页。SELECT 打开附近联机面板。
 
 选中游戏后，短按 X 并松开启动单机，长按 X 打开当前游戏的联机面板；A 打开游戏操作，可将游戏移出收藏。在游戏库的游戏列表和搜索结果中按 Y 收藏，收藏页按 Y 排序，平台列表按 Y 搜索。空平台与空文件夹会自动隐藏。游戏退出后返回刚才的列表和选中位置。
+
+按 START → 系统控制打开音量和亮度滑块，上下选择、左右调节，B 返回设置。数值显示实际读回的百分比。系统工具退出后回到原菜单并保留焦点。
+
+系统控制 → 系统工具 → Wi-Fi 设置可以扫描网络、输入密码、连接或管理已保存的网络；连接成功后保留新网络，取消连接时恢复之前的网络。存储空间显示分区的可用量与总容量，按 A 展开设备、文件系统和挂载点；B 收起，再按 B 返回工具菜单。START → 电源提供返回、确认关机和确认重启。
+
+选中游戏后按 A → 游戏详情，查看运行核心、BIOS 文件、存档与配置路径。游戏设置可以切换游戏、核心和前端范围，编辑后查看生效预览，再确认保存。存档管理按即时存档、游戏进度与备份分别展示记录；选择记录可以载入、创建备份或恢复，确认页面显示目标文件。单机沿用原存档位置，联机会话使用独立目录。
 
 单机沿用系统的模拟器设置、游戏存档与即时存档位置。START 打开主题、音效、直连网络管理和退出菜单；选择「返回原系统」回到系统主页。
 

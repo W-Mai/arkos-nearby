@@ -1,6 +1,8 @@
 use super::actor::actor;
-use super::artwork::preview as super_preview;
-use super::deck::{ActionAnchor, ActorScope, Layer};
+use super::configuration::{hints as configuration_hints, panel as configuration_panel};
+use super::deck::{ActionAnchor, ActionLayout, ActorScope, Layer};
+use super::saves::{hints as saves_hints, panel as saves_panel};
+use super::wifi::{heading as wifi_heading, hints as wifi_hints, panel as wifi_panel};
 use super::{
     chrome::{footer, header},
     composition::{focus_frame, room_pages},
@@ -16,9 +18,9 @@ use super::{
 use crate::launcher::Launcher;
 use crate::model::{LibraryKind, Page};
 use mirui::prelude::*;
-use mirui::ui::widgets::Image;
 use mirui::ui::widgets::TextAlign::{Center, Start};
 use mirui::ui::widgets::page_view::{CreatePage, PageView};
+use mirui::ui::widgets::{Image, Text};
 
 #[event]
 fn create_library(
@@ -175,7 +177,7 @@ pub(super) fn deck(
                 shadow (metrics)
             }
             primary_overlay (state.clone(), metrics)
-            actor (state, deck)
+            actor (state, deck, shelf, catalog, room)
         }
     }
 }
@@ -203,6 +205,7 @@ fn graphical_overlay(
     metrics: Metrics,
     primary: bool,
 ) -> Entity {
+    let hint = state.clone();
     ui! {
         View (
             position: Position::Absolute,
@@ -240,26 +243,54 @@ fn graphical_overlay(
                         super::actions_damage::ActionsPanel,
                     ] {
                         backdrop (Margins)
-                        overlay_label (state, None, metrics)
+                        if ${ state.wifi_active() } {
+                            wifi_heading (state, metrics)
+                        } else {
+                            overlay_label (state, None)
+                        }
                         View (height: metrics.rule_height(), bg_color: WARNING, shrink: 0.0)
                         Row (grow: 1.0, min_height: 0, column_gap: metrics.gap * 2) {
-                            if ${ state.view().overlay_kind == "game" } {
-                                Column (width: Dimension::percent(38), shrink: 0.0, min_height: 0) {
-                                    super_preview (display, metrics)
-                                    shadow (metrics)
-                                }
-                            }
-                            Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: metrics.gap) {
-                                walk 0_usize..3 with line {
-                                    if ${ line * 2 < state.view().items.len() } {
-                                        Row (grow: 1.0, min_height: 0, column_gap: metrics.gap) {
-                                            walk 0_usize..2 with column {
-                                                if ${ line * 2 + column < state.view().items.len() } {
-                                                    action_tile (
-                                                        state,
-                                                        line * 2 + column,
-                                                        metrics
-                                                    )
+                            if ${ state.saves().active() || state.configuration().active() } {
+                                configuration_or_saves_panel (state, metrics)
+                            } else {
+                                Column (grow: 1.0, min_height: 0, min_width: 0) {
+                                    if ${ state.wifi_active() } {
+                                        wifi_panel (state, metrics)
+                                    } else {
+                                        Column (grow: 1.0, min_height: 0, min_width: 0) {
+                                            if ${ state.view().overlay_kind == "controls" } {
+                                                level_panel (state, display.settings(), metrics)
+                                            } else {
+                                                Column (grow: 1.0, min_width: 0, min_height: 0) {
+                                                    if ${ state.view().overlay_kind == "details" } {
+                                                        details_panel (state, metrics)
+                                                    } else {
+                                                        Column (
+                                                            grow: 1.0,
+                                                            min_width: 0,
+                                                            min_height: 0,
+                                                            row_gap: metrics.gap
+                                                        ) {
+                                                            walk ${ 0_usize..state.view().items.len().div_ceil(2) } with line {
+                                                                Row (
+                                                                    grow: 1.0,
+                                                                    min_height: 0,
+                                                                    column_gap: metrics.gap
+                                                                ) {
+                                                                    walk 0_usize..2 with column {
+                                                                        if ${ line * 2 + column < state.view().items.len() } {
+                                                                            action_tile (
+                                                                                state,
+                                                                                display.settings(),
+                                                                                line * 2 + column,
+                                                                                metrics
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -269,13 +300,70 @@ fn graphical_overlay(
                         }
                         Row (
                             height: metrics.footer_height(),
+                            shrink: 0.0,
                             column_gap: metrics.gap * 2,
                             align: AlignItems::Center
                         ) {
-                            control_key ("A", metrics, true)
-                            control_label (|| "确认".into(), metrics)
-                            control_key ("B", metrics, false)
-                            control_label (|| "返回".into(), metrics)
+                            if ${ state.wifi_active() } {
+                                wifi_hints (state, metrics)
+                            } else {
+                                Row (grow: 1.0, min_width: 0) {
+                                    if ${ state.saves().active() || state.configuration().active() } {
+                                        configuration_or_saves_hints (state, metrics)
+                                    } else {
+                                        Row (
+                                            grow: 1.0,
+                                            min_width: 0,
+                                            column_gap: metrics.gap * 2,
+                                            align: AlignItems::Center
+                                        ) {
+                                            if ${ state.view().overlay_kind == "controls" && state.view().selected < 2 } {
+                                                control_key ("左右", metrics, true)
+                                                control_label (|| "调节".into(), metrics)
+                                            } else {
+                                                control_key ("A", metrics, true)
+                                                control_label (
+                                                    move || {
+                                                        if hint.view().details.as_ref().is_some_and(|details| details.expanded) {
+                                                            "收起".into()
+                                                        } else if hint
+                                                            .view()
+                                                            .details
+                                                            .as_ref()
+                                                            .is_some_and(|details| {
+                                                                details.section == nearby_menu::details::Section::Storage
+                                                            })
+                                                        {
+                                                            "查看详情".into()
+                                                        } else if hint
+                                                            .view()
+                                                            .details
+                                                            .as_ref()
+                                                            .is_some_and(|details| {
+                                                                details.section != nearby_menu::details::Section::Overview
+                                                            })
+                                                        {
+                                                            "查看来源".into()
+                                                        } else {
+                                                            "确认".into()
+                                                        }
+                                                    },
+                                                    metrics
+                                                )
+                                            }
+                                            if ${ state.detail_expanded() } {
+                                                control_key ("上下", metrics, false)
+                                                control_label (|| "滚动".into(), metrics)
+                                            }
+                                            control_key ("B", metrics, false)
+                                            control_label (|| "返回".into(), metrics)
+                                            Column (grow: 1.0, min_width: 0) {
+                                                action_reason (state, metrics)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     shadow (metrics)
@@ -285,8 +373,406 @@ fn graphical_overlay(
     }
 }
 
+#[component]
+pub(super) struct DetailsScroll {
+    state: model!(Launcher),
+}
+
+#[system(order = Animation)]
+fn scroll_details(
+    nodes: query!(
+        Entity,
+        DetailsScroll,
+        mirui::input::event::scroll::ScrollOffset
+    ),
+    commands: commands!(),
+) {
+    for (entity, component, offset) in nodes {
+        if !component.state.detail_active() {
+            continue;
+        }
+        let y = component.state.detail_offset();
+        if offset.y != y {
+            commands.insert(
+                entity,
+                mirui::input::event::scroll::ScrollOffset { x: Fixed::ZERO, y },
+            );
+        }
+    }
+}
+
+#[view(component = DetailsScroll, systems = [scroll_details::system()])]
+pub(super) fn details_scroll() {}
+
 #[compose]
-fn action_tile(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity {
+fn details_panel(state: model!(Launcher), metrics: Metrics) -> Entity {
+    use mirui::input::event::scroll::{ScrollConfig, ScrollOffset};
+    ui! {
+        Column (grow: 1.0, min_height: 0, min_width: 0, row_gap: metrics.gap) {
+            Row (
+                height: i32::from(BODY_SIZE) + LABEL_LEADING,
+                shrink: 0.0,
+                min_width: 0,
+                column_gap: metrics.gap
+            ) {
+                Text (
+                    text: ${ state.detail_heading() },
+                    grow: 1.0,
+                    min_width: 0,
+                    font: font(BODY_SIZE),
+                    font_size: BODY_SIZE,
+                    text_color: SECONDARY,
+                    paragraph: super::widgets::paragraph(Start, 1)
+                ) [
+                    FONT_PAINT,
+                ]
+                Text (
+                    text: ${ state.detail_platform() },
+                    width: Dimension::Content,
+                    shrink: 0.0,
+                    font: font(BODY_SIZE),
+                    font_size: BODY_SIZE,
+                    text_color: SECONDARY
+                ) [
+                    FONT_PAINT,
+                ]
+            }
+            Column (
+                grow: 1.0,
+                min_height: 0,
+                min_width: 0,
+                clip_children: true
+            ) [
+                ScrollOffset::default(),
+                ScrollConfig {
+                    elastic: false,
+                    ..Default::default()
+                },
+                DetailsScroll {
+                    state: state.clone(),
+                },
+                ActorScope::Reading,
+            ] {
+                walk ${ 0..state.detail_count() } with index by index {
+                    detail_row (state, index, metrics)
+                }
+            } on SizeChanged { state.detail_viewport(event.new.height); }
+        }
+    }
+}
+
+#[compose]
+fn detail_row(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity {
+    ui! {
+        Column (
+            height: ${
+                state.detail_size(index, metrics.gap)
+                    + Fixed::from_int(metrics.shadow_height() + metrics.gap)
+            },
+            shrink: 0.0,
+            min_width: 0,
+            padding: Padding {
+                bottom: Dimension::px(metrics.gap),
+                ..Default::default()
+            },
+            transform: ${
+                mirui::types::Transform::translate(
+                    Fixed::ZERO,
+                    Fixed::from_int(
+                        if state.menu_selection() == Some(index) {
+                            super::motion::hop(state.selection_age(), 2.0)
+                        } else {
+                            0
+                        },
+                    ),
+                )
+            }
+        ) {
+            Row (
+                height: ${ state.detail_size(index, metrics.gap) },
+                shrink: 0.0,
+                min_width: 0,
+                padding: Padding::all(metrics.gap),
+                column_gap: metrics.gap,
+                bg_color: ${ if state.menu_selection() == Some(index) { ACCENT_DIM } else { PANEL } },
+                border_width: 2,
+                border_color: ${ if state.menu_selection() == Some(index) { ACCENT } else { DIVIDER } }
+            ) [
+                ActionAnchor(index, ActionLayout::Details),
+            ] {
+                View (width: 3, height: 40, shrink: 0.0, bg_color: ACCENT)
+                Column (grow: 1.0, min_width: 0, height: Dimension::percent(100), row_gap: 4) {
+                    detail_text (state, index, 0, TITLE_SIZE)
+                    detail_text (state, index, 1, BODY_SIZE)
+                    if ${ state.menu_selection() == Some(index) && state.detail_expanded() } {
+                        View (height: 1, bg_color: DIVIDER)
+                        Column (
+                            height: ${ state.detail_facts_size(index, metrics.gap) },
+                            shrink: 0.0,
+                            min_width: 0,
+                            row_gap: metrics.gap
+                        ) {
+                            walk ${ 0..state.detail_fact_count(index) } with field by field {
+                                detail_fact (state, index, field, metrics)
+                            }
+                        }
+                    }
+                }
+                Column (width: 24, height: 24, shrink: 0.0) {
+                    action_icon (state, index)
+                }
+            }
+            shadow (metrics)
+        } on SizeChanged { state.detail_measure(index, event.new.height); }
+    }
+}
+
+#[compose]
+fn detail_text(state: model!(Launcher), index: usize, part: usize, size: u16) -> Entity {
+    ui! {
+        Text (
+            text: ${
+                match part {
+                    0 => state.item(index).map(|item| item.name).unwrap_or_default(),
+                    1 => state.item(index).map(|item| item.value).unwrap_or_default(),
+                    _ => String::new(),
+                }
+            },
+            height: Dimension::Content,
+            width: Dimension::percent(100),
+            min_height: i32::from(size) + ROW_LEADING,
+            min_width: 0,
+            shrink: 0.0,
+            font: font(size),
+            font_size: size,
+            text_color: if part == 1 { SECONDARY } else { FOREGROUND },
+            paragraph: mirui::ui::widgets::ParagraphStyle {
+                wrap: mirui::ui::widgets::TextWrap::Grapheme,
+                max_lines: None,
+                ..Default::default()
+            }
+        ) [
+            FONT_PAINT,
+        ] on SizeChanged { state.detail_text_size(index, part, event.new.height); }
+    }
+}
+
+#[compose]
+fn detail_fact(state: model!(Launcher), index: usize, field: usize, metrics: Metrics) -> Entity {
+    ui! {
+        Column (
+            height: ${ state.detail_fact_height(index, field) + Fixed::ONE },
+            shrink: 0.0,
+            min_width: 0
+        ) {
+            Row (
+                height: ${ state.detail_fact_height(index, field) },
+                shrink: 0.0,
+                min_width: 0,
+                column_gap: metrics.gap
+            ) {
+                Column (width: Dimension::percent(20), min_width: 56, shrink: 0.0) {
+                    detail_fact_text (state, index, field, false)
+                }
+                Column (grow: 1.0, min_width: 0) {
+                    detail_fact_text (state, index, field, true)
+                }
+            }
+            View (height: 1, shrink: 0.0, bg_color: DIVIDER)
+        }
+    }
+}
+
+#[compose]
+fn detail_fact_text(state: model!(Launcher), index: usize, field: usize, value: bool) -> Entity {
+    ui! {
+        Text (
+            text: ${
+                {
+                    let fact = state.detail_fact(index, field);
+                    if value { fact.value } else { fact.label }
+                }
+            },
+            width: Dimension::percent(100),
+            height: Dimension::Content,
+            min_height: i32::from(BODY_SIZE) + ROW_LEADING,
+            min_width: 0,
+            shrink: 0.0,
+            font: font(BODY_SIZE),
+            font_size: BODY_SIZE,
+            text_color: if value { FOREGROUND } else { SECONDARY },
+            paragraph: mirui::ui::widgets::ParagraphStyle {
+                wrap: mirui::ui::widgets::TextWrap::Grapheme,
+                max_lines: None,
+                ..Default::default()
+            }
+        ) [
+            FONT_PAINT,
+        ] on SizeChanged { state.detail_fact_measure(index, field, value, event.new.height); }
+    }
+}
+
+#[compose]
+fn level_panel(
+    state: model!(Launcher),
+    settings: model!(crate::settings::Settings),
+    metrics: Metrics,
+) -> Entity {
+    ui! {
+        Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: metrics.gap) {
+            level_row (state, 0, metrics)
+            level_row (state, 1, metrics)
+            Row (
+                height: metrics.action_height() + 4,
+                shrink: 0.0,
+                column_gap: metrics.gap,
+                min_height: 0
+            ) {
+                action_tile (state, settings, 2, metrics)
+                action_tile (state, settings, 3, metrics)
+            }
+        }
+    }
+}
+
+#[compose]
+fn level_row(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity {
+    ui! {
+        Column (grow: 1.0, min_height: if metrics.compact { 60 } else { 76 }, min_width: 0) {
+            Row (
+                grow: 1.0,
+                min_height: 0,
+                min_width: 0,
+                column_gap: metrics.gap,
+                padding: Padding::all(metrics.gap),
+                align: AlignItems::Center,
+                bg_color: ${ if state.view().selected == index { ACCENT_DIM } else { PANEL } },
+                border_width: 2,
+                border_color: ${ if state.view().selected == index { ACCENT } else { DIVIDER } },
+                transform: ${
+                    mirui::types::Transform::translate(
+                        Fixed::ZERO,
+                        Fixed::from_int(
+                            if state.view().selected == index {
+                                super::motion::hop(state.selection_age(), 3.0)
+                            } else {
+                                0
+                            },
+                        ),
+                    )
+                }
+            ) [
+                ActionAnchor(index, ActionLayout::Levels),
+            ] {
+                View (
+                    width: 3,
+                    height: Dimension::percent(100),
+                    shrink: 0.0,
+                    bg_color: ${ if state.view().selected == index { ACCENT } else { DIVIDER } }
+                )
+                Column (width: 32, height: 32, shrink: 0.0) {
+                    action_icon (state, index)
+                }
+                Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: 4) {
+                    Row (
+                        height: 24,
+                        min_width: 0,
+                        shrink: 0.0,
+                        align: AlignItems::Center,
+                        column_gap: metrics.gap
+                    ) {
+                        Text (
+                            text: ${ state.item(index).map(|item| item.name).unwrap_or_default() },
+                            grow: 1.0,
+                            min_width: 0,
+                            font: font(TITLE_SIZE),
+                            font_size: TITLE_SIZE,
+                            text_color: ${ action_foreground(&state.view(), index) },
+                            paragraph: super::widgets::paragraph(Start, 1)
+                        ) [
+                            FONT_PAINT,
+                        ]
+                        View (
+                            width: 4,
+                            height: 4,
+                            bg_color: ${ if state.level(index).is_some_and(|level| level.pending) { WARNING } else { PANEL } }
+                        )
+                        Text (
+                            text: ${
+                                state
+                                    .level(index)
+                                    .and_then(|level| level.value)
+                                    .map_or_else(|| "--".into(), |value| format!("{value}%"))
+                            },
+                            width: 60,
+                            shrink: 0.0,
+                            font: font(TITLE_SIZE),
+                            font_size: TITLE_SIZE,
+                            text_color: ${ action_foreground(&state.view(), index) },
+                            paragraph: super::widgets::paragraph(mirui::ui::widgets::TextAlign::End, 1)
+                        ) [
+                            FONT_PAINT,
+                        ]
+                    }
+                    View (
+                        height: 14,
+                        width: Dimension::percent(100),
+                        min_width: 0,
+                        shrink: 0.0,
+                        container: true,
+                        bg_color: BACKGROUND,
+                        border_width: 1,
+                        border_color: SECONDARY
+                    ) {
+                        View (
+                            position: Position::Absolute,
+                            left: 0,
+                            top: 0,
+                            height: Dimension::percent(100),
+                            width: ${ Dimension::Percent(state.level_positions()[index]) },
+                            bg_color: ACCENT
+                        )
+                        walk 1..20 with segment {
+                            View (
+                                position: Position::Absolute,
+                                left: Dimension::percent(segment * 5),
+                                top: 0,
+                                height: Dimension::percent(100),
+                                width: 2,
+                                bg_color: BACKGROUND
+                            )
+                        }
+                        if ${ state.level(index).is_some_and(|level| level.value.is_some()) } {
+                            View (
+                                position: Position::Absolute,
+                                left: ${ Dimension::Percent(state.level_positions()[index]) },
+                                top: -4,
+                                width: 10,
+                                height: 22,
+                                bg_color: WARNING,
+                                border_width: 2,
+                                border_color: FOREGROUND
+                            ) [
+                                mirui::ui::widgets::WidgetTransform(
+                                    mirui::types::Transform::translate((-5).into(), Fixed::ZERO),
+                                ),
+                            ]
+                        }
+                    }
+                }
+            }
+            shadow (metrics)
+        }
+    }
+}
+
+#[compose]
+fn action_tile(
+    state: model!(Launcher),
+    settings: model!(crate::settings::Settings),
+    index: usize,
+    metrics: Metrics,
+) -> Entity {
     ui! {
         Column (
             grow: 1.0,
@@ -315,7 +801,7 @@ fn action_tile(state: model!(Launcher), index: usize, metrics: Metrics) -> Entit
                 justify: JustifyContent::Center,
                 bg_color: ${
                     if state.view().selected == index
-                        && state.view().items.get(index).is_some_and(|item| item.enabled)
+                        && state.view().items.get(index).is_some_and(|item| item.enabled())
                     {
                         ACCENT
                     } else {
@@ -325,42 +811,161 @@ fn action_tile(state: model!(Launcher), index: usize, metrics: Metrics) -> Entit
                 border_width: 2,
                 border_color: ${ if state.view().selected == index { WARNING } else { DIVIDER } }
             ) [
-                ActionAnchor(index),
+                ActionAnchor(index, ActionLayout::Grid),
             ] {
-                action_icon (state, index)
-                overlay_label (state, Some(index), metrics)
+                Row (
+                    grow: 1.0,
+                    min_height: 0,
+                    width: Dimension::percent(100),
+                    column_gap: metrics.gap,
+                    align: AlignItems::Center
+                ) {
+                    Column (width: 32, height: 32, shrink: 0.0) {
+                        action_icon (state, index)
+                    }
+                    Column (
+                        grow: 1.0,
+                        min_width: 0,
+                        row_gap: metrics.gap / 2,
+                        justify: JustifyContent::Center
+                    ) {
+                        overlay_label (state, Some(index))
+                        action_value (settings, state, index, metrics)
+                    }
+                }
             }
             shadow (metrics)
         }
     }
 }
 
+#[compose]
+fn action_value(
+    settings: model!(crate::settings::Settings),
+    state: model!(Launcher),
+    index: usize,
+    metrics: Metrics,
+) -> Entity {
+    let foreground = state.clone();
+    ui! {
+        Column (
+            visible: ${
+                state
+                    .item(index)
+                    .is_some_and(|item| {
+                        !settings.menu_value(item.action).is_empty() || !item.value.is_empty()
+                    })
+            },
+            shrink: 0.0
+        ) {
+            text_block (
+                move || {
+                    state
+                        .item(index)
+                        .map(|item| {
+                            let local = settings.menu_value(item.action);
+                            if local.is_empty() { item.value } else { local.into() }
+                        })
+                        .unwrap_or_default()
+                },
+                move || action_foreground(&foreground.view(), index),
+                metrics.small,
+                Center,
+                LABEL_LEADING,
+                1
+            )
+        }
+    }
+}
+
+#[compose]
+fn action_reason(state: model!(Launcher), metrics: Metrics) -> Entity {
+    ui! {
+        text_block (
+            move || {
+                let reason = state
+                    .menu_selection()
+                    .and_then(|selected| state.item(selected))
+                    .map(|item| item.reason().to_owned())
+                    .unwrap_or_default();
+                if reason.is_empty() { state.notice() } else { reason }
+            },
+            || SECONDARY,
+            metrics.small,
+            Start,
+            LABEL_LEADING,
+            1
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum ActionGlyph {
     Play,
+    Library,
     Signal,
     Favorite,
     Sound,
+    Brightness,
+    Settings,
     Power,
+    Restart,
     Exit,
     Back,
+    Toolbox,
+    Info,
+    Wifi,
+    Network,
+    Muted,
+    Core,
+    Firmware,
+    Storage,
 }
 
-fn action_glyph(kind: &str, index: usize) -> ActionGlyph {
-    match (kind, index) {
-        ("game", 0) | ("network", 0) => ActionGlyph::Play,
-        ("game", 1) | ("system", 2) | ("network", 1) => ActionGlyph::Signal,
-        ("game", 2) => ActionGlyph::Favorite,
-        ("system", 1) => ActionGlyph::Sound,
-        ("system", 4) | ("power", 1) => ActionGlyph::Power,
-        ("system", 3) | ("exit", 1) => ActionGlyph::Exit,
-        _ => ActionGlyph::Back,
+fn action_glyph(action: crate::model::MenuAction) -> ActionGlyph {
+    use crate::model::MenuAction::*;
+    match action {
+        Play => ActionGlyph::Play,
+        Multiplayer | ManageNetwork | RestorePlay => ActionGlyph::Signal,
+        OpenWifi => ActionGlyph::Wifi,
+        NetworkInfo => ActionGlyph::Network,
+        ToggleFavorite => ActionGlyph::Favorite,
+        ToggleSound | Volume => ActionGlyph::Sound,
+        Brightness => ActionGlyph::Brightness,
+        ShowControls | ShowGameSettings => ActionGlyph::Settings,
+        ShowTools => ActionGlyph::Toolbox,
+        SystemInfo | ShowGameDetails | ExpandDetail => ActionGlyph::Info,
+        ShowCoreDetails => ActionGlyph::Core,
+        ShowFirmwareDetails => ActionGlyph::Firmware,
+        ShowSaveDetails | ShowSaveManager | ShowStorage => ActionGlyph::Storage,
+        FileManager => ActionGlyph::Library,
+        ShowPower | Poweroff => ActionGlyph::Power,
+        Reboot => ActionGlyph::Restart,
+        ShowExit | Exit => ActionGlyph::Exit,
+        CycleTheme | Back => ActionGlyph::Back,
+    }
+}
+
+fn item_glyph(item: Option<crate::model::LauncherItem>) -> ActionGlyph {
+    match item {
+        Some(item)
+            if item.action == crate::model::MenuAction::Volume
+                && item
+                    .level
+                    .is_some_and(|level| level.muted || level.value == Some(0)) =>
+        {
+            ActionGlyph::Muted
+        }
+        Some(item) => action_glyph(item.action),
+        None => ActionGlyph::Back,
     }
 }
 
 fn action_foreground(view: &crate::model::LauncherView, index: usize) -> ColorToken {
-    if !view.items.get(index).is_some_and(|item| item.enabled) {
+    if !view.items.get(index).is_some_and(|item| item.enabled()) {
         SECONDARY
+    } else if view.overlay_kind == "details" || view.overlay_kind == "controls" && index < 2 {
+        FOREGROUND
     } else if view.selected == index {
         ON_ACCENT
     } else {
@@ -378,7 +983,13 @@ fn action_icon(state: model!(Launcher), index: usize) -> Entity {
             width: Dimension::percent(100),
             align: AlignItems::Center
         ) {
-            if ${ state.view().overlay_kind == "system" && index == 0 } {
+            if ${
+                state
+                    .view()
+                    .items
+                    .get(index)
+                    .is_some_and(|item| item.action == crate::model::MenuAction::CycleTheme)
+            } {
                 Row (
                     grow: 1.0,
                     width: Dimension::percent(70),
@@ -396,14 +1007,37 @@ fn action_icon(state: model!(Launcher), index: usize) -> Entity {
                 Column (width: 32, grow: 1.0, min_height: 0) {
                     walk ${
                         std::iter::once((
-                            action_glyph(&state.view().overlay_kind, index),
+                            item_glyph(state.item(index)),
                             action_foreground(&state.view(), index),
                         ))
                     } with icon by icon {
                         Image (
                             src: match icon.0 {
+                                ActionGlyph::Core => {
+                                    path!(
+                                        M 4 4 H 12 V 12 H 4 Z M 5 1 H 7 V 4 H 5 Z M 9 1 H 11 V 4 H 9 Z M 5 12 H 7
+                                        V 15 H 5 Z M 9 12 H 11 V 15 H 9 Z M 1 5 H 4 V 7 H 1 Z M 1 9 H 4 V 11 H 1
+                                        Z M 12 5 H 15 V 7 H 12 Z M 12 9 H 15 V 11 H 12 Z
+                                    )
+                                }
+                                ActionGlyph::Firmware => {
+                                    path!(
+                                        M 3 2 H 6 V 4 H 10 V 2 H 13 V 14 H 3 Z M 1 4 H 3 V 6 H 1 Z M 1 8 H 3 V 10
+                                        H 1 Z M 1 12 H 3 V 14 H 1 Z M 13 4 H 15 V 6 H 13 Z M 13 8 H 15 V 10 H 13
+                                        Z M 13 12 H 15 V 14 H 13 Z
+                                    )
+                                }
+                                ActionGlyph::Storage => {
+                                    path!(
+                                        M 2 1 H 12 L 15 4 V 15 H 1 V 1 Z M 4 2 V 6 H 11 V 2 Z M 4 9 V 14 H 12 V 9
+                                        Z
+                                    )
+                                }
                                 ActionGlyph::Play => {
                                     path!(M 3 2 H 6 V 4 H 10 V 7 H 14 V 10 H 10 V 13 H 6 V 15 H 3 Z)
+                                }
+                                ActionGlyph::Library => {
+                                    path!(M 1 3 H 7 V 5 H 15 V 14 H 1 Z M 3 7 V 12 H 13 V 7 Z)
                                 }
                                 ActionGlyph::Signal => {
                                     path!(
@@ -430,6 +1064,13 @@ fn action_icon(state: model!(Launcher), index: usize) -> Entity {
                                         3 Z
                                     )
                                 }
+                                ActionGlyph::Restart => {
+                                    path!(
+                                        M 4 1 H 11 V 3 H 13 V 5 H 15 V 1 H 16 V 8 H 9 V 6 H 12 V 4 H 10 V 3 H 5 V
+                                        4 H 3 V 11 H 5 V 13 H 11 V 11 H 13 V 9 H 15 V 12 H 13 V 14 H 11 V 15 H 4
+                                        V 13 H 2 V 11 H 1 V 5 H 2 V 3 H 4 Z
+                                    )
+                                }
                                 ActionGlyph::Exit => {
                                     path!(
                                         M 1 1 H 8 V 3 H 3 V 13 H 8 V 15 H 1 Z M 11 3 H 13 V 5 H 15 V 7 H 16 V 9 H
@@ -439,6 +1080,52 @@ fn action_icon(state: model!(Launcher), index: usize) -> Entity {
                                 ActionGlyph::Back => {
                                     path!(
                                         M 6 2 H 8 V 6 H 15 V 10 H 8 V 14 H 6 V 12 H 4 V 10 H 2 V 6 H 4 V 4 H 6 Z
+                                    )
+                                }
+                                ActionGlyph::Brightness => {
+                                    path!(
+                                        M 6 4 H 10 V 6 H 12 V 10 H 10 V 12 H 6 V 10 H 4 V 6 H 6 Z M 7 0 H 9 V 2 H
+                                        7 Z M 7 14 H 9 V 16 H 7 Z M 0 7 H 2 V 9 H 0 Z M 14 7 H 16 V 9 H 14 Z M 2
+                                        2 H 4 V 4 H 2 Z M 12 2 H 14 V 4 H 12 Z M 2 12 H 4 V 14 H 2 Z M 12 12 H 14
+                                        V 14 H 12 Z
+                                    )
+                                }
+                                ActionGlyph::Settings => {
+                                    path!(
+                                        M 5 1 H 11 V 3 H 13 V 5 H 15 V 11 H 13 V 13 H 11 V 15 H 5 V 13 H 3 V 11 H
+                                        1 V 5 H 3 V 3 H 5 Z M 6 5 V 6 H 5 V 10 H 6 V 11 H 10 V 10 H 11 V 6 H 10 V
+                                        5 Z
+                                    )
+                                }
+                                ActionGlyph::Toolbox => {
+                                    path!(
+                                        M 5 1 H 11 V 5 H 15 V 15 H 1 V 5 H 5 Z M 7 3 V 5 H 9 V 3 Z M 2 8 V 10 H 7
+                                        V 12 H 9 V 10 H 14 V 8 H 9 V 7 H 7 V 8 Z
+                                    )
+                                }
+                                ActionGlyph::Info => {
+                                    path!(
+                                        M 3 0 H 13 V 2 H 15 V 14 H 13 V 16 H 3 V 14 H 1 V 2 H 3 Z M 7 3 V 5 H 9 V
+                                        3 Z M 7 7 V 13 H 9 V 7 Z
+                                    )
+                                }
+                                ActionGlyph::Wifi => {
+                                    path!(
+                                        M 1 2 H 15 V 4 H 1 Z M 3 6 H 13 V 8 H 3 Z M 5 10 H 11 V 12 H 5 Z M 7 14 H
+                                        9 V 16 H 7 Z
+                                    )
+                                }
+                                ActionGlyph::Network => {
+                                    path!(
+                                        M 5 0 H 11 V 5 H 9 V 8 H 14 V 11 H 16 V 16 H 10 V 11 H 12 V 10 H 4 V 11 H
+                                        6 V 16 H 0 V 11 H 2 V 8 H 7 V 5 H 5 Z
+                                    )
+                                }
+                                ActionGlyph::Muted => {
+                                    path!(
+                                        M 1 6 H 4 V 4 H 6 V 2 H 8 V 14 H 6 V 12 H 4 V 10 H 1 Z M 10 4 H 12 V 6 H
+                                        10 Z M 12 6 H 14 V 10 H 12 Z M 14 4 H 16 V 6 H 14 Z M 10 10 H 12 V 12 H
+                                        10 Z M 14 10 H 16 V 12 H 14 Z
                                     )
                                 }
                             },
@@ -455,14 +1142,22 @@ fn action_icon(state: model!(Launcher), index: usize) -> Entity {
 }
 
 #[compose]
-fn overlay_label(state: model!(Launcher), index: Option<usize>, metrics: Metrics) -> Entity {
+fn overlay_label(state: model!(Launcher), index: Option<usize>) -> Entity {
     let text = state.clone();
     ui! {
         text_block (
             move || {
                 index
                     .map_or_else(
-                        || text.view().overlay,
+                        || {
+                            if text.saves().active() {
+                                text.saves().heading()
+                            } else if text.configuration().active() {
+                                text.configuration().heading()
+                            } else {
+                                text.view().overlay
+                            }
+                        },
                         |index| {
                             text.view()
                                 .items
@@ -473,7 +1168,7 @@ fn overlay_label(state: model!(Launcher), index: Option<usize>, metrics: Metrics
                     )
             },
             move || { index.map_or(FOREGROUND, |index| action_foreground(&state.view(), index)) },
-            metrics.title,
+            TITLE_SIZE,
             if index.is_none() { Start } else { Center },
             LABEL_LEADING,
             2
@@ -556,6 +1251,31 @@ fn catalog_viewport(state: model!(DisplayState), deck: model!(Deck), metrics: Me
         Column (visible: ${ deck.expansion() > Fixed::ZERO }, position: Position::Absolute, width: Dimension::percent(100), top: 0, height: ${ Dimension::Percent(catalog_share(deck.expansion()) * Fixed::from_int(100)) }, transform: ${ mirui::types::Transform::translate(Fixed::ZERO, deck.height() * shelf_share(deck.expansion())) }, clip_children: true, min_height: 0, container: true) {
             Column (position: Position::Absolute, top: 0, width: Dimension::percent(100), height: @(id("launcher_deck").height as height) { height * FULL }, transform: ${ transform(deck.expansion(), deck.height() * FULL) }, padding: Padding::all(metrics.gap), min_height: 0) [ActorScope::Layer(Layer::Catalog)] {
                 PageView (grow: 1.0, min_height: 0, page: ${ state.page_key() }, transition: ${ state.transition() }) on CreatePage(create_library::callback(state.clone(), metrics))
+            }
+        }
+    }
+}
+
+#[compose]
+fn configuration_or_saves_panel(state: model!(Launcher), metrics: Metrics) -> Entity {
+    ui! {
+        Column (grow: 1.0, min_width: 0, min_height: 0) {
+            if ${ state.saves().active() } {
+                saves_panel (state.saves(), metrics)
+            } else {
+                configuration_panel (state.configuration(), metrics)
+            }
+        }
+    }
+}
+#[compose]
+fn configuration_or_saves_hints(state: model!(Launcher), metrics: Metrics) -> Entity {
+    ui! {
+        Row (grow: 1.0, min_width: 0, min_height: 0) {
+            if ${ state.saves().active() } {
+                saves_hints (state.saves(), metrics)
+            } else {
+                configuration_hints (state.configuration(), metrics)
             }
         }
     }

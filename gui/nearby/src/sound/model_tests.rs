@@ -41,6 +41,33 @@ fn view(page: Page, phase: Phase) -> View {
     }
 }
 
+#[test]
+fn wifi_editor_focus_and_validation_use_the_existing_model_audio_effects() {
+    let (mut app, state, sink) = setup();
+    app.audio().unwrap().set_muted(false);
+    state.focus_changed(Some(0), Some(1), 1000);
+    app.render().unwrap();
+    state.focus_changed(Some(1), Some(1), 1100);
+    app.render().unwrap();
+    state.invalid_input();
+    app.render().unwrap();
+    let commands = sink.0.borrow();
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|command| matches!(command,AudioCommand::Play{cue,..} if *cue==Cue::Focus.id()))
+            .count(),
+        1
+    );
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|command| matches!(command,AudioCommand::Play{cue,..} if *cue==Cue::Error.id()))
+            .count(),
+        1
+    );
+}
+
 enum Delivery {
     View { view: Rc<View>, at: u64 },
     Input { action: Action, at: u64 },

@@ -14,18 +14,22 @@ mod cache;
 mod choices;
 mod chrome;
 mod composition;
+mod configuration;
 mod consoles;
 mod copy;
 mod deck;
 mod font;
+mod keyboard;
 mod launcher;
 mod library;
+mod list_layout;
 mod lists;
 mod modal;
 pub(crate) mod motion;
 mod pages;
 mod pixel;
 mod rows;
+mod saves;
 mod selection;
 mod sessions;
 mod shelf;
@@ -34,6 +38,7 @@ mod static_snapshot;
 mod style;
 mod suspension;
 mod widgets;
+mod wifi;
 
 #[component]
 struct StaticCache;
@@ -56,6 +61,9 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     app.with_widget(page_view::view::<PageKey>());
     app.with_widget(selection::target::view());
     app.with_widget(selection::frame::view());
+    app.with_widget(launcher::details_scroll::view());
+    app.with_widget(configuration::config_scroll::view());
+    app.with_widget(saves::save_reading::view());
     app.with_widget(pixel::choice_sprite::view());
     app.with_widget(pixel::walker_sprite::view());
     app.with_widget(pixel::actor_sprite::view());
@@ -69,6 +77,13 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     static_snapshot::install(app);
     suspension::install(app);
     state::install(app);
+    let input_launcher = app
+        .world
+        .resource::<state::DisplayRuntime>()
+        .expect("Display models are installed")
+        .state
+        .launcher();
+    crate::launcher::text_input::install(app, input_launcher);
     artwork::install(app)?;
     app.add_plugin(actions_damage::ActionsDamage::default());
     app.add_plugin(cache::CacheBoundaryPaint::default());
@@ -316,4 +331,31 @@ pub fn subscribe_shelf_layout<B: Surface, F: RendererFactory<B>>(
             .map_err(|e| format!("Shelf effects: {e:?}"))?;
     }
     Ok(())
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub fn subscribe_list_layout<B: Surface, F: RendererFactory<B>>(
+    app: &App<B, F>,
+    listener: impl Fn(&list_layout::LayoutRequest) + 'static,
+) -> Result<(), String> {
+    let runtime = app
+        .world
+        .resource::<state::DisplayRuntime>()
+        .ok_or("Display runtime is missing")?;
+    let listener = std::rc::Rc::new(listener);
+    for state in [&runtime.state, &runtime.catalog] {
+        let listener = listener.clone();
+        state
+            .list_layout()
+            .on_effect(move |request: &list_layout::LayoutRequest| listener(request))
+            .map_err(|e| format!("List effects: {e:?}"))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn save_image_source(
+    path: String,
+    revision: Option<(u64, Option<std::time::SystemTime>)>,
+) -> String {
+    artwork::save_source(path, revision)
 }

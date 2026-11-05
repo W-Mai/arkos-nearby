@@ -146,6 +146,10 @@ impl State {
     pub fn closed(&self) -> bool {
         matches!(self.phase.as_str(), "closed" | "failed")
     }
+
+    pub fn network_released(&self) -> bool {
+        self.closed() && self.network_restored && self.recovery_errors.is_empty()
+    }
 }
 
 fn base() -> Result<()> {
@@ -159,14 +163,38 @@ fn lock() -> Result<Lock> {
 }
 pub fn while_idle<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
     let _lock = lock()?;
-    if Path::new(BASE).join("session.json").exists() {
+    require_idle()?;
+    operation()
+}
+
+pub(crate) fn try_while_idle<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    base()?;
+    let _lock = Lock::try_acquire(&Path::new(BASE).join("session.lock"))?;
+    require_idle()?;
+    operation()
+}
+
+pub(crate) fn require_idle() -> Result<()> {
+    require_room_idle()?;
+    require(!crate::wifi::pending(), "普通 Wi-Fi 连接仍待恢复")
+}
+
+pub(crate) fn recover_wifi<T>(operation: impl FnOnce() -> Result<T>) -> Result<T> {
+    base()?;
+    let _lock = Lock::try_acquire(&Path::new(BASE).join("session.lock"))?;
+    require_room_idle()?;
+    operation()
+}
+
+fn require_room_idle() -> Result<()> {
+    if Path::new(BASE).join("session.json").try_exists()? {
         let state = state()?;
         require(
-            state.closed() && state.network_restored && state.recovery_errors.is_empty(),
-            "Close the room and finish restoring Wi-Fi before changing pairing or installation",
+            state.network_released(),
+            "Close the room and finish network recovery first",
         )?;
     }
-    operation()
+    Ok(())
 }
 pub fn state() -> Result<State> {
     let state: State = read(&Path::new(BASE).join("session.json"))?;
@@ -363,26 +391,29 @@ fn scan_observations(sha: &str, refresh: bool, force: bool) -> Result<Value> {
     base()?;
     let _lock = Lock::acquire(&Path::new(BASE).join("scan.lock"))?;
     let path = Path::new(BASE).join("scan.json");
-    let mut cache = read::<Value>(&path)
-        .unwrap_or_else(|_| json!({"rooms":[],"requested_at":0,"observed_at":0}));
+    let mut cache = read::<Value>(&path).unwrap_or_else(|_| json!({"rooms":[]}));
     let now = monotonic();
-    let mut active = false;
-    let result = (|| -> Result<Vec<RoomEntry>> {
-        if refresh
-            && now - cache["requested_at"].as_f64().unwrap_or(0.0) >= if force { 0.75 } else { 4.0 }
-        {
-            command(
-                "nmcli",
-                &["device", "wifi", "rescan", "ifname", "wlan0"],
-                4,
-                true,
-            )?;
-            cache["requested_at"] = now.into();
-            active = true;
-        }
-        let rows = command(
-            "nmcli",
-            &[
+    let mut result = collect_scan(&mut cache, &owner, sha, refresh, force, now, |request| {
+        command("nmcli", request.args(), 4, true)
+    })?;
+    write(&path, &cache)?;
+    result["scanning"] = scan_activity()
+        .unwrap_or(result["refresh_accepted"] == true)
+        .into();
+    Ok(result)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScanRequest {
+    Refresh,
+    List,
+}
+
+impl ScanRequest {
+    fn args(self) -> &'static [&'static str] {
+        match self {
+            Self::Refresh => &["device", "wifi", "rescan", "ifname", "wlan0"],
+            Self::List => &[
                 "-t",
                 "--escape",
                 "no",
@@ -396,37 +427,145 @@ fn scan_observations(sha: &str, refresh: bool, force: bool) -> Result<Value> {
                 "--rescan",
                 "no",
             ],
-            4,
-            true,
-        )?;
-        let mut rooms = Vec::new();
-        for line in rows.lines() {
-            if let Some((ssid, rest)) = line.split_once(':') {
-                if let Some((bssid, signal)) = rest.rsplit_once(':') {
-                    if let Some(room) =
-                        RoomEntry::observed(ssid, bssid, signal.parse().unwrap_or(0), sha)
+        }
+    }
+}
+
+fn collect_scan(
+    cache: &mut Value,
+    owner: &str,
+    sha: &str,
+    refresh: bool,
+    force: bool,
+    now: f64,
+    mut run: impl FnMut(ScanRequest) -> Result<String>,
+) -> Result<Value> {
+    let mut result = json!({"refresh_accepted":false});
+    if refresh
+        && cache["requested_at"]
+            .as_f64()
+            .is_none_or(|at| now - at >= if force { 0.75 } else { 4.0 })
+    {
+        // Rejected requests still consume the retry interval; observations are independent.
+        cache["requested_at"] = now.into();
+        match run(ScanRequest::Refresh) {
+            Ok(_) => result["refresh_accepted"] = true.into(),
+            Err(error) => result["refresh_error"] = error.to_string().into(),
+        }
+    }
+    let rooms = match run(ScanRequest::List) {
+        Ok(rows) => {
+            let mut rooms: Vec<_> = rows
+                .lines()
+                .filter_map(|line| {
+                    let (ssid, rest) = line.split_once(':')?;
+                    let (bssid, signal) = rest.rsplit_once(':')?;
+                    RoomEntry::observed(ssid, bssid, signal.parse().unwrap_or(0), sha)
+                        .filter(|room| room.bssid != owner)
+                })
+                .collect();
+            rooms.sort_by_key(|room| (-room.signal, room.id.clone()));
+            rooms.dedup_by(|left, right| left.id == right.id);
+            rooms
+        }
+        Err(error) => {
+            result["scan_error"] = error.to_string().into();
+            if cache["observed_at"]
+                .as_f64()
+                .is_some_and(|at| now - at <= 9.0)
+            {
+                serde_json::from_value::<Vec<RoomEntry>>(cache["rooms"].clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|room| {
+                        RoomEntry::observed(&room.ssid, &room.bssid, room.signal, sha)
                             .filter(|room| room.bssid != owner)
-                    {
-                        rooms.push(room);
-                    }
-                }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
             }
         }
-        rooms.sort_by_key(|room| (-room.signal, room.id.clone()));
-        rooms.dedup_by(|left, right| left.id == right.id);
-        Ok(rooms)
-    })();
-    let scanning = scan_activity().unwrap_or(active);
-    match result {
-        Ok(rooms) => {
-            cache["rooms"] = serde_json::to_value(&rooms)?;
-            cache["observed_at"] = now.into();
-            write(&path, &cache)?;
-            Ok(json!({"rooms":rooms,"scanning":scanning}))
+    };
+    if result["scan_error"].is_null() {
+        cache["rooms"] = serde_json::to_value(&rooms)?;
+        cache["observed_at"] = now.into();
+    }
+    result["rooms"] = serde_json::to_value(rooms)?;
+    Ok(result)
+}
+
+#[cfg(test)]
+mod discovery_contracts {
+    use super::*;
+
+    const ROW: &str = "DIRECT-NP-aaaaaa-1111111111111:02:aa:bb:cc:dd:01:80";
+
+    #[test]
+    fn refresh_failure_cannot_suppress_observations_or_bypass_retry_budget() {
+        let mut cache = json!({"rooms":[]});
+        let mut requests = Vec::new();
+        for (now, force) in [(0.0, false), (0.35, false), (0.75, true), (1.0, true)] {
+            let value = collect_scan(
+                &mut cache,
+                "",
+                &"a".repeat(64),
+                true,
+                force,
+                now,
+                |request| {
+                    requests.push(request);
+                    match request {
+                        ScanRequest::Refresh => Err("Scanning is already in progress".into()),
+                        ScanRequest::List => Ok(ROW.into()),
+                    }
+                },
+            )
+            .unwrap();
+            assert_eq!(value["rooms"].as_array().unwrap().len(), 1);
+            assert!(value["rooms"][0]["same_game_hint"].as_bool().unwrap());
+            assert!(value["scan_error"].is_null());
         }
-        Err(error) => Ok(
-            json!({"rooms":if now-cache["requested_at"].as_f64().unwrap_or(0.0)<=9.0 { cache["rooms"].clone() } else {json!([])},"scan_error":error.to_string(),"scanning":scanning}),
-        ),
+        assert_eq!(
+            requests.iter().filter(|r| **r == ScanRequest::List).count(),
+            4
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|r| **r == ScanRequest::Refresh)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn refreshes_cannot_extend_observation_lifetime_or_preserve_another_game_hint() {
+        let mut cache = json!({"rooms":[]});
+        collect_scan(&mut cache, "", &"a".repeat(64), false, false, 10.0, |_| {
+            Ok(ROW.into())
+        })
+        .unwrap();
+        for (now, expected) in [(18.0, 1), (19.1, 0), (20.0, 0)] {
+            let value = collect_scan(
+                &mut cache,
+                "",
+                &"b".repeat(64),
+                true,
+                false,
+                now,
+                |request| match request {
+                    ScanRequest::Refresh => Ok(String::new()),
+                    ScanRequest::List => Err("No observations available".into()),
+                },
+            )
+            .unwrap();
+            assert_eq!(value["rooms"].as_array().unwrap().len(), expected);
+            assert_eq!(cache["observed_at"], 10.0);
+            if expected != 0 {
+                assert_eq!(value["rooms"][0]["same_game_hint"], false);
+            }
+        }
     }
 }
 fn scan_activity() -> Option<bool> {
@@ -482,6 +621,7 @@ pub fn begin_for(role: &str, intent: &SessionIntent, selected: Option<RoomEntry>
     let id;
     {
         let _lock = lock()?;
+        require(!crate::wifi::pending(), "普通 Wi-Fi 连接仍待恢复")?;
         if let Ok(existing) = state() {
             require(
                 existing.recovery_errors.is_empty(),
@@ -1378,6 +1518,51 @@ pub fn recover(id: &str, reason: &str) -> Result<Value> {
 #[cfg(test)]
 mod native_admission_tests {
     use super::native_admission;
+
+    #[test]
+    fn network_ownership_is_released_only_after_complete_recovery_for_both_purposes() {
+        let mut state: super::State = serde_json::from_value(serde_json::json!({
+            "id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "self_mac":"02:00:00:00:00:01",
+            "role":"host", "phase":"closed", "stage":"", "step":"", "context_key":[],
+            "room":{"id":"room", "ssid":"room", "bssid":"02:00:00:00:00:01", "signal":0, "token":"token", "name":"room", "same_game_hint":false},
+            "original_uuid":"", "radio_before":"enabled", "services_before":[true,true],
+            "driver_owned":false, "mounts":[], "deadline":0.0, "claim_deadline":0.0,
+            "network_restored":true, "recovery_errors":[], "timings":[], "stage_started":0.0
+        })).unwrap();
+        for purpose in [
+            super::SessionPurpose::Game,
+            super::SessionPurpose::NetworkOnly,
+        ] {
+            state.purpose = purpose;
+            for phase in [
+                "created",
+                "joining",
+                "waiting",
+                "ready",
+                "playing",
+                "network_connected",
+                "restoring",
+                "restore_failed",
+                "closed",
+                "failed",
+                "unrecognized",
+            ] {
+                state.phase = phase.into();
+                for restored in [false, true] {
+                    state.network_restored = restored;
+                    for errors in [vec![], vec!["NetworkManager".to_string()]] {
+                        state.recovery_errors = errors;
+                        assert_eq!(
+                            state.network_released(),
+                            matches!(phase, "closed" | "failed")
+                                && restored
+                                && state.recovery_errors.is_empty()
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn unrelated_log_encoding_cannot_hide_the_current_native_admission() {

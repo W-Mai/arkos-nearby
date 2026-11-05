@@ -21,14 +21,17 @@ pub trait Backend: Send + Sync + 'static {
 enum Event {
     Input(String, f64),
     ShelfLayout(crate::catalog::shelf::Grid, bool),
+    ListLayout(usize, bool),
     Launcher(String, String, f64),
+    Wifi(nearby_menu::wifi::Request, f64),
+    Configuration(nearby_menu::configuration::Request, f64),
+    Saves(nearby_menu::saves::Request, f64),
     FrameReady,
     Eof,
     Status(u64, Value),
     Scan(u64, Value),
     Action(Request, Value, bool),
     Prepared(std::result::Result<Box<Context>, String>),
-    Indexed(Arc<crate::catalog::Index>),
     Searched(crate::catalog::SearchResult),
 }
 
@@ -87,10 +90,76 @@ pub struct MenuSession {
     display: display::Display,
     lobby_flow: Option<Flow>,
     launcher: bool,
-    index_task: Option<thread::JoinHandle<Arc<crate::catalog::Index>>>,
+    index_task: Option<thread::JoinHandle<Option<Arc<crate::catalog::Index>>>>,
+    index_invalidated: bool,
 }
 
 impl MenuSession {
+    pub(crate) fn prewarm_catalog(&mut self) {
+        if self.index_task.is_none() {
+            self.index_task = Some(thread::spawn(|| {
+                crate::catalog::IndexJob::local().ok().map(|job| job.run())
+            }));
+        }
+    }
+
+    fn ensure_index(&mut self, browser: &crate::catalog::Browser) {
+        if self.index_task.is_none() && browser.indexing {
+            let job = browser.index_job();
+            self.index_task = Some(thread::spawn(move || Some(job.run())));
+        }
+    }
+
+    fn poll_browser_index(
+        &mut self,
+        browser: &mut crate::catalog::Browser,
+        recheck_snapshot: &mut bool,
+    ) -> Result<()> {
+        if let Some(index) = self.take_index()? {
+            browser.accept_index(index);
+            if std::mem::take(recheck_snapshot) {
+                browser.indexing = true;
+            }
+        }
+        if self.index_task.is_none() {
+            *recheck_snapshot = false;
+        }
+        self.ensure_index(browser);
+        Ok(())
+    }
+
+    pub(crate) fn invalidate_library(&mut self) {
+        self.index_invalidated = self.index_task.is_some();
+    }
+
+    fn take_index(&mut self) -> Result<Option<Arc<crate::catalog::Index>>> {
+        if !self
+            .index_task
+            .as_ref()
+            .is_some_and(|task| task.is_finished())
+        {
+            return Ok(None);
+        }
+        let index = self.index_task.take().unwrap().join();
+        if std::mem::take(&mut self.index_invalidated) {
+            return Ok(None);
+        }
+        index.map_err(|_| "Library indexing failed".into())
+    }
+
+    pub fn stopping(&self) -> bool {
+        self.display.stopped()
+    }
+
+    pub fn with_frontend_released<T>(
+        &mut self,
+        operation: impl FnOnce(&std::sync::atomic::AtomicBool) -> Result<T>,
+        ready: impl FnOnce() -> Result<()>,
+    ) -> Result<T> {
+        self.display
+            .with_frontend_released(self.launcher, operation, ready)
+    }
+
     pub fn launcher_busy(
         &mut self,
         controller: &mut crate::launcher::Controller,
@@ -109,6 +178,7 @@ impl MenuSession {
             lobby_flow: None,
             launcher: true,
             index_task: None,
+            index_invalidated: false,
         })
     }
     pub fn choose_launcher(
@@ -121,37 +191,39 @@ impl MenuSession {
                 controller.changed_tab = false;
                 sender = self.display.begin_screen();
             }
-            if self
-                .index_task
-                .as_ref()
-                .is_some_and(|task| task.is_finished())
-            {
-                let index = self
-                    .index_task
-                    .take()
-                    .unwrap()
-                    .join()
-                    .map_err(|_| "Library indexing failed")?;
+            if let Some(index) = self.take_index()? {
                 controller.indexed(index);
             }
-            if self.index_task.is_none() && controller.browser().indexing {
-                let job = controller.browser().index_job();
-                self.index_task = Some(thread::spawn(move || job.run()));
-            }
+            self.ensure_index(controller.browser());
             if let Some(job) = controller.browser().search_job() {
                 let replies = sender.clone();
                 thread::spawn(move || replies.send(Event::Searched(job.run())));
             }
             self.display.present(controller.view())?;
+            if let Some(intent) = controller.save_launch() {
+                return Ok(intent);
+            }
             let outcome = match self.display.receive() {
                 Ok(Some(Event::Input(action, _))) => controller.input(&action)?,
                 Ok(Some(Event::Launcher(action, key, _))) => controller.gesture(&action, &key)?,
+                Ok(Some(Event::Saves(request, _))) => {
+                    controller.saves_request(request);
+                    None
+                }
+                Ok(Some(Event::Configuration(request, _))) => {
+                    controller.configuration_request(request);
+                    None
+                }
+                Ok(Some(Event::Wifi(request, _))) => {
+                    controller.wifi_request(request);
+                    None
+                }
                 Ok(Some(Event::ShelfLayout(grid, true))) => {
                     controller.shelf_layout(grid);
                     None
                 }
-                Ok(Some(Event::Indexed(index))) => {
-                    controller.indexed(index);
+                Ok(Some(Event::ListLayout(rows, true))) => {
+                    controller.list_layout(rows);
                     None
                 }
                 Ok(Some(Event::Searched(result))) => {
@@ -180,6 +252,7 @@ impl MenuSession {
             lobby_flow: None,
             launcher: false,
             index_task: None,
+            index_invalidated: false,
         })
     }
     pub fn run_with_fallback(
@@ -265,13 +338,10 @@ impl MenuSession {
         mode_picker: bool,
     ) -> Result<Outcome> {
         let sender = self.display.begin_screen();
+        let mut recheck_snapshot = self.index_task.is_some();
         if let Some(browser) = &mut browser {
             browser.reopen();
-            if browser.indexing {
-                let job = browser.index_job();
-                let sender = sender.clone();
-                thread::spawn(move || sender.send(Event::Indexed(job.run())));
-            }
+            self.poll_browser_index(browser, &mut recheck_snapshot)?;
         }
         let mut preparing = None;
         let result = (|| -> Result<Outcome> {
@@ -303,6 +373,7 @@ impl MenuSession {
             let mut scan_pending = false;
             while flow.exit_code.is_none() && !self.display.stopped() {
                 if let Some(browser) = &mut browser {
+                    self.poll_browser_index(browser, &mut recheck_snapshot)?;
                     if browser.exit {
                         return Ok(Outcome::Exit(0));
                     }
@@ -316,6 +387,7 @@ impl MenuSession {
                     self.display.present(browser.view())?;
                     match self.display.receive() {
                         Ok(Some(Event::ShelfLayout(grid, false))) => browser.shelf_layout(grid),
+                        Ok(Some(Event::ListLayout(rows, false))) => browser.list_layout(rows),
                         Ok(Some(Event::Input(action, at))) if at >= browser.input_epoch => {
                             if let Some(entry) = browser.dispatch(&action)? {
                                 let sender = sender.clone();
@@ -334,7 +406,6 @@ impl MenuSession {
                             }
                             browser.prepared(result.map(|context| *context));
                         }
-                        Ok(Some(Event::Indexed(index))) => browser.indexed(index),
                         Ok(Some(Event::Searched(result))) => browser.searched(result),
                         Ok(Some(Event::FrameReady)) => {
                             log(json!({"phase":"frame_submitted","frame_submitted":true}))?
@@ -434,10 +505,13 @@ impl MenuSession {
                     }
                     Ok(Some(
                         Event::Prepared(_)
-                        | Event::Indexed(_)
                         | Event::Searched(_)
                         | Event::ShelfLayout(_, _)
-                        | Event::Launcher(_, _, _),
+                        | Event::ListLayout(_, _)
+                        | Event::Launcher(_, _, _)
+                        | Event::Wifi(_, _)
+                        | Event::Configuration(_, _)
+                        | Event::Saves(_, _),
                     )) => {}
                     Ok(None) | Err(mpsc::RecvTimeoutError::Timeout) => {}
                     Err(error) => return Err(error.into()),

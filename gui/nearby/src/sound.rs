@@ -94,6 +94,15 @@ impl SoundState {
             .as_ref()
             .and_then(|view| self.feedback.input(action, view, at));
     }
+    pub fn focus_changed(&mut self, previous: Option<usize>, next: Option<usize>, at: u64) {
+        if previous != next && elapsed(self.feedback.last_focus, at, NAVIGATION_INTERVAL_MS) {
+            self.feedback.last_focus = Some(at);
+            self.pending = Some(Cue::Focus);
+        }
+    }
+    pub fn invalid_input(&mut self) {
+        self.pending = Some(Cue::Error);
+    }
 
     #[cfg(test)]
     pub fn theme_changed(&mut self) {
@@ -194,14 +203,31 @@ impl Feedback {
             return None;
         }
         let cue = match action {
+            Action::Confirm
+                if view
+                    .launcher
+                    .wifi
+                    .as_ref()
+                    .is_some_and(|wifi| !wifi.page.pending()) =>
+            {
+                Some(Cue::Confirm)
+            }
+            Action::Refresh
+                if view.launcher.wifi.as_ref().is_some_and(|wifi| {
+                    matches!(
+                        wifi.page,
+                        nearby_menu::wifi::Page::List | nearby_menu::wifi::Page::Empty
+                    )
+                }) =>
+            {
+                Some(Cue::Refresh)
+            }
             Action::Confirm if view.launcher.enabled && !view.launcher.overlay.is_empty() => view
                 .launcher
                 .items
                 .get(view.launcher.selected)
-                .filter(|item| item.enabled && !view.busy)
-                .filter(|_| {
-                    !(view.launcher.overlay_kind == "system" && view.launcher.selected == 0)
-                })
+                .filter(|item| item.enabled() && !view.busy)
+                .filter(|item| item.action != crate::model::MenuAction::CycleTheme)
                 .map(|_| Cue::Confirm),
             Action::Auxiliary
             | Action::Start
@@ -277,6 +303,32 @@ impl Feedback {
             }
         }
         let old = previous?;
+        if let Some(wifi) = next.launcher.wifi.as_ref() {
+            let before = old.launcher.wifi.as_ref();
+            if wifi.page == nearby_menu::wifi::Page::Success
+                && before.is_none_or(|v| v.page != wifi.page)
+            {
+                return Some(Cue::Ready);
+            }
+            if matches!(
+                wifi.page,
+                nearby_menu::wifi::Page::Failed | nearby_menu::wifi::Page::Password
+            ) && !wifi.notice.is_empty()
+                && before.is_none_or(|v| v.notice != wifi.notice)
+            {
+                return Some(Cue::Error);
+            }
+            if wifi.page == nearby_menu::wifi::Page::List
+                && before.is_some_and(|v| {
+                    matches!(
+                        v.page,
+                        nearby_menu::wifi::Page::Restoring | nearby_menu::wifi::Page::Cancelling
+                    )
+                })
+            {
+                return Some(Cue::Restored);
+            }
+        }
         if old.phase != next.phase {
             let cue = match next.phase {
                 Phase::Failed | Phase::RestoreFailed => Some(Cue::Error),
@@ -473,14 +525,18 @@ mod tests {
         view.launcher.overlay = "Settings".into();
         view.launcher.overlay_kind = "system".into();
         view.launcher.items = vec![crate::model::LauncherItem {
+            action: crate::model::MenuAction::CycleTheme,
             name: "Theme".into(),
-            enabled: true,
+            ..Default::default()
         }];
         assert_eq!(feedback.input(Action::Confirm, &view, 1000), None);
         view.launcher.overlay_kind.clear();
-        view.launcher.items[0].enabled = false;
+        view.launcher.items[0].action = crate::model::MenuAction::Back;
+        view.launcher.items[0].availability = nearby_menu::Availability::Unavailable {
+            reason: "Unavailable".into(),
+        };
         assert_eq!(feedback.input(Action::Confirm, &view, 1001), None);
-        view.launcher.items[0].enabled = true;
+        view.launcher.items[0].availability = nearby_menu::Availability::Available;
         assert_eq!(
             feedback.input(Action::Confirm, &view, 1002),
             Some(Cue::Confirm)

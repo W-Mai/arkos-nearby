@@ -35,6 +35,31 @@ struct LibraryPresentation {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum LibraryPlaceholder {
+    Searching,
+    Loading,
+    Failed,
+    Preparing,
+    Input,
+    NoMatches,
+    Empty,
+}
+
+impl LibraryPlaceholder {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Searching => "正在搜索",
+            Self::Loading => "正在加载",
+            Self::Failed => "暂时无法读取",
+            Self::Preparing => "正在核对",
+            Self::Input => "输入游戏名或文件名",
+            Self::NoMatches => "没有匹配的游戏",
+            Self::Empty => "没有可选游戏",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum DisplayRole {
     Primary,
     Shelf,
@@ -97,6 +122,7 @@ pub(super) struct DisplayState {
     role: DisplayRole,
     pub(super) cover_bounds: model!(owned super::artwork::CoverBounds),
     pub(super) shelf: model!(owned super::shelf::Shelf),
+    pub(super) list_layout: model!(owned super::list_layout::ListLayout),
     #[observe]
     pub(super) deck_height: Fixed,
     view: View,
@@ -148,6 +174,7 @@ impl DisplayState {
         let binding_activated = bind_rows && !renders_rows(self.role, &self.view);
         self.launcher.present(view);
         self.shelf.present(view);
+        self.list_layout.present(view);
         let mut changes = Changes::NONE;
         if view.page == Page::Games {
             changes.update(&mut self.query, view.library.query.clone(), Changes::QUERY);
@@ -237,9 +264,9 @@ impl DisplayState {
         // for another route whose empty defaults do not describe game rows.
         if matches!(view.page, Page::Games | Page::Candidates) {
             let limit = if view.library.kind == crate::model::LibraryKind::Favorites {
-                super::shelf::MAX_VISIBLE
+                super::shelf::WINDOW_BUDGET
             } else {
-                4
+                super::list_layout::WINDOW_BUDGET
             };
             if bind_rows
                 && (binding_activated
@@ -480,6 +507,22 @@ impl DisplayState {
     }
 
     #[observe]
+    pub(super) fn library_placeholder(&self) -> LibraryPlaceholder {
+        let search = self.library.detail.kind == crate::model::LibraryKind::Search;
+        match &self.library.detail.load {
+            nearby_menu::LibraryLoad::Loading if search => LibraryPlaceholder::Searching,
+            nearby_menu::LibraryLoad::Loading => LibraryPlaceholder::Loading,
+            nearby_menu::LibraryLoad::Failed { .. } => LibraryPlaceholder::Failed,
+            nearby_menu::LibraryLoad::Ready if self.view.busy => LibraryPlaceholder::Preparing,
+            nearby_menu::LibraryLoad::Ready if search && self.query.is_empty() => {
+                LibraryPlaceholder::Input
+            }
+            nearby_menu::LibraryLoad::Ready if search => LibraryPlaceholder::NoMatches,
+            nearby_menu::LibraryLoad::Ready => LibraryPlaceholder::Empty,
+        }
+    }
+
+    #[observe]
     pub(super) fn keyboard(&self) -> bool {
         self.library.detail.keyboard
     }
@@ -591,6 +634,7 @@ impl DisplayState {
     }
 
     pub(super) fn advance_frame(&mut self, now: u64, theme: &mirui::ui::theme::Theme) -> Changes {
+        self.shelf.tick(now);
         self.frame(now, theme);
         self.launcher.tick(now);
         Changes::NONE
@@ -742,6 +786,7 @@ fn register<B: Surface, F: RendererFactory<B>>(
         role,
         cover_bounds: super::artwork::CoverBounds::default().into(),
         shelf: super::shelf::Shelf::new(role == DisplayRole::Shelf).into(),
+        list_layout: super::list_layout::ListLayout::new(role == DisplayRole::Catalog).into(),
         deck_height: Fixed::ZERO,
         view: View::default(),
         library: LibraryPresentation::default(),
@@ -751,7 +796,7 @@ fn register<B: Surface, F: RendererFactory<B>>(
         settings: crate::settings::Settings::default().into(),
         direction: PageDirection::Forward,
         rooms: ModelList::bounded(4).into(),
-        entries: ModelList::bounded(super::shelf::MAX_VISIBLE).into(),
+        entries: ModelList::bounded(super::shelf::WINDOW_BUDGET).into(),
         row_revision: 0,
         devices: Vec::new(),
         room_name: String::new(),

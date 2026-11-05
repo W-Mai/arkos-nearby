@@ -56,7 +56,7 @@ struct RowStamp {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct Stamp {
+struct FrameStamp {
     theme: mirui::ui::theme::ThemeId,
     physical: (u16, u16),
     logical: (u16, u16),
@@ -65,7 +65,13 @@ struct Stamp {
     pages: (usize, usize, usize),
     cards: super::motion::Frame,
     selected: Option<usize>,
-    rows: [Option<RowStamp>; super::shelf::MAX_VISIBLE],
+    markers: [Fixed; super::shelf::PAGE_MARKERS],
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Stamp {
+    frame: FrameStamp,
+    rows: Vec<RowStamp>,
 }
 
 struct Image {
@@ -145,25 +151,11 @@ impl<B: Surface, F: RendererFactory<B>> Plugin<B, F> for RestorePaint {
     }
 }
 
-fn stamp<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> Option<Stamp> {
+fn frame_stamp<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> Option<FrameStamp> {
     let display = app.world.resource::<DisplayRuntime>()?;
     let shelf = &display.shelf;
     let viewport = app.backend.viewport();
-    let mut rows = [None; super::shelf::MAX_VISIBLE];
-    for (slot, (member, row)) in rows.iter_mut().zip(shelf.entries().entries()) {
-        *slot = Some(RowStamp {
-            member,
-            text: row.text_revision(),
-            artwork: row.artwork_token(),
-            index: row.index(),
-            available: row.available(),
-            directory: row.directory(),
-            icon: row.icon(),
-            platform: row.platform(),
-            favorite: row.favorite(),
-        });
-    }
-    Some(Stamp {
+    Some(FrameStamp {
         theme: app.theme().id(),
         physical: viewport.physical_size(),
         logical: viewport.logical_size(),
@@ -172,8 +164,51 @@ fn stamp<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> Option<Stamp> {
         pages: shelf.shelf().pages(),
         cards: shelf.card_motion(),
         selected: shelf.selected(),
-        rows,
+        markers: shelf.shelf().marker_lengths(),
     })
+}
+
+fn row_stamp(member: ModelItemId, row: super::rows::RowHandle) -> RowStamp {
+    RowStamp {
+        member,
+        text: row.text_revision(),
+        artwork: row.artwork_token(),
+        index: row.index(),
+        available: row.available(),
+        directory: row.directory(),
+        icon: row.icon(),
+        platform: row.platform(),
+        favorite: row.favorite(),
+    }
+}
+
+fn stamp<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> Option<Stamp> {
+    let display = app.world.resource::<DisplayRuntime>()?;
+    Some(Stamp {
+        frame: frame_stamp(app)?,
+        rows: display
+            .shelf
+            .entries()
+            .entries()
+            .map(|(member, row)| row_stamp(member, row))
+            .collect(),
+    })
+}
+
+fn matches_stamp<B: Surface, F: RendererFactory<B>>(app: &App<B, F>, stamp: &Stamp) -> bool {
+    if frame_stamp(app) != Some(stamp.frame) {
+        return false;
+    }
+    app.world
+        .resource::<DisplayRuntime>()
+        .is_some_and(|display| {
+            display
+                .shelf
+                .entries()
+                .entries()
+                .map(|(member, row)| row_stamp(member, row))
+                .eq(stamp.rows.iter().copied())
+        })
 }
 
 fn wanted<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> bool {
@@ -185,6 +220,7 @@ fn wanted<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> bool {
                 && display.deck.expansion() == Fixed::ONE
                 && display.deck.viewport_settled()
                 && display.shelf.card_motion().cards_settled()
+                && display.shelf.shelf().markers_settled()
         })
 }
 
@@ -223,8 +259,7 @@ impl Controller {
         let Some(source) = app.world.find_by_id("shelf_snapshot_source") else {
             return;
         };
-        let current = stamp(app);
-        if !wanted(app) || current.is_none() {
+        if !wanted(app) {
             self.resuming |= self.model.hidden();
             self.unpublish();
             if let Some(capture) = self.capturing.take() {
@@ -234,9 +269,8 @@ impl Controller {
             return;
         }
         self.resuming = false;
-        let current = current.unwrap();
         if let Some(image) = self.pending.take() {
-            if image.stamp == current {
+            if matches_stamp(app, &image.stamp) {
                 self.held = Some(image);
                 self.publish(true, self.held.as_ref().map(|image| image.revision));
             } else {
@@ -245,14 +279,22 @@ impl Controller {
             }
         }
         if self.held.as_ref().is_some_and(|image| {
-            image.stamp == current && image._handle.get().cache_revision == image.revision
+            matches_stamp(app, &image.stamp) && image._handle.get().cache_revision == image.revision
         }) {
             self.publish(true, self.held.as_ref().map(|image| image.revision));
             return;
         }
         self.restore();
-        if capture_allowed(app) && self.attempted != Some(current) {
-            self.attempted = Some(current);
+        if capture_allowed(app)
+            && !self
+                .attempted
+                .as_ref()
+                .is_some_and(|stamp| matches_stamp(app, stamp))
+        {
+            let Some(current) = stamp(app) else {
+                return;
+            };
+            self.attempted = Some(current.clone());
             let owned_request = !app.world.has::<mirui::ui::OffscreenRender>(source);
             if owned_request {
                 app.world
@@ -276,7 +318,7 @@ impl Controller {
         let Some(captured) = self.capturing.take() else {
             return;
         };
-        if !wanted(app) || stamp(app) != Some(captured.stamp) || !capture_allowed(app) {
+        if !wanted(app) || !matches_stamp(app, &captured.stamp) || !capture_allowed(app) {
             captured.release(app);
             self.attempted = None;
             return;
@@ -356,6 +398,43 @@ mod tests {
     use mirui::render::texture::ColorFormat;
     use mirui::surface::framebuf::FramebufSurface;
     use std::cell::Cell;
+
+    #[test]
+    fn shelf_summary_includes_rows_beyond_the_old_eight_item_window() {
+        let surface = FramebufSurface::with_format(640, 900, ColorFormat::RGBA8888, |_, _| {});
+        let mut app = App::new(surface);
+        app.with_default_widgets().with_default_systems();
+        super::super::install(&mut app).unwrap();
+        let mut home = View {
+            page: Page::Games,
+            ..Default::default()
+        };
+        home.launcher.enabled = true;
+        home.library.kind = LibraryKind::Favorites;
+        home.library.total = 12;
+        home.entries = (0..12)
+            .map(|index| GameRow {
+                key: format!("visible-{index}"),
+                name: format!("Game {index}"),
+                icon: "nes".into(),
+                ..Default::default()
+            })
+            .collect();
+        let _scene = super::super::draw(&mut app, &home).unwrap();
+        super::super::paint_at(&mut app, 1000).unwrap();
+        super::super::paint_at(&mut app, 1300).unwrap();
+        let original = stamp(&app).unwrap();
+        assert_eq!(original.rows.len(), 12);
+        assert!(matches_stamp(&app, &original));
+        home.entries[10].name = "Changed visible title".into();
+        app.world
+            .resource::<DisplayRuntime>()
+            .unwrap()
+            .shelf
+            .present(&home);
+        assert!(frame_stamp(&app) == Some(original.frame));
+        assert!(!matches_stamp(&app, &original));
+    }
 
     #[test]
     fn unchanged_library_round_trips_reuse_the_prepared_shelf() {

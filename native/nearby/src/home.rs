@@ -285,6 +285,7 @@ mod device {
             owner["definition_sha256"] == crate::content::digest(Path::new(UNIT))?,
             "Frontend definition changed during shortcut session",
         )?;
+        crate::launcher::tools::recover_pending()?;
         if let Ok(state) = session::state() {
             if (state.purpose == crate::purpose::SessionPurpose::Game
                 || owner["keep_network"] != true)

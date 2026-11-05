@@ -20,6 +20,7 @@ class ReleaseContract(unittest.TestCase):
                 self.assertTrue(
                     name.startswith(
                         (
+                            "native/nearby-menu/",
                             "native/nearby/",
                             "native/core_inspect/",
                             "native/core_probe/",

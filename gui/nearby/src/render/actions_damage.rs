@@ -22,6 +22,7 @@ struct Motion {
     key: String,
     selected: usize,
     age: u16,
+    levels: [Fixed; 2],
     rect: Rect,
 }
 
@@ -42,7 +43,12 @@ impl ActionsDamage {
         }
         let launcher = runtime.state.launcher();
         let age = launcher.selection_age();
-        if age >= HOP_MS && self.last.as_ref().is_none_or(|last| last.age >= HOP_MS) {
+        let levels = launcher.level_positions();
+        let levels_changed = self.last.as_ref().is_some_and(|last| last.levels != levels);
+        if !levels_changed
+            && age >= HOP_MS
+            && self.last.as_ref().is_none_or(|last| last.age >= HOP_MS)
+        {
             return None;
         }
         let view = launcher.view();
@@ -73,6 +79,7 @@ impl ActionsDamage {
             key: view.key,
             selected: view.selected,
             age,
+            levels,
             rect,
         };
         if self.last.as_ref() == Some(&motion) {

@@ -84,7 +84,12 @@ fn run(args: &[String]) -> Result<i32> {
             Ok(0)
         }
         Some("home-resume") if args.len() == 1 => {
+            arkos_nearby::wifi::recover_pending()?;
             arkos_nearby::home::resume()?;
+            Ok(0)
+        }
+        Some("wifi-recover") if args.len() == 2 => {
+            arkos_nearby::wifi::recover(&args[1])?;
             Ok(0)
         }
         Some("network") if (2..=3).contains(&args.len()) => {

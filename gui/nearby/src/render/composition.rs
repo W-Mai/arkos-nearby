@@ -1,3 +1,4 @@
+use super::actor::actor;
 use super::launcher::deck as launcher_deck;
 use super::launcher::overlay;
 use super::{
@@ -98,14 +99,19 @@ pub(super) fn shell(state: model!(DisplayState), metrics: Metrics, launcher: boo
         }
     } else {
         ui! {
-            PageView (
-                id: "nearby_pages",
-                grow: 1.0,
-                min_height: 0,
-                bg_color: BACKGROUND,
-                page: ${ state.page_key() },
-                transition: ${ state.transition() }
-            ) on CreatePage(create_page::callback(state.clone(), metrics))
+            Column (grow: 1.0, min_height: 0) [
+                super::deck::ActorScope::Layer(super::deck::Layer::Room),
+            ] {
+                PageView (
+                    id: "nearby_pages",
+                    grow: 1.0,
+                    min_height: 0,
+                    bg_color: BACKGROUND,
+                    page: ${ state.page_key() },
+                    transition: ${ state.transition() }
+                ) on CreatePage(create_page::callback(state.clone(), metrics))
+                actor (state, deck, shelf, catalog, room)
+            }
         }
     }
 }

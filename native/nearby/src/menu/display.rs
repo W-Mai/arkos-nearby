@@ -62,6 +62,12 @@ impl Display {
         let root = Path::new("/run/arkos-nearby-rust/ui");
         mkdir(root)?;
         let lock = crate::system::Lock::try_acquire(&root.join("interface.lock"))?;
+        let mut display = Self::spawn(launcher, Arc::new(AtomicBool::new(false)))?;
+        display._lock = Some(lock);
+        Ok(display)
+    }
+
+    fn spawn(launcher: bool, stopping: Arc<AtomicBool>) -> Result<Self> {
         let logs = Path::new(INSTALL).join("logs");
         mkdir(&logs)?;
         log(json!({"phase":"gui-spawn"}))?;
@@ -82,7 +88,7 @@ impl Display {
                 .spawn()?,
         );
         let mut display = Self::connect(gui)?;
-        display._lock = Some(lock);
+        display.stopping = stopping;
         for signal in [libc::SIGTERM, libc::SIGHUP] {
             display.signals.push(signal_hook::flag::register(
                 signal,
@@ -90,6 +96,41 @@ impl Display {
             )?);
         }
         Ok(display)
+    }
+
+    pub(super) fn handoff<T>(
+        &mut self,
+        operation: impl FnOnce(&AtomicBool) -> Result<T>,
+        resume: impl FnOnce(Arc<AtomicBool>) -> Result<Self>,
+    ) -> Result<T> {
+        require(!self.stopped(), "Interface is stopping")?;
+        self.close_gui();
+        let result = operation(&self.stopping);
+        require(!self.stopped(), "Interface was stopped during system tool")?;
+        let mut replacement = resume(self.stopping.clone())?;
+        replacement._lock = self._lock.take();
+        *self = replacement;
+        result
+    }
+
+    pub(super) fn with_frontend_released<T>(
+        &mut self,
+        launcher: bool,
+        operation: impl FnOnce(&AtomicBool) -> Result<T>,
+        ready: impl FnOnce() -> Result<()>,
+    ) -> Result<T> {
+        self.handoff(operation, |stopping| {
+            ready()?;
+            Self::spawn(launcher, stopping)
+        })
+    }
+
+    fn close_gui(&mut self) {
+        drop(self.stdin.take());
+        drop(self.gui.take());
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
     }
 
     fn connect(mut gui: OwnedChild) -> Result<Self> {
@@ -105,8 +146,8 @@ impl Display {
             let mut reader = BufReader::new(stdout);
             loop {
                 let mut line = Vec::new();
-                let result = (&mut reader).take(16385).read_until(b'\n', &mut line);
-                if !matches!(result, Ok(count) if count > 0 && count <= 16384) {
+                let result = (&mut reader).take(262145).read_until(b'\n', &mut line);
+                if !matches!(result, Ok(count) if count > 0 && count <= 262144) {
                     break;
                 }
                 if let Ok(value) = serde_json::from_slice::<Value>(&line) {
@@ -118,6 +159,35 @@ impl Display {
                             .filter(|grid| grid.valid())
                             .zip(value["launcher"].as_bool())
                             .map(|(grid, launcher)| Event::ShelfLayout(grid, launcher))
+                    } else if value["event"] == "list_layout" {
+                        value["rows"]
+                            .as_u64()
+                            .filter(|rows| {
+                                (1..=nearby_menu::LIST_WINDOW_ITEMS as u64).contains(rows)
+                            })
+                            .zip(value["launcher"].as_bool())
+                            .map(|(rows, launcher)| Event::ListLayout(rows as usize, launcher))
+                    } else if value["event"] == "saves" {
+                        serde_json::from_value::<nearby_menu::saves::Request>(
+                            value["request"].clone(),
+                        )
+                        .ok()
+                        .filter(nearby_menu::saves::Request::valid)
+                        .map(|request| Event::Saves(request, monotonic()))
+                    } else if value["event"] == "configuration" {
+                        serde_json::from_value::<nearby_menu::configuration::Request>(
+                            value["request"].clone(),
+                        )
+                        .ok()
+                        .filter(nearby_menu::configuration::Request::valid)
+                        .map(|request| Event::Configuration(request, monotonic()))
+                    } else if value["event"] == "wifi" {
+                        serde_json::from_value::<nearby_menu::wifi::Request>(
+                            value["request"].clone(),
+                        )
+                        .ok()
+                        .filter(nearby_menu::wifi::Request::valid)
+                        .map(|request| Event::Wifi(request, monotonic()))
                     } else if value["event"] == "launcher"
                         && matches!(value["action"].as_str(), Some("launch" | "multiplayer"))
                         && value["key"].as_str().is_some_and(|key| {
@@ -222,7 +292,7 @@ impl Display {
     pub(super) fn receive(&self) -> std::result::Result<Option<Event>, mpsc::RecvTimeoutError> {
         let delivery = self.receiver.recv_timeout(Duration::from_millis(20))?;
         if delivery.screen.is_some_and(|screen| screen != self.screen)
-            || matches!(&delivery.event, Event::Input(_, at) | Event::Launcher(_,_,at) if *at < self.input_epoch)
+            || matches!(&delivery.event, Event::Input(_, at) | Event::Launcher(_,_,at)|Event::Wifi(_,at)|Event::Configuration(_,at)|Event::Saves(_,at) if *at < self.input_epoch)
         {
             return Ok(None);
         }
@@ -239,11 +309,7 @@ impl Drop for Display {
         for signal in self.signals.drain(..) {
             signal_hook::low_level::unregister(signal);
         }
-        drop(self.stdin.take());
-        drop(self.gui.take());
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
+        self.close_gui();
     }
 }
 
@@ -332,6 +398,173 @@ mod tests {
             std::io::Error::last_os_error().raw_os_error(),
             Some(libc::ESRCH)
         );
+    }
+
+    #[test]
+    fn external_tools_release_the_gui_but_keep_ownership_and_resume_after_errors() {
+        let path = std::env::temp_dir().join(crate::system::random_id().unwrap());
+        for failed in [false, true] {
+            let mut display = display();
+            display._lock = Some(crate::system::Lock::try_acquire(&path).unwrap());
+            let old = display.gui.as_ref().unwrap().0.id();
+            let stopping = display.stopping.clone();
+            let sender = display.sender.clone();
+            let result = display.handoff(
+                |_| -> Result<()> {
+                    assert_eq!(unsafe { libc::kill(old as i32, 0) }, -1);
+                    assert!(crate::system::Lock::try_acquire(&path).is_err());
+                    sender
+                        .send(Delivery {
+                            screen: None,
+                            event: Event::Input("back".into(), monotonic()),
+                        })
+                        .unwrap();
+                    if failed {
+                        Err("Tool failed".into())
+                    } else {
+                        Ok(())
+                    }
+                },
+                |flag| {
+                    assert!(Arc::ptr_eq(&flag, &stopping));
+                    let mut replacement = self::display();
+                    replacement.stopping = flag;
+                    Ok(replacement)
+                },
+            );
+            assert_eq!(result.is_err(), failed);
+            assert!(crate::system::Lock::try_acquire(&path).is_err());
+            assert!(display.previous().is_null());
+            assert!(matches!(
+                display.receive(),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ));
+            display.begin_screen();
+            display.present(json!({"page":"tools"})).unwrap();
+            assert!(matches!(next(&display), Event::Input(action, _) if action == "confirm"));
+            drop(display);
+            drop(crate::system::Lock::try_acquire(&path).unwrap());
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn stopped_or_failed_handoffs_do_not_resurrect_the_interface() {
+        let mut display = display();
+        assert!(
+            display
+                .handoff(|_| Ok(()), |_| Err("Resume failed".into()))
+                .is_err()
+        );
+        assert!(display.gui.is_none() && display.reader.is_none() && display.stdin.is_none());
+        let mut display = self::display();
+        assert!(
+            display
+                .handoff(
+                    |flag| {
+                        flag.store(true, Ordering::Relaxed);
+                        Ok(())
+                    },
+                    |_| panic!("Stopped interface must not resume"),
+                )
+                .is_err()
+        );
+        assert!(display.stopped());
+        assert!(display.gui.is_none());
+        assert!(
+            display
+                .handoff(
+                    |_| -> Result<()> { panic!("Stopped interface must not run a tool") },
+                    |_| panic!("Stopped interface must not resume"),
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn file_changes_discard_only_the_inflight_index_without_waiting_on_the_ui() {
+        let browser = crate::catalog::Browser::new().unwrap();
+        let job = browser.index_job();
+        let (release, waiting) = mpsc::channel();
+        let mut menu = super::super::MenuSession {
+            display: display(),
+            lobby_flow: None,
+            launcher: true,
+            index_task: Some(thread::spawn(move || {
+                waiting.recv().unwrap();
+                Some(job.run())
+            })),
+            index_invalidated: false,
+        };
+        menu.invalidate_library();
+        assert!(menu.take_index().unwrap().is_none());
+        assert!(menu.index_task.is_some());
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !menu.index_task.as_ref().unwrap().is_finished() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(menu.take_index().unwrap().is_none());
+        assert!(!menu.index_invalidated);
+        assert!(menu.index_task.is_none());
+        let job = browser.index_job();
+        menu.index_task = Some(thread::spawn(move || Some(job.run())));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !menu.index_task.as_ref().unwrap().is_finished() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(menu.take_index().unwrap().is_some());
+        menu.invalidate_library();
+        assert!(!menu.index_invalidated);
+    }
+
+    #[test]
+    fn direct_entry_prewarming_survives_screen_changes_and_supplies_the_browser() {
+        let mut menu = super::super::MenuSession {
+            display: display(),
+            lobby_flow: None,
+            launcher: false,
+            index_task: None,
+            index_invalidated: false,
+        };
+        let mut browser = crate::catalog::Browser::new().unwrap();
+        menu.prewarm_catalog();
+        let owner = menu.index_task.as_ref().unwrap().thread().id();
+        for _ in 0..32 {
+            menu.display.begin_screen();
+            menu.prewarm_catalog();
+            browser.reopen();
+            menu.ensure_index(&browser);
+            assert_eq!(menu.index_task.as_ref().unwrap().thread().id(), owner);
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !menu.index_task.as_ref().unwrap().is_finished() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        let mut recheck_snapshot = true;
+        menu.poll_browser_index(&mut browser, &mut recheck_snapshot)
+            .unwrap();
+        assert!(!recheck_snapshot);
+        assert!(
+            browser.indexing,
+            "An earlier snapshot needs a freshness check"
+        );
+        let seed = browser.index_job().cached().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !menu.index_task.as_ref().unwrap().is_finished() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        menu.poll_browser_index(&mut browser, &mut recheck_snapshot)
+            .unwrap();
+        assert!(!browser.indexing);
+        assert!(Arc::ptr_eq(&browser.index_job().cached().unwrap(), &seed));
+        browser.resume();
+        menu.ensure_index(&browser);
+        assert!(menu.index_task.is_none());
     }
 
     #[test]

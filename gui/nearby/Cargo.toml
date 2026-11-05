@@ -10,6 +10,7 @@ gpu = ["mirui/sdl-gpu", "sound"]
 sound = ["mirui/sdl-audio"]
 
 [dependencies]
+nearby-menu = { path = "../../native/nearby-menu" }
 mirui = { version = "=0.53.0", default-features = false, features = ["std", "quad-aa", "audio"] }
 mirx = "=0.53.0"
 serde = { version = "1", features = ["derive"] }

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::content::{confined, digest};
+use crate::content::digest;
 use crate::context::{Context, config};
 use crate::handheld_link::LinkMode;
 use crate::menu::OwnedChild;
@@ -137,6 +137,7 @@ pub fn isolated(original: &str, overrides: &str) -> String {
 pub struct Settings {
     pub base: String,
     pub options: Vec<u8>,
+    pub remap: String,
 }
 
 pub fn settings(context: &Context) -> Result<Settings> {
@@ -147,29 +148,42 @@ pub fn solo_settings(context: &Context) -> Result<Settings> {
     settings_for(context, false)
 }
 
+pub struct ConfigurationSources {
+    pub root: std::path::PathBuf,
+    pub base: std::path::PathBuf,
+    pub options: std::path::PathBuf,
+}
+
+pub fn configuration_sources(frontend: &str) -> Result<ConfigurationSources> {
+    let root = config(frontend)?;
+    Ok(ConfigurationSources {
+        base: root.join("retroarch.cfg"),
+        options: root.join("retroarch-core-options.cfg"),
+        root,
+    })
+}
+
 fn settings_for(context: &Context, multiplayer: bool) -> Result<Settings> {
-    let configuration = config(&context.frontend)?;
-    let source = confined(
-        &configuration.join("retroarch.cfg"),
-        std::slice::from_ref(&configuration),
-    )?;
-    let path = configuration.join("retroarch-core-options.cfg");
-    let bytes = if path.is_file() {
-        fs::read(confined(&path, std::slice::from_ref(&configuration))?)?
-    } else {
-        vec![]
-    };
+    crate::configuration::recover()?;
+    let resolved = crate::configuration::Snapshot::load(
+        crate::configuration::Snapshot::environment(context)?,
+        Default::default(),
+        vec![],
+    )?
+    .settings();
+    let bytes = resolved.options;
     let options = if let Some(mode) = context.link_mode.filter(|_| multiplayer) {
         isolated(&String::from_utf8(bytes)?, mode.options()).into_bytes()
     } else if let Some(overrides) =
-        crate::core_choice::arcade_options(&context.game_path, &context.core_id)
+        crate::core_choice::solo_options(&context.game_path, &context.core_id)
     {
         isolated(&String::from_utf8(bytes)?, overrides).into_bytes()
     } else {
         bytes
     };
     Ok(Settings {
-        base: fs::read_to_string(source)?,
+        base: resolved.base,
+        remap: resolved.remap,
         options,
     })
 }
@@ -212,7 +226,32 @@ pub fn prepare(
         mkdir(&path)?;
         chown(&path, uid, gid)?;
     }
-    let overrides = configuration(&directory, context.link_mode)?;
+    let mut overrides = configuration(&directory, context.link_mode)?;
+    if !settings.remap.is_empty() {
+        let root = directory.join("remaps");
+        let folder = root.join(&context.identity.core.name);
+        for path in [&root, &folder] {
+            mkdir(path)?;
+            chown(path, uid, gid)?;
+        }
+        let file = folder.join(format!(
+            "{}.rmp",
+            context
+                .game_path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+        ));
+        private_write(&file, settings.remap.as_bytes())?;
+        chown(&file, uid, gid)?;
+        overrides = isolated(
+            &overrides,
+            &format!(
+                "input_remapping_directory = \"{}\"\nauto_remaps_enable = \"true\"\ninput_remap_sort_by_controller_enable = \"false\"\n",
+                root.display()
+            ),
+        );
+    }
     private_write(
         &directory.join("base.cfg"),
         isolated(&settings.base, &overrides).as_bytes(),

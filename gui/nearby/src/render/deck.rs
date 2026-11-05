@@ -18,6 +18,7 @@ pub(super) enum Layer {
 
 #[component]
 pub(super) enum ActorScope {
+    Reading,
     Layer(Layer),
     Pane(crate::model::Page),
 }
@@ -26,7 +27,23 @@ pub(super) enum ActorScope {
 pub(super) struct ActorAnchor(pub super::pixel::Stage);
 
 #[component]
-pub(super) struct ActionAnchor(pub usize);
+pub(super) struct ActionAnchor(pub usize, pub ActionLayout);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ActionLayout {
+    Grid,
+    Levels,
+    Details,
+    Configuration,
+    SavesList,
+    SavesModal,
+    SavesProgress,
+    WifiList,
+    WifiOptions,
+    WifiKeyboard,
+    WifiProgress,
+    SearchKeyboard,
+}
 
 struct Track {
     tween: Tween,
@@ -109,7 +126,7 @@ impl Deck {
         self.height = height;
     }
     pub fn present(&mut self, view: &View) {
-        self.layer = if view.return_to_launcher {
+        self.layer = if view.return_to_launcher || !self.enabled && !view.launcher.enabled {
             Layer::Room
         } else if !view.launcher.overlay.is_empty() {
             Layer::Actions

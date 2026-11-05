@@ -32,6 +32,14 @@ pub fn arcade_options(game: &Path, core_id: &str) -> Option<&'static str> {
         .then_some("mame_softlists_enable = \"disabled\"\nmame_media_type = \"rom\"\n")
 }
 
+pub fn solo_options(game: &Path, core_id: &str) -> Option<&'static str> {
+    if core_id == "tgbdual" {
+        Some("tgbdual_gblink_enable = \"disabled\"\n")
+    } else {
+        arcade_options(game, core_id)
+    }
+}
+
 fn platform(game: &Path) -> Option<&str> {
     let mut parts = game.components();
     if parts.next() != Some(std::path::Component::RootDir)

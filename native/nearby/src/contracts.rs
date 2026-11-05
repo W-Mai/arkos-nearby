@@ -152,6 +152,52 @@ fn unsupported_handheld_link_cannot_offer_create_or_join_actions() {
 }
 
 #[test]
+fn only_game_loading_entries_can_resume_single_player_on_cancel() {
+    use crate::flow::{Flow, Page};
+    for supported in [false, true] {
+        let mut game = context();
+        game.supported = supported;
+        for manual in [false, true] {
+            let mut flow = Flow::new(Some(game.clone()));
+            if manual {
+                flow.manual();
+            }
+            assert_eq!(
+                flow.page,
+                if supported {
+                    Page::Choice
+                } else {
+                    Page::Unavailable
+                }
+            );
+            assert_eq!(flow.view()["current_game"], true);
+            assert_eq!(flow.view()["title"], game.title);
+            flow.dispatch("back", crate::system::monotonic() + 1.0);
+            assert_eq!(flow.exit_code, Some(if manual { 0 } else { 230 }));
+            assert!(flow.request.is_none());
+        }
+    }
+    for connected in [false, true] {
+        let mut flow = Flow::lobby(None, connected);
+        flow.manual();
+        assert_eq!(flow.view()["current_game"], false);
+        assert_eq!(flow.view()["network_only"], false);
+        flow.dispatch("back", crate::system::monotonic() + 1.0);
+        if !connected {
+            assert_eq!(flow.page, Page::Lobby);
+            assert!(flow.exit_code.is_none());
+            flow.dispatch("back", crate::system::monotonic() + 1.0);
+        }
+        assert_eq!(flow.exit_code, Some(0));
+        assert!(flow.request.is_none());
+    }
+    let mut network = Flow::network();
+    network.dispatch("back", crate::system::monotonic() + 1.0);
+    assert_eq!(network.exit_code, Some(0));
+    assert!(network.request.is_none());
+}
+
+#[test]
 fn network_completion_can_detach_but_cannot_offer_game_start() {
     use crate::flow::{Flow, FlowExit, Operation, Page};
     for role in ["host", "client"] {

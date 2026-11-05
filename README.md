@@ -4,11 +4,11 @@
 
 **R36S 双机附近联机**
 
-[![Release](https://img.shields.io/badge/release-v0.10.1-a33d2e?style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.10.1) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v0.11.0-a33d2e?style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.11.0) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
 
 选好游戏，创建房间，和身边的朋友一起玩。
 
-[下载安装](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.10.1) · [使用说明](docs/installation.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
+[下载安装](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.11.0) · [使用说明](docs/installation.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
 
 <img src="docs/assets/nearby-dual-demo.svg" alt="双机联机界面演示：创建房间、搜索加入、确认就绪与主题切换" width="840" />
 
@@ -21,7 +21,9 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 - **当前游戏直接联机** — 在游戏列表选好游戏，启动时按住 X，搜索附近房间或创建当前游戏的房间。
 - **从游戏库挑选** — 在 Options → Nearby Multiplayer → 选择游戏 中选择平台和游戏。
 - **个人启动器** — 从 Options → Nearby Launcher 打开收藏，短按 X 启动单机，长按 X 打开当前游戏的联机面板。
-- **收藏与搜索** — 按 X 收藏游戏，在收藏夹横向浏览卡带，按 Y 切换名称／最近使用排序。在平台列表按 Y 搜索游戏名、文件名或中文名拼音。
+- **收藏与搜索** — 在启动器游戏库按 Y 收藏游戏，收藏页按 Y 切换名称／最近使用排序。在平台列表按 Y 搜索游戏名、文件名或中文名拼音。
+- **设置与存档** — 查看游戏的核心和 BIOS 信息，编辑游戏设置，载入即时存档、备份与恢复游戏进度。
+- **系统控制** — 调节音量和亮度，连接 Wi-Fi，查看存储空间，关机或重启。
 - **仅组网** — 连接后返回系统，打开 Ports 中的局域网游戏。
 - **搜索身边的房间** — 打开工具即可搜索，选中房间后加入，按 X 刷新列表；主页按 FN + X 快速打开。
 - **记住常玩的朋友** — 首次连接由房主确认，之后使用保存的配对信息。
@@ -32,7 +34,7 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 适用配置：**ArkOS4Clone 08262026 · Linux 4.4.189 · RTL8188EU 无线芯片 · 640×480 屏幕**。详细要求见 [设备兼容性](docs/compatibility.md#设备配置)。在两台掌机上安装同一版本：
 
-1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases/download/v0.10.1/arkos-nearby-0.10.1-arm64.tar.gz)。
+1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases/download/v0.11.0/arkos-nearby-0.11.0-arm64.tar.gz)。
 2. 解压，将 `arkos-nearby` 文件夹放入游戏卡的 `ports` 目录。
 3. 在掌机 **Ports** 中打开 **Install Nearby Multiplayer**，安装完成后重启掌机。
 
@@ -56,9 +58,15 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 从 **Options → Nearby Launcher** 打开个人收藏，首页只显示收藏卡带。选中收藏末尾的游戏库图标，按 **A** 展开游戏库，收藏架保留在上方。**B** 逐级返回收藏，**SELECT** 打开附近联机。游戏库展示有游戏的平台和文件夹，提供主机图案、截图与最近游玩记录；在平台列表按 **Y** 搜索游戏。
 
-收藏卡带按可用空间排成一排或两排，封面铺满卡带画面。左右选择同排游戏，上下切换行；在一排的边缘继续按左右可翻页。进入游戏库再返回会保留原来的选中卡片。
+收藏卡带按可用空间排成多行，封面铺满卡带画面。方向键跨行、跨页选择，底部页码随翻页伸缩；收藏页按 **B** 回到第一页。选中末尾的游戏库卡片后，按 **A** 或下键展开游戏库，返回时保留原选中位置。
 
 选中游戏后，短按 **X** 并松开启动单机，长按 **X** 弹出这款游戏的联机面板。在游戏库或搜索结果中按 **Y** 收藏，收藏架中按 **Y** 切换名称／最近游玩排序。**A** 打开游戏操作，可以将游戏移出收藏。单机使用系统原来的模拟器配置和存档，退出后回到刚才的位置。
+
+按 **START → 系统控制** 调节音量和亮度：上下选择滑块，左右调整，**B** 返回设置。滑块显示当前百分比，系统工具入口保留文件管理和系统信息等操作。
+
+进入 **系统控制 → 系统工具 → Wi-Fi 设置** 扫描网络、输入密码和切换连接。**存储空间** 显示各分区的可用量与总容量，按 **A** 展开挂载点和设备信息。**START → 电源** 提供关机与重启确认。
+
+选中游戏按 **A → 游戏详情** 查看运行核心、BIOS、存档与配置位置；进入 **游戏设置** 编辑游戏、核心或前端设置，保存前查看生效值和目标文件。**存档管理** 分别列出即时存档、游戏进度和备份，支持选槽载入、创建备份与确认恢复。单机存档沿用原路径，联机会话使用独立存档。
 
 系统游戏列表、启动器和联机房间共用核心选择规则，当前核心标明「工具优化」或「设备原有」。加入房间时使用房主确定的核心，完成游戏内容核对后开局。
 

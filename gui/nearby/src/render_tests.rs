@@ -1,6 +1,810 @@
 use super::*;
 
 #[test]
+fn configuration_editor_keeps_active_focus_and_wrapped_paths_inside_its_panel() {
+    use crate::model::Action;
+    use nearby_menu::configuration::Section as ConfigSection;
+    let settle = std::env::var("NEARBY_CONFIG_SETTLE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "游戏设置".into();
+        current.launcher.overlay_kind = "configuration".into();
+        current.launcher.configuration = Some(crate::launcher::configuration::tests::fixture());
+        let scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let launcher = scene.state.launcher();
+        let editor = launcher.configuration();
+        let requests = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let output = requests.clone();
+        editor
+            .on_effect(move |request: &nearby_menu::configuration::Request| {
+                output.borrow_mut().push(request.clone())
+            })
+            .unwrap();
+        for (step, actions) in [
+            vec![],
+            vec![Action::Down, Action::Confirm],
+            vec![Action::Down; 20],
+            vec![Action::Confirm],
+            vec![Action::Down; 3],
+            vec![Action::Back],
+            vec![Action::Back],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for action in actions {
+                launcher.configuration_input(action);
+            }
+            paint_at(
+                &mut app,
+                &scene,
+                1000 + step as u64 * (200 + settle) + settle,
+            );
+            let selected = app
+                .world
+                .query::<deck::ActionAnchor>()
+                .iter()
+                .find_map(|(entity, anchor)| {
+                    (anchor.1 == deck::ActionLayout::Configuration
+                        && anchor.0 == editor.selected()
+                        && !mirui::ui::branch::is_effectively_hidden(&app.world, entity))
+                    .then(|| app.world.get::<ComputedRect>(entity).unwrap().0)
+                })
+                .expect("active settings anchor");
+            assert_eq!(launcher.menu_selection(), Some(editor.selected()));
+            assert_eq!(launcher.selection_age(), editor.age());
+            assert!(
+                selected.y >= Fixed::ZERO
+                    && selected.y + selected.h <= Fixed::from_int(i32::from(size[1])),
+                "{size:?} {step}: {selected:?}"
+            );
+            if let Ok(directory) = std::env::var("NEARBY_CONFIG_CAPTURES") {
+                let directory = std::path::Path::new(&directory);
+                std::fs::create_dir_all(directory).unwrap();
+                let file = std::fs::File::create(
+                    directory.join(format!("settings-{}-{step}.png", size[0])),
+                )
+                .unwrap();
+                let mut encoder = png::Encoder::new(file, u32::from(size[0]), u32::from(size[1]));
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                let frame = app.backend.framebuffer();
+                let pixels = frame.read_pixels().unwrap();
+                encoder
+                    .write_header()
+                    .unwrap()
+                    .write_image_data(pixels.bytes())
+                    .unwrap();
+            }
+        }
+        assert_eq!(editor.section(), ConfigSection::Home);
+        launcher.configuration_input(Action::Back);
+        paint_at(&mut app, &scene, 2600 + settle * 8);
+        assert!(
+            requests
+                .borrow()
+                .iter()
+                .any(|r| matches!(r, nearby_menu::configuration::Request::Close { epoch: 7 }))
+        );
+    }
+}
+
+#[test]
+fn wifi_input_method_orders_edits_and_submit_and_clears_retired_sessions() {
+    use crate::model::Action;
+    use mirui::ui::widgets::TextEditing;
+    use nearby_menu::wifi::{Page as WifiPage, View as WifiView};
+    let mut app = app([640, 480]);
+    let mut current = view(Page::Games);
+    current.launcher.enabled = true;
+    current.launcher.overlay = "Wi-Fi 密码".into();
+    current.launcher.overlay_kind = "wifi".into();
+    current.launcher.wifi = Some(WifiView {
+        epoch: 4,
+        page: WifiPage::Password,
+        ..Default::default()
+    });
+    let mut scene = draw(&mut app, &current).unwrap();
+    paint_at(&mut app, &scene, 1000);
+    let launcher = scene.state.launcher();
+    assert!(
+        launcher.input_session().is_some(),
+        "framework owns the active software session"
+    );
+    let sent = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let received = sent.clone();
+    launcher
+        .on_effect(move |intent: &crate::launcher::Intent| {
+            received.borrow_mut().push(intent.clone())
+        })
+        .unwrap();
+    // A whole burst and Submit in one frame must read the committed document.
+    for _ in 0..8 {
+        launcher.wifi_input(Action::Confirm);
+    }
+    launcher.wifi_input(Action::Refresh);
+    launcher.wifi_input(Action::Confirm);
+    launcher.wifi_input(Action::Start);
+    paint_at(&mut app, &scene, 1600);
+    assert_eq!(launcher.wifi_length(), 8);
+    assert_eq!(launcher.wifi_editor(35), "********");
+    assert!(
+        app.world
+            .query::<TextEditing>()
+            .iter()
+            .any(|(_, field)| field.read(|text| text == "qqqqqqqq"))
+    );
+    assert_eq!(sent.borrow().len(), 1);
+    assert!(
+        matches!(&sent.borrow()[0], crate::launcher::Intent::Wifi(request) if request.valid() && request.epoch() == 4)
+    );
+    assert!(
+        !serde_json::to_string(&launcher.view())
+            .unwrap()
+            .contains("qqqqqqqq")
+    );
+    launcher.wifi_input(Action::Auxiliary);
+    assert_eq!(launcher.wifi_editor(35), "qqqqqqqq");
+    current.launcher.wifi.as_mut().unwrap().page = WifiPage::List;
+    update(&mut scene, &current).unwrap();
+    paint_at(&mut app, &scene, 1800);
+    assert!(launcher.input_session().is_none());
+    assert_eq!(launcher.wifi_length(), 0);
+    assert!(launcher.input_edit().is_none());
+}
+
+#[test]
+fn wifi_windows_and_keyboard_keep_focus_in_the_active_panel_scope() {
+    use crate::model::Action;
+    use nearby_menu::wifi::{Network, Page as WifiPage, View as WifiView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "Wi-Fi 设置".into();
+        current.launcher.overlay_kind = "wifi".into();
+        current.launcher.selected = 25;
+        current.launcher.wifi = Some(WifiView {
+            selected: 25,
+            networks: (0..30)
+                .map(|index| Network {
+                    key: index.to_string(),
+                    ssid: format!("Network {index}"),
+                    signal: 80,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        });
+        let mut scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 1000);
+        let rows: Vec<_> = app
+            .world
+            .query::<deck::ActionAnchor>()
+            .iter()
+            .filter_map(|(entity, anchor)| {
+                Some((anchor.0, app.world.get::<ComputedRect>(entity)?.0))
+            })
+            .collect();
+        assert!(
+            (1..=8).contains(&rows.len()),
+            "bounded visible window: {}",
+            rows.len()
+        );
+        let selected = rows
+            .iter()
+            .find(|r| r.0 == 25)
+            .expect("selected network visible");
+        assert!(
+            selected.1.y >= Fixed::ZERO
+                && selected.1.y + selected.1.h <= Fixed::from_int(i32::from(size[1]))
+        );
+        for (step, phase) in [WifiPage::Password, WifiPage::Connecting, WifiPage::Password]
+            .into_iter()
+            .enumerate()
+        {
+            current.launcher.wifi.as_mut().unwrap().page = phase;
+            current.launcher.wifi.as_mut().unwrap().epoch = 1;
+            update(&mut scene, &current).unwrap();
+            let phase_time = 1200 + step as u64 * 3000;
+            paint_at(&mut app, &scene, phase_time);
+            let target = app
+                .world
+                .query::<actor::ActorFrame>()
+                .iter()
+                .find_map(|(entity, _)| {
+                    app.world
+                        .get::<FollowBounds>(entity)
+                        .map(|bounds| bounds.target)
+                })
+                .expect("actor remains visible");
+            let anchor = app
+                .world
+                .get::<deck::ActionAnchor>(target)
+                .expect("semantic actor target");
+            assert_eq!(anchor.0, 0, "{phase:?}");
+            assert_eq!(
+                anchor.1,
+                if phase == WifiPage::Password {
+                    deck::ActionLayout::WifiKeyboard
+                } else {
+                    deck::ActionLayout::WifiProgress
+                }
+            );
+            if phase == WifiPage::Connecting {
+                for offset in [0, 160, 500, 999] {
+                    paint_at(&mut app, &scene, phase_time + offset);
+                    let track = app
+                        .world
+                        .query::<wifi::LoadingTrack>()
+                        .iter()
+                        .find_map(|(entity, _)| {
+                            app.world.get::<ComputedRect>(entity).map(|rect| rect.0)
+                        })
+                        .unwrap();
+                    let outputs = app
+                        .world
+                        .resource::<mirui::ui::Outputs<mirui::ui::LayoutGeometry>>()
+                        .unwrap();
+                    let geometry = outputs.get(target).unwrap();
+                    let ink = Rect::bounding_quad(
+                        &geometry
+                            .transform()
+                            .apply_rect(geometry.border_rect())
+                            .unwrap(),
+                    );
+                    let expected = track.x + scene.state.launcher().wifi_loading_end() * track.w;
+                    assert!(
+                        (ink.x - expected).abs() <= Fixed::from_int(2),
+                        "actor must follow the moving leading edge: {ink:?} {track:?}"
+                    );
+                    assert!(ink.x >= track.x && ink.x <= track.x + track.w + Fixed::ONE);
+                }
+            }
+            if phase == WifiPage::Password {
+                for index in 1..35 {
+                    scene.state.launcher().wifi_input(Action::Right);
+                    paint_at(&mut app, &scene, phase_time + 100 + index as u64 * 20);
+                    let target = app
+                        .world
+                        .query::<actor::ActorFrame>()
+                        .iter()
+                        .find_map(|(entity, _)| {
+                            app.world.get::<FollowBounds>(entity).map(|b| b.target)
+                        })
+                        .unwrap();
+                    let anchor = app.world.get::<deck::ActionAnchor>(target).unwrap();
+                    assert_eq!(
+                        (anchor.0, anchor.1),
+                        (index, deck::ActionLayout::WifiKeyboard)
+                    );
+                }
+                // Preserve a retained keyboard's local key through a connection attempt.
+                for _ in 0..34 {
+                    scene.state.launcher().wifi_input(Action::Left);
+                }
+                paint_at(&mut app, &scene, phase_time + 1000);
+            }
+        }
+        for (step, page) in [
+            WifiPage::Info,
+            WifiPage::List,
+            WifiPage::Success,
+            WifiPage::Details,
+            WifiPage::List,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            current.launcher.wifi.as_mut().unwrap().page = page;
+            current.launcher.wifi.as_mut().unwrap().selected = 0;
+            current.launcher.selected = 0;
+            update(&mut scene, &current).unwrap();
+            paint_at(&mut app, &scene, 10000 + step as u64 * 200);
+            let target = app
+                .world
+                .query::<actor::ActorFrame>()
+                .iter()
+                .find_map(|(entity, _)| app.world.get::<FollowBounds>(entity).map(|v| v.target))
+                .unwrap();
+            let action = app
+                .world
+                .get::<deck::ActionAnchor>(target)
+                .expect("active Wi-Fi row");
+            assert_eq!(action.0, 0);
+            let mut node = target;
+            loop {
+                assert!(
+                    !mirui::ui::branch::is_effectively_hidden(&app.world, node),
+                    "actor cannot follow a cached hidden branch: {page:?}"
+                );
+                let Some(parent) = app.world.get::<mirui::ui::Parent>(node) else {
+                    break;
+                };
+                node = parent.0;
+            }
+            let target_rect = app.world.get::<ComputedRect>(target).unwrap().0;
+            let minimum_y = Fixed::from_int(35);
+            assert!(
+                target_rect.y > minimum_y && target_rect.h >= Fixed::from_int(24),
+                "active row must retain visible geometry: {page:?} {target_rect:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn details_keep_rows_separate_and_selected_content_visible_on_short_screens() {
+    use nearby_menu::details::{Document, Load, Section, View as DetailsView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "游戏详情".into();
+        current.launcher.overlay_kind = "details".into();
+        current.launcher.items = (0..3)
+            .map(|index| {
+                nearby_menu::MenuItem::available(
+                    nearby_menu::MenuAction::ExpandDetail,
+                    format!("详情条目 {index}"),
+                )
+                .with_value("来源与当前文件状态")
+            })
+            .collect();
+        current.launcher.details = Some(DetailsView {
+            section: Section::Core,
+            load: Load::Ready {
+                document: Document::default(),
+            },
+            ..DetailsView::default()
+        });
+        let scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 1000);
+        let bounds = |app: &TestApp| {
+            let mut rows: Vec<_> = app
+                .world
+                .query::<deck::ActionAnchor>()
+                .iter()
+                .filter_map(|(entity, anchor)| {
+                    app.world
+                        .get::<ComputedRect>(entity)
+                        .map(|rect| (anchor.0, rect.0))
+                })
+                .collect();
+            rows.sort_by_key(|row| row.0);
+            rows
+        };
+        let rows = bounds(&app);
+        assert_eq!(rows.len(), 3);
+        for pair in rows.windows(2) {
+            assert!(pair[0].1.h >= Fixed::from_int(40));
+            assert!(pair[1].1.y >= pair[0].1.y + pair[0].1.h);
+        }
+        current.launcher.items.extend((3..12).map(|index| {
+            nearby_menu::MenuItem::available(
+                nearby_menu::MenuAction::ExpandDetail,
+                format!("详情条目 {index}"),
+            )
+            .with_value("来源与当前文件状态")
+        }));
+        current.launcher.selected = 11;
+        let mut scene = scene;
+        update(&mut scene, &current).unwrap();
+        for frame in [1100, 1200, 1300] {
+            paint_at(&mut app, &scene, frame);
+        }
+        let (viewport, offset) = app
+            .world
+            .query::<launcher::DetailsScroll>()
+            .iter()
+            .find_map(|(entity, _)| {
+                Some((
+                    app.world.get::<ComputedRect>(entity)?.0,
+                    app.world
+                        .get::<mirui::input::event::scroll::ScrollOffset>(entity)?
+                        .y,
+                ))
+            })
+            .unwrap();
+        let selected = bounds(&app).into_iter().find(|row| row.0 == 11).unwrap().1;
+        assert!(offset > Fixed::ZERO);
+        assert!(selected.y - offset >= viewport.y);
+        assert!(selected.y - offset + selected.h <= viewport.y + viewport.h);
+
+        let details = current.launcher.details.as_mut().unwrap();
+        let Load::Ready { document } = &mut details.load else {
+            unreachable!()
+        };
+        document.core = (0..12)
+            .map(|_| nearby_menu::details::Row {
+                facts: vec![
+                    nearby_menu::details::Fact::new(
+                        "目录",
+                        "/home/ark/.config/retroarch/".repeat(12),
+                    ),
+                    nearby_menu::details::Fact::new(
+                        "配置文件",
+                        "/home/ark/.config/retroarch/retroarch.cfg",
+                    ),
+                ],
+                path: "/home/ark/.config/retroarch/".repeat(12),
+                ..Default::default()
+            })
+            .collect();
+        details.expanded = true;
+        update(&mut scene, &current).unwrap();
+        for frame in [1400, 1500, 1600] {
+            paint_at(&mut app, &scene, frame);
+        }
+        let expanded = bounds(&app).into_iter().find(|row| row.0 == 11).unwrap().1;
+        assert!(expanded.h > selected.h);
+        let facts: Vec<_> = app
+            .world
+            .query::<Text>()
+            .iter()
+            .filter_map(|(entity, text)| {
+                let rect = app.world.get::<ComputedRect>(entity)?.0;
+                Some((text.resolve(app.world.resource()).to_string(), rect))
+            })
+            .collect();
+        for label in ["目录", "配置文件"] {
+            assert!(facts.iter().any(|(text, _)| text == label));
+        }
+        let wrapped = facts
+            .iter()
+            .find(|(text, _)| text == &"/home/ark/.config/retroarch/".repeat(12))
+            .unwrap()
+            .1;
+        assert!(wrapped.h > Fixed::from_int(14));
+        assert!(wrapped.x >= viewport.x && wrapped.x + wrapped.w <= viewport.x + viewport.w);
+        let reading = app
+            .world
+            .query::<launcher::DetailsScroll>()
+            .iter()
+            .find_map(|(entity, _)| app.world.get::<ComputedRect>(entity).map(|_| entity))
+            .unwrap();
+        assert!(
+            app.world
+                .query::<actor::ActorFrame>()
+                .iter()
+                .any(|(entity, _)| app
+                    .world
+                    .get::<mirui::ui::widgets::FollowBounds>(entity)
+                    .is_some_and(|follow| follow.target == reading))
+        );
+        current.launcher.details.as_mut().unwrap().scroll = 48;
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 1700);
+        let scroll = app
+            .world
+            .query::<launcher::DetailsScroll>()
+            .iter()
+            .find_map(|(entity, _)| {
+                app.world
+                    .get::<mirui::input::event::scroll::ScrollOffset>(entity)
+                    .map(|offset| offset.y)
+            })
+            .unwrap();
+        assert!(scroll > offset);
+    }
+}
+
+#[test]
+fn list_windows_follow_available_space_and_keep_native_title_size() {
+    for size in [[480, 320], [640, 480], [640, 900]] {
+        for launcher in [false, true] {
+            let mut app = app(size);
+            let mut current = view(Page::Games);
+            current.platforms = true;
+            current.library.kind = crate::model::LibraryKind::Platforms;
+            current.launcher.enabled = launcher;
+            current.launcher.tab = usize::from(launcher);
+            let mut home = current.clone();
+            home.library.kind = crate::model::LibraryKind::Favorites;
+            home.launcher.tab = 0;
+            if launcher {
+                current.launcher_shelf = Some(Box::new(home));
+            }
+            let requests = Rc::new(std::cell::RefCell::new(Vec::new()));
+            let received = requests.clone();
+            subscribe_list_layout(&app, move |request| {
+                received
+                    .borrow_mut()
+                    .push(serde_json::to_value(request).unwrap());
+            })
+            .unwrap();
+            let mut scene = draw(&mut app, &current).unwrap();
+            paint_at(&mut app, &scene, 1000);
+            let request = requests.borrow().last().cloned().unwrap();
+            assert_eq!(request["launcher"], launcher);
+            let count = request["rows"].as_u64().unwrap() as usize;
+            assert!((1..=nearby_menu::LIST_WINDOW_ITEMS).contains(&count));
+            if size == [480, 320] {
+                assert!(count < 4);
+            }
+            let entry = current.entries[0].clone();
+            current.entries = (0..count)
+                .map(|index| {
+                    let mut entry = entry.clone();
+                    entry.key = format!("platform-{index}");
+                    entry
+                })
+                .collect();
+            update(&mut scene, &current).unwrap();
+            paint_at(&mut app, &scene, 1400);
+            let display = if launcher {
+                &scene.catalog
+            } else {
+                &scene.state
+            };
+            assert_eq!(display.entries().len(), count);
+            let body = app
+                .world
+                .query::<selection::SelectionFrame>()
+                .iter()
+                .find(|(_, frame)| frame.page.library == crate::model::LibraryKind::Platforms)
+                .unwrap()
+                .1
+                .body;
+            let mut rows = 0;
+            for (entity, _) in app.world.query::<selection::FocusTarget>().iter() {
+                if !selection::contains(body, entity, |node| {
+                    app.world
+                        .get::<mirui::ui::Parent>(node)
+                        .map(|parent| parent.0)
+                }) {
+                    continue;
+                }
+                let Some(bounds) = app.world.get::<ComputedRect>(entity).map(|rect| rect.0) else {
+                    continue;
+                };
+                rows += 1;
+                assert!(
+                    bounds.y >= Fixed::ZERO && bounds.y + bounds.h <= i32::from(size[1]).into()
+                );
+                let has_title = app.world.query::<Text>().iter().any(|(text_entity, text)| {
+                    selection::contains(entity, text_entity, |node| {
+                        app.world
+                            .get::<mirui::ui::Parent>(node)
+                            .map(|parent| parent.0)
+                    }) && text.resolve(app.world.resource()) == entry.name
+                        && app
+                            .world
+                            .get::<mirui::ui::Style>(text_entity)
+                            .is_some_and(|style| style.font_size == Some(24))
+                });
+                assert!(has_title);
+            }
+            assert_eq!(rows, count);
+            let emitted = requests.borrow().len();
+            paint_at(&mut app, &scene, 1600);
+            assert_eq!(requests.borrow().len(), emitted);
+        }
+    }
+}
+
+#[test]
+fn page_marker_entities_follow_the_active_page_without_remounting() {
+    let mut app = app([640, 480]);
+    let mut current = view(Page::Games);
+    current.library.kind = crate::model::LibraryKind::Favorites;
+    current.library.total = 24;
+    current.library.position = 1;
+    let mut scene = draw(&mut app, &current).unwrap();
+    paint_at(&mut app, &scene, 1000);
+    let markers = |app: &TestApp| {
+        let parent = app
+            .world
+            .query::<shelf::PageMarkers>()
+            .iter()
+            .next()
+            .unwrap()
+            .0;
+        let mut markers: Vec<_> = app
+            .world
+            .query::<mirui::ui::Parent>()
+            .iter()
+            .filter(|(_, value)| value.0 == parent)
+            .map(|(entity, _)| (app.world.get::<ComputedRect>(entity).unwrap().0.x, entity))
+            .collect();
+        markers.sort_by_key(|(position, _)| *position);
+        markers
+            .into_iter()
+            .enumerate()
+            .map(|(index, (_, entity))| (index, entity))
+            .collect::<Vec<_>>()
+    };
+    let initial = markers(&app);
+    assert!(initial.len() >= 2);
+    current.library.position = scene.state.shelf().plan().grid.capacity() + 1;
+    update(&mut scene, &current).unwrap();
+    paint_at(&mut app, &scene, 1130);
+    let widths: Vec<_> = initial
+        .iter()
+        .take(2)
+        .map(|(_, entity)| app.world.get::<ComputedRect>(*entity).unwrap().0.w)
+        .collect();
+    assert!(
+        widths
+            .iter()
+            .all(|width| *width > 6.into() && *width < 22.into())
+    );
+    paint_at(&mut app, &scene, 1400);
+    assert_eq!(markers(&app), initial);
+    assert_eq!(
+        app.world.get::<ComputedRect>(initial[0].1).unwrap().0.w,
+        6.into()
+    );
+    assert_eq!(
+        app.world.get::<ComputedRect>(initial[1].1).unwrap().0.w,
+        22.into()
+    );
+}
+
+#[test]
+fn empty_library_actor_returns_to_live_results_and_keyboard_targets() {
+    let mut app = app([480, 320]);
+    let mut home = view(Page::Games);
+    home.library.kind = crate::model::LibraryKind::Favorites;
+    home.launcher.enabled = true;
+    let mut current = home.clone();
+    current.launcher.tab = 1;
+    current.launcher_shelf = Some(Box::new(home));
+    current.library.kind = crate::model::LibraryKind::Search;
+    let results = current.entries.clone();
+    current.entries.clear();
+    let mut scene = draw(&mut app, &current).unwrap();
+    paint_at(&mut app, &scene, 800);
+    let target = |app: &TestApp| {
+        let frame = app
+            .world
+            .query::<actor::ActorFrame>()
+            .iter()
+            .next()
+            .unwrap()
+            .0;
+        assert!(!app.world.has::<mirui::ui::Hidden>(frame));
+        app.world.get::<FollowBounds>(frame).unwrap().target
+    };
+    assert!(app.world.has::<deck::ActorAnchor>(target(&app)));
+    current.entries = results;
+    update(&mut scene, &current).unwrap();
+    paint_at(&mut app, &scene, 1600);
+    let selected = target(&app);
+    assert!(app.world.has::<selection::FocusTarget>(selected));
+    assert!(!app.world.has::<deck::ActorAnchor>(selected));
+    current.library.keyboard = true;
+    update(&mut scene, &current).unwrap();
+    paint_at(&mut app, &scene, 2400);
+    assert!(
+        app.world
+            .get::<selection::FocusTarget>(target(&app))
+            .unwrap()
+            .index()
+            >= 100
+    );
+}
+
+#[test]
+fn library_loading_empty_and_failed_states_update_without_changing_routes() {
+    let mut app = app([640, 480]);
+    let mut current = view(Page::Games);
+    current.library.kind = crate::model::LibraryKind::Search;
+    current.library.query = "no-match".into();
+    current.entries.clear();
+    current.library.load = nearby_menu::LibraryLoad::Loading;
+    let mut scene = draw(&mut app, &current).unwrap();
+    paint_at(&mut app, &scene, 400);
+    let count = app.world.query::<mirui::ui::widgets::Text>().iter().count();
+    assert!(!current.busy);
+    assert_eq!(scene.state.library_placeholder().title(), "正在搜索");
+    assert!(copy::loading(&current));
+    current.library.load = nearby_menu::LibraryLoad::Ready;
+    update(&mut scene, &current).unwrap();
+    paint_at(&mut app, &scene, 600);
+    assert_eq!(scene.state.library_placeholder().title(), "没有匹配的游戏");
+    current.library.load = nearby_menu::LibraryLoad::Failed {
+        message: "无法读取目录".into(),
+    };
+    update(&mut scene, &current).unwrap();
+    paint_at(&mut app, &scene, 800);
+    assert_eq!(scene.state.library_placeholder().title(), "暂时无法读取");
+    assert_eq!(
+        app.world.query::<mirui::ui::widgets::Text>().iter().count(),
+        count
+    );
+}
+
+#[test]
+fn menu_values_observe_settings_without_replacing_the_backend_view() {
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.library.kind = crate::model::LibraryKind::Favorites;
+        current.launcher.enabled = true;
+        current.launcher.overlay = "启动器设置".into();
+        current.launcher.overlay_kind = "system".into();
+        current.launcher.items = vec![
+            crate::model::LauncherItem::unavailable(
+                crate::model::MenuAction::ManageNetwork,
+                "管理直连网络",
+                "尚未保留直连网络",
+            ),
+            crate::model::LauncherItem::available(
+                crate::model::MenuAction::ToggleSound,
+                "音效开关",
+            ),
+            crate::model::LauncherItem::available(crate::model::MenuAction::CycleTheme, "切换主题"),
+            crate::model::LauncherItem::available(crate::model::MenuAction::Volume, "音量 +")
+                .with_value("45%"),
+            crate::model::LauncherItem::available(crate::model::MenuAction::Brightness, "亮度 +")
+                .with_value("60%"),
+        ];
+        let mut scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 400);
+        let labels = |world: &mirui::ecs::World| {
+            world
+                .query::<Text>()
+                .iter()
+                .filter(|(entity, _)| {
+                    let mut node = *entity;
+                    loop {
+                        if mirui::ui::branch::is_effectively_hidden(world, node) {
+                            return false;
+                        }
+                        let Some(parent) = world.get::<mirui::ui::Parent>(node) else {
+                            return true;
+                        };
+                        node = parent.0;
+                    }
+                })
+                .map(|(_, text)| text.resolve(world.resource()).to_string())
+                .collect::<Vec<_>>()
+        };
+        for expected in ["尚未保留直连网络", "森林", "开", "45%", "60%"] {
+            assert!(
+                labels(&app.world).iter().any(|text| text == expected),
+                "{size:?}: missing {expected}"
+            );
+        }
+        let settings = scene.state.settings();
+        current.launcher.selected = 3;
+        current.launcher.notice = "未能完成系统工具，请重试或返回".into();
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 450);
+        assert!(labels(&app.world).contains(&current.launcher.notice));
+        assert_eq!(scene.state.launcher().notice(), current.launcher.notice);
+        current.launcher.notice.clear();
+        current.launcher.selected = 0;
+        update(&mut scene, &current).unwrap();
+        settings.cycle_theme();
+        settings.set_sound(crate::settings::SoundPreferences {
+            enabled: false,
+            ..Default::default()
+        });
+        paint_at(&mut app, &scene, 500);
+        for expected in ["落日", "关"] {
+            assert!(
+                labels(&app.world).iter().any(|text| text == expected),
+                "{size:?}: missing {expected}"
+            );
+        }
+        current.launcher.items[3].value = "50%".into();
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 700);
+        assert!(labels(&app.world).iter().any(|label| label == "50%"));
+        assert!(!labels(&app.world).iter().any(|label| label == "45%"));
+        assert_full_frame_matches(&mut app, "Current menu values invalidate the active branch");
+    }
+}
+
+#[test]
 fn text_output_policy_is_shared_across_library_and_room_pages() {
     for page in [
         Page::Mode,
@@ -509,15 +1313,34 @@ fn action_panels_keep_labels_inside_their_cards() {
         for (kind, labels) in [
             ("game", vec!["开始游戏", "附近联机", "移出收藏", "返回"]),
             (
-                "system",
-                vec!["切换主题", "音效开关", "管理直连网络", "返回原系统", "关机"],
+                "tools",
+                vec![
+                    "Wi-Fi 设置",
+                    "网络信息",
+                    "存储空间",
+                    "文件管理",
+                    "系统信息",
+                    "返回",
+                ],
             ),
+            (
+                "system",
+                vec![
+                    "切换主题",
+                    "音效开关",
+                    "系统控制",
+                    "管理直连网络",
+                    "返回原系统",
+                    "电源",
+                ],
+            ),
+            ("controls", vec!["音量", "亮度", "系统工具", "更多设置"]),
             (
                 "network",
                 vec!["保留直连，开始游戏", "恢复 Wi-Fi 后开始", "返回"],
             ),
             ("exit", vec!["返回", "退出并恢复 Wi-Fi"]),
-            ("power", vec!["返回", "确认关机"]),
+            ("power", vec!["返回", "确认关机", "确认重启"]),
         ] {
             let mut app = app(size);
             let mut current = view(Page::Games);
@@ -527,9 +1350,35 @@ fn action_panels_keep_labels_inside_their_cards() {
             current.launcher.overlay_kind = kind.into();
             current.launcher.items = labels
                 .iter()
-                .map(|label| crate::model::LauncherItem {
-                    name: (*label).into(),
-                    enabled: true,
+                .map(|label| {
+                    let mut item = crate::model::LauncherItem {
+                        name: (*label).into(),
+                        ..Default::default()
+                    };
+                    if kind == "controls"
+                        && (label.starts_with("音量") || label.starts_with("亮度"))
+                    {
+                        let control = if label.starts_with("音量") {
+                            nearby_menu::SystemLevel::Volume
+                        } else {
+                            nearby_menu::SystemLevel::Brightness
+                        };
+                        item.action = control.action();
+                        item.level =
+                            Some(nearby_menu::Level::new(control, Some(100), false, false));
+                    } else if kind == "controls" && *label == "系统工具" {
+                        item.action = crate::model::MenuAction::ShowTools;
+                    } else if kind == "tools" {
+                        item.action = match *label {
+                            "Wi-Fi 设置" => crate::model::MenuAction::OpenWifi,
+                            "网络信息" => crate::model::MenuAction::NetworkInfo,
+                            "文件管理" => crate::model::MenuAction::FileManager,
+                            "系统信息" => crate::model::MenuAction::SystemInfo,
+                            "存储空间" => crate::model::MenuAction::ShowStorage,
+                            _ => crate::model::MenuAction::Back,
+                        };
+                    }
+                    item
                 })
                 .collect();
             let scene = draw(&mut app, &current).unwrap();
@@ -886,7 +1735,7 @@ fn launcher_overlays_keep_library_identity_and_return_to_the_same_selection() {
         next.launcher.overlay = title.into();
         next.launcher.items = vec![crate::model::LauncherItem {
             name: "开始游戏".into(),
-            enabled: true,
+            ..Default::default()
         }];
         update(&mut scene, &next).unwrap();
         paint_at(&mut app, &scene, 1000 + index as u64 * 1000);
@@ -2358,6 +3207,272 @@ fn lobby_sheets_retain_entities_and_scope_focus_through_reversal() {
 }
 
 #[test]
+fn action_cursor_observes_the_menu_model_without_a_library_selection_change() {
+    let mut app = app([640, 480]);
+    let mut home = view(Page::Games);
+    home.library.kind = crate::model::LibraryKind::Favorites;
+    home.launcher.enabled = true;
+    let mut scene = draw(&mut app, &home).unwrap();
+    paint_at(&mut app, &scene, 800);
+    home.launcher.overlay = "启动器设置".into();
+    home.launcher.items =
+        vec![crate::model::LauncherItem::available(crate::model::MenuAction::Back, "返回"); 4];
+    update(&mut scene, &home).unwrap();
+    paint_at(&mut app, &scene, 1600);
+    let actions = scene.state.launcher();
+    home.launcher.selected = 3;
+    // A standard Model mutation is sufficient; the library View stays unchanged.
+    actions.present(&home);
+    paint_at(&mut app, &scene, 1648);
+    let pose = pixel::cursor_frame(
+        scene.state.actor_motion(),
+        actions.menu_selection(),
+        actions.selection_age(),
+    );
+    assert_eq!(scene.state.selected(), Some(0));
+    assert_eq!(pose.selected, Some(3));
+    assert_eq!(pose.selection, actions.selection_age());
+    assert!(pose.walking);
+    assert_ne!(pose.selection, scene.state.walker_motion().selection);
+    paint_at(&mut app, &scene, 2400);
+    assert!(
+        !pixel::cursor_frame(
+            scene.state.actor_motion(),
+            actions.menu_selection(),
+            actions.selection_age()
+        )
+        .walking
+    );
+    assert_full_frame_matches(&mut app, "Menu cursor follows its own animation clock");
+    home.launcher.overlay.clear();
+    actions.present(&home);
+    assert_eq!(actions.menu_selection(), None);
+    assert_eq!(
+        pixel::cursor_frame(
+            scene.state.actor_motion(),
+            actions.menu_selection(),
+            actions.selection_age()
+        ),
+        scene.state.actor_motion()
+    );
+}
+
+#[test]
+fn action_actor_placement_and_return_do_not_inherit_the_background_page() {
+    use crate::model::LibraryKind;
+    for size in [[480, 320], [640, 480]] {
+        let mut reference = [None; 4];
+        for (kind, empty) in [
+            (LibraryKind::Favorites, false),
+            (LibraryKind::Platforms, false),
+            (LibraryKind::Search, false),
+            (LibraryKind::Search, true),
+        ] {
+            let mut app = app(size);
+            let mut current = view(Page::Games);
+            current.launcher.enabled = true;
+            current.launcher.tab = usize::from(kind != LibraryKind::Favorites);
+            current.library.kind = kind;
+            current.library.keyboard = kind == LibraryKind::Search && !empty;
+            if empty {
+                current.entries.clear();
+            }
+            let mut scene = draw(&mut app, &current).unwrap();
+            paint_at(&mut app, &scene, 1000);
+            let frame = app
+                .world
+                .query::<actor::ActorFrame>()
+                .iter()
+                .next()
+                .unwrap()
+                .0;
+            let original = app.world.get::<FollowBounds>(frame).unwrap().target;
+            current.launcher.overlay = "系统控制".into();
+            current.launcher.overlay_kind = "controls".into();
+            current.launcher.items = nearby_menu::SystemLevel::ALL
+                .into_iter()
+                .map(|control| {
+                    nearby_menu::MenuItem::available(control.action(), control.label())
+                        .with_level(nearby_menu::Level::new(control, Some(50), false, false))
+                })
+                .chain([
+                    nearby_menu::MenuItem::available(
+                        nearby_menu::MenuAction::ShowTools,
+                        "系统工具",
+                    ),
+                    nearby_menu::MenuItem::available(nearby_menu::MenuAction::Back, "更多设置"),
+                ])
+                .collect();
+            for (step, selected) in [0, 1, 2, 3].into_iter().enumerate() {
+                current.launcher.selected = selected;
+                update(&mut scene, &current).unwrap();
+                paint_at(&mut app, &scene, 2000 + step as u64 * 1000);
+                let target = app.world.get::<FollowBounds>(frame).unwrap().target;
+                assert_eq!(
+                    app.world.get::<deck::ActionAnchor>(target).unwrap().0,
+                    selected
+                );
+                let body = app
+                    .world
+                    .query::<pixel::ActorSprite>()
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .0;
+                let rect = app.world.get::<ComputedRect>(body).unwrap().0;
+                let anchor = app.world.get::<ComputedRect>(target).unwrap().0;
+                let offset = (rect.x - anchor.x, rect.y - anchor.y, rect.w, rect.h);
+                if let Some(expected) = reference[selected] {
+                    assert_eq!(offset, expected, "{size:?} {kind:?}/{selected}");
+                } else {
+                    reference[selected] = Some(offset);
+                }
+            }
+            current.launcher.overlay.clear();
+            current.launcher.overlay_kind.clear();
+            current.launcher.items.clear();
+            update(&mut scene, &current).unwrap();
+            paint_at(&mut app, &scene, 6500);
+            assert_eq!(
+                app.world.get::<FollowBounds>(frame).unwrap().target,
+                original
+            );
+            assert!(!app.world.has::<mirui::ui::Hidden>(frame));
+        }
+    }
+}
+
+#[test]
+fn room_actor_ownership_and_membership_are_independent_of_entry() {
+    fn actors(app: &mut TestApp) -> (usize, bool, bool) {
+        let rgb = |role| {
+            let color = app.theme().resolve(role);
+            [color.r, color.g, color.b]
+        };
+        let skin = rgb(crate::theme::actor::SKIN);
+        let host = rgb(crate::theme::actor::HOST);
+        let guest = rgb(crate::theme::actor::GUEST);
+        let frame = app.backend.framebuffer();
+        let pixels = frame.read_pixels().unwrap();
+        let bytes = pixels.bytes();
+        let width = 640;
+        let head = |x: usize, y: usize| bytes[(y * width + x) * 4..][..3] == skin;
+        let mut count = 0;
+        for y in 0..480 {
+            let mut x = 0;
+            while x < width {
+                if !head(x, y) {
+                    x += 1;
+                    continue;
+                }
+                let start = x;
+                while x < width && head(x, y) {
+                    x += 1;
+                }
+                if x - start >= 2 && (y == 0 || !(start..x).any(|x| head(x, y - 1))) {
+                    count += 1;
+                }
+            }
+        }
+        (
+            count,
+            bytes.chunks_exact(4).any(|p| p[..3] == host),
+            bytes.chunks_exact(4).any(|p| p[..3] == guest),
+        )
+    }
+    for (launcher, current_game) in [(false, true), (true, false), (true, true)] {
+        let mut app = app([640, 480]);
+        let mut initial = view(if launcher { Page::Games } else { Page::Choice });
+        initial.launcher.enabled = launcher;
+        initial.library.kind = crate::model::LibraryKind::Favorites;
+        let mut scene = draw(&mut app, &initial).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let mut current = view(Page::Host);
+        current.return_to_launcher = launcher;
+        current.current_game = current_game;
+        for (index, (page, phase, ready, connected, visitor)) in [
+            (Page::Host, Phase::Creating, false, false, false),
+            (Page::Host, Phase::WaitingPeer, false, false, false),
+            (Page::Host, Phase::ApprovalPending, false, false, true),
+            (Page::Host, Phase::PeerPreparing, false, false, true),
+            (Page::Host, Phase::HostReady, true, true, true),
+            (Page::Host, Phase::WaitingPeer, false, false, false),
+            (Page::Joined, Phase::Connecting, false, false, true),
+            (Page::Joined, Phase::Checking, false, true, true),
+            (Page::Joined, Phase::Notifying, false, true, true),
+            (Page::Joined, Phase::WaitingStart, true, true, true),
+            (Page::Joined, Phase::Starting, true, true, true),
+            (Page::Leaving, Phase::Leaving, false, false, true),
+            (Page::Leaving, Phase::RestoreFailed, false, false, true),
+            (Page::Host, Phase::NetworkConfirming, false, false, false),
+            (Page::Host, Phase::NetworkConnected, false, true, true),
+            (Page::Host, Phase::NetworkReconnecting, false, false, true),
+            (Page::Joined, Phase::NetworkConnected, false, true, true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            current.page = page;
+            current.phase = phase;
+            current.network_only = matches!(
+                phase,
+                Phase::NetworkConfirming | Phase::NetworkConnected | Phase::NetworkReconnecting
+            );
+            current.ready = ready;
+            current.connected = connected;
+            update(&mut scene, &current).unwrap();
+            paint_at(&mut app, &scene, 1600 + index as u64 * 480);
+            let active = if launcher { &scene.room } else { &scene.state };
+            assert_eq!(
+                active.session_motion().visitor,
+                visitor,
+                "{launcher}/{phase:?}"
+            );
+            let cursor = app
+                .world
+                .query::<actor::ActorFrame>()
+                .iter()
+                .next()
+                .unwrap()
+                .0;
+            assert!(app.world.get::<mirui::ui::Hidden>(cursor).is_some());
+            // Leaving actors travel outside the stage; membership survives restoration errors.
+            if page != Page::Leaving {
+                assert_eq!(
+                    actors(&mut app),
+                    (1 + usize::from(visitor), true, visitor),
+                    "{launcher}/{phase:?}"
+                );
+            }
+        }
+        current.page = Page::Rooms;
+        current.phase = Phase::Idle;
+        current.selected = 1;
+        current.network_only = false;
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 10500);
+        let cursor = app
+            .world
+            .query::<actor::ActorFrame>()
+            .iter()
+            .next()
+            .unwrap()
+            .0;
+        assert!(app.world.get::<mirui::ui::Hidden>(cursor).is_none());
+        let target = app.world.get::<FollowBounds>(cursor).unwrap().target;
+        assert_eq!(app.world.get::<FocusTarget>(target).unwrap().index(), 1);
+        assert_eq!(actors(&mut app), (1, true, false));
+        let sprites = app.world.query::<pixel::ActorSprite>();
+        assert_eq!(sprites.iter().count(), 1);
+        assert_eq!(
+            sprites.iter().next().unwrap().1.state.page_key().page,
+            Page::Rooms
+        );
+        assert_full_frame_matches(&mut app, "Room return restores exactly one active cursor");
+    }
+}
+
+#[test]
 fn retained_actor_follows_only_the_active_layer_page_and_pane() {
     let mut app = app([640, 480]);
     let mut initial = view(Page::Games);
@@ -2650,7 +3765,7 @@ fn launcher_overlays_share_one_background_snapshot_until_the_last_overlay_closes
         .into_iter()
         .map(|name| crate::model::LauncherItem {
             name: name.into(),
-            enabled: true,
+            ..Default::default()
         })
         .collect();
     update(&mut scene, &actions).unwrap();
@@ -2833,7 +3948,7 @@ fn compressed_shelf_snapshot_preserves_pixels_and_reopens_current_contents() {
         overlay.launcher.overlay_kind = "system".into();
         overlay.launcher.items = vec![crate::model::LauncherItem {
             name: "Back".into(),
-            enabled: true,
+            ..Default::default()
         }];
         update(&mut scene, &overlay).unwrap();
         super::paint_at(&mut app, 2548).unwrap();
@@ -2940,7 +4055,7 @@ fn action_motion_damage_uses_only_the_panel_and_stops_when_settled() {
     current.launcher.items = (0..6)
         .map(|index| crate::model::LauncherItem {
             name: format!("操作 {index}"),
-            enabled: true,
+            ..Default::default()
         })
         .collect();
     let mut scene = draw(&mut app, &current).unwrap();
@@ -3015,7 +4130,7 @@ fn static_cartridge_snapshots_follow_content_geometry_and_row_lifetime() {
     for frame in 0..100 {
         super::paint_at(&mut app, frame * 17).unwrap();
         let (count, captures) = static_snapshot::counts(&app.world);
-        assert!(count <= shelf::MAX_VISIBLE);
+        assert!(count <= shelf::WINDOW_BUDGET);
         assert!(
             captures <= previous + 1,
             "At most one static snapshot per normal tick"
@@ -3170,4 +4285,232 @@ fn platform_preview_retains_console_entities_across_selection_changes() {
             1
         );
     }
+}
+
+#[test]
+fn menu_ownership_stays_bounded_after_leaving_save_manager() {
+    use crate::model::{Action, LauncherItem};
+    fn frame(app: &mut TestApp, time: &mut u64) {
+        *time += 300;
+        super::paint_at(app, *time).unwrap();
+        *time += 16;
+        super::paint_at(app, *time).unwrap();
+    }
+    fn visible(world: &mirui::ecs::World, mut entity: mirui::ecs::Entity) -> bool {
+        loop {
+            if mirui::ui::branch::is_effectively_hidden(world, entity) {
+                return false;
+            }
+            let Some(parent) = world.get::<mirui::ui::Parent>(entity) else {
+                return true;
+            };
+            entity = parent.0;
+        }
+    }
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut time = 0;
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "游戏操作".into();
+        current.launcher.overlay_kind = "game".into();
+        current.launcher.items = (0..7)
+            .map(|index| {
+                LauncherItem::available(nearby_menu::MenuAction::Back, format!("Action {index}"))
+            })
+            .collect();
+        let mut scene = draw(&mut app, &current).unwrap();
+        frame(&mut app, &mut time);
+        current.launcher.overlay = "存档".into();
+        current.launcher.overlay_kind = "saves".into();
+        current.launcher.items.clear();
+        current.launcher.saves = Some(crate::launcher::saves::tests::fixture());
+        update(&mut scene, &current).unwrap();
+        frame(&mut app, &mut time);
+        scene.state.launcher().saves_input(Action::Confirm);
+        frame(&mut app, &mut time);
+        scene.state.launcher().saves_input(Action::Back);
+        frame(&mut app, &mut time);
+        current.launcher.saves = None;
+        current.launcher.overlay.clear();
+        update(&mut scene, &current).unwrap();
+        frame(&mut app, &mut time);
+        for (kind, items) in [("system", 6), ("game", 7), ("system", 6), ("exit", 2)] {
+            current.launcher.overlay = kind.into();
+            current.launcher.overlay_kind = kind.into();
+            current.launcher.selected = 0;
+            current.launcher.items = (0..items)
+                .map(|index| {
+                    LauncherItem::available(
+                        nearby_menu::MenuAction::Back,
+                        format!("{kind} {index}"),
+                    )
+                })
+                .collect();
+            update(&mut scene, &current).unwrap();
+            frame(&mut app, &mut time);
+            let count = app.world.query::<Style>().iter().count();
+            for step in 0..items * 3 {
+                current.launcher.selected = step % items;
+                update(&mut scene, &current).unwrap();
+                frame(&mut app, &mut time);
+                let panels = app
+                    .world
+                    .query::<actions_damage::ActionsPanel>()
+                    .iter()
+                    .count();
+                assert_eq!(panels, 1, "{size:?} {kind} step={step}");
+                let mut anchors: Vec<_> = app
+                    .world
+                    .query::<deck::ActionAnchor>()
+                    .iter()
+                    .filter(|(entity, anchor)| {
+                        anchor.1 == deck::ActionLayout::Grid && visible(&app.world, *entity)
+                    })
+                    .map(|(_, anchor)| anchor.0)
+                    .collect();
+                anchors.sort_unstable();
+                assert_eq!(
+                    anchors,
+                    (0..items).collect::<Vec<_>>(),
+                    "Each action has exactly one visible node: {size:?} {kind} step={step}"
+                );
+                assert_eq!(
+                    app.world.query::<Style>().iter().count(),
+                    count,
+                    "Menu navigation must preserve its mounted subtree: {size:?} {kind} step={step}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn save_manager_keeps_the_current_actor_and_actions_within_each_viewport() {
+    use crate::launcher::saves::Page as SavePage;
+    use crate::model::Action;
+    for size in [[480, 320], [640, 480]] {
+        for palette in crate::theme::Palette::ALL {
+            let mut app = app(size);
+            app.set_theme(palette.theme()).unwrap();
+            let mut current = view(Page::Games);
+            current.launcher.enabled = true;
+            current.launcher.overlay = "存档".into();
+            current.launcher.overlay_kind = "saves".into();
+            current.launcher.saves = Some(crate::launcher::saves::tests::fixture());
+            let scene = draw(&mut app, &current).unwrap();
+            paint_at(&mut app, &scene, 800);
+            let launcher = scene.state.launcher();
+            let saves = launcher.saves();
+            for (step, actions) in [
+                vec![],
+                vec![Action::Down; 9],
+                vec![Action::Confirm],
+                vec![Action::Back],
+                vec![Action::Refresh],
+                vec![Action::Back, Action::Right],
+                vec![Action::Right],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                for action in actions {
+                    launcher.saves_input(action);
+                }
+                paint_at(&mut app, &scene, 1200 + step as u64 * 1000);
+                if saves.tab() != nearby_menu::saves::Tab::Session {
+                    let layout = if saves.modal() {
+                        deck::ActionLayout::SavesModal
+                    } else {
+                        deck::ActionLayout::SavesList
+                    };
+                    let rect = app
+                        .world
+                        .query::<deck::ActionAnchor>()
+                        .iter()
+                        .find_map(|(entity, anchor)| {
+                            (anchor.1 == layout
+                                && anchor.0 == saves.selected()
+                                && !mirui::ui::branch::is_effectively_hidden(&app.world, entity))
+                            .then(|| app.world.get::<ComputedRect>(entity).map(|r| r.0))
+                            .flatten()
+                        })
+                        .expect("active save action");
+                    assert!(
+                        rect.y >= Fixed::ZERO
+                            && rect.y + rect.h <= Fixed::from_int(i32::from(size[1])),
+                        "{size:?} {step} {rect:?}"
+                    );
+                    assert_eq!(launcher.menu_selection(), Some(saves.selected()));
+                    let target = app
+                        .world
+                        .query::<actor::ActorFrame>()
+                        .iter()
+                        .find_map(|(e, _)| {
+                            (!app.world.has::<mirui::ui::Hidden>(e))
+                                .then(|| app.world.get::<FollowBounds>(e).map(|b| b.target))
+                                .flatten()
+                        })
+                        .expect("visible save actor");
+                    let anchor = app.world.get::<deck::ActionAnchor>(target).unwrap();
+                    assert_eq!(
+                        (anchor.0, anchor.1),
+                        (saves.selected(), layout),
+                        "{size:?} {step}"
+                    );
+                }
+                assert_eq!(saves.page() == SavePage::Browse, step != 2 && step != 4);
+                if let Ok(directory) = std::env::var("NEARBY_SAVE_CAPTURES") {
+                    let directory = std::path::Path::new(&directory);
+                    std::fs::create_dir_all(directory).unwrap();
+                    let file = std::fs::File::create(directory.join(format!(
+                        "saves-{}-{}-{step}.png",
+                        palette.id(),
+                        size[0]
+                    )))
+                    .unwrap();
+                    let mut encoder =
+                        png::Encoder::new(file, u32::from(size[0]), u32::from(size[1]));
+                    encoder.set_color(png::ColorType::Rgba);
+                    encoder.set_depth(png::BitDepth::Eight);
+                    let frame = app.backend.framebuffer();
+                    encoder
+                        .write_header()
+                        .unwrap()
+                        .write_image_data(frame.read_pixels().unwrap().bytes())
+                        .unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn save_operation_progress_has_one_exact_actor_target_and_close_is_deferred() {
+    let mut app = app([480, 320]);
+    let mut current = view(Page::Games);
+    current.launcher.enabled = true;
+    current.launcher.overlay = "存档".into();
+    current.launcher.overlay_kind = "saves".into();
+    let mut document = crate::launcher::saves::tests::fixture();
+    document.busy = true;
+    current.launcher.saves = Some(document);
+    let scene = draw(&mut app, &current).unwrap();
+    for time in [800, 960, 1400, 1800] {
+        paint_at(&mut app, &scene, time);
+        let target = app
+            .world
+            .query::<actor::ActorFrame>()
+            .iter()
+            .find_map(|(entity, _)| app.world.get::<FollowBounds>(entity))
+            .unwrap();
+        assert!(target.transition.is_none());
+        let anchor = app.world.get::<deck::ActionAnchor>(target.target).unwrap();
+        assert_eq!((anchor.0, anchor.1), (0, deck::ActionLayout::SavesProgress));
+    }
+    scene
+        .state
+        .launcher()
+        .saves_input(crate::model::Action::Back);
+    assert!(scene.state.launcher().saves().busy());
 }

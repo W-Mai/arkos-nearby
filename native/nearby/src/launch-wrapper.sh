@@ -9,6 +9,9 @@ if [ "$?" -eq "10" ]; then
 fi
 
 nearby_arguments=$(mktemp /tmp/nearby-arguments.XXXXXX) || exit 1
+if [ -n "${ARKOS_NEARBY_SAVE_TICKET:-}" ]; then
+  set -- "--nearby-save-ticket=$ARKOS_NEARBY_SAVE_TICKET" "$@"
+fi
 if sudo -n /opt/arkos-nearby/arkos-nearby resolve-launch --frontend "$emulator" -- "$@" > "$nearby_arguments"; then
   nearby_launch=()
   while IFS= read -r -d '' nearby_argument; do

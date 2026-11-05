@@ -1,6 +1,7 @@
 use mirui::prelude::*;
-use mirui::ui::widgets::{Image, Text, TextAlign::Center};
+use mirui::ui::widgets::{Image, Text, TextAlign::Start};
 
+use super::keyboard::keycap as keyboard_keycap;
 use super::{
     artwork::cover,
     consoles::console,
@@ -10,7 +11,7 @@ use super::{
     selection::FocusTarget,
     state::DisplayState,
     style::*,
-    widgets::{caption, paragraph, shadow},
+    widgets::{caption, paragraph},
 };
 use crate::model::LibraryKind;
 
@@ -94,18 +95,27 @@ fn shelf(
                     }
                 }
             }
-            Row (height: 4, shrink: 0.0, column_gap: 4, justify: JustifyContent::Center) {
+            Row (height: 4, shrink: 0.0, column_gap: 4, justify: JustifyContent::Center) [
+                super::shelf::PageMarkers,
+            ] {
                 walk ${
-                    let (first, end, selected) = grid.pages();
-                    (first..end).map(|i| (i, i == selected)).collect::<Vec<_>>()
-                } with page by page.0 {
-                    View (
-                        width: if page.1 { 12 } else { 4 },
-                        bg_color: if page.1 { ACCENT } else { DIVIDER }
-                    )
+                    let (first, end, _) = grid.pages();
+                    first..end
+                } with page by page {
+                    page_marker (grid, page)
                 }
             }
         } on SizeChanged { grid.set_size(event.new.width, event.new.height); }
+    }
+}
+
+#[compose]
+fn page_marker(grid: model!(super::shelf::Shelf), page: usize) -> Entity {
+    ui! {
+        View (
+            width: ${ grid.marker_width(page) },
+            bg_color: ${ if grid.pages().2 == page { ACCENT } else { DIVIDER } }
+        )
     }
 }
 
@@ -122,7 +132,6 @@ fn cartridge(
     let directory = row.clone();
     let name = row.clone();
     let enabled = row.clone();
-    let selected = row.clone();
     ui! {
         Column (
             width: ${ grid.plan().card_width },
@@ -152,6 +161,7 @@ fn cartridge(
                     min_width: 0,
                     container: true,
                     padding: Padding {
+                        left: metrics.gap.into(),
                         right: super::shelf::LABEL_ACTOR_SPACE.into(),
                         ..Default::default()
                     }
@@ -160,30 +170,13 @@ fn cartridge(
                         text: ${ name.label(true) },
                         grow: 1.0,
                         min_width: 0,
-                        font: font(BODY_SIZE),
-                        font_size: BODY_SIZE,
+                        font: font(TITLE_SIZE),
+                        font_size: TITLE_SIZE,
                         text_color: ${ if enabled.available() { FOREGROUND } else { DISABLED } },
                         paragraph: paragraph(mirui::ui::widgets::TextAlign::Start, 1)
                     ) [
                         FONT_PAINT,
                     ]
-                    if ${ !state.launcher().view().enabled && state.selected() == Some(selected.index()) } {
-                        View (
-                            position: Position::Absolute,
-                            left: Dimension::percent(100),
-                            top: Dimension::percent(100),
-                            width: 32,
-                            height: 48,
-                            transform: ${
-                                mirui::types::Transform::translate(Fixed::from_int(-24), Fixed::from_int(-36))
-                                    .compose(&mirui::types::Transform::scale(Fixed::HALF, Fixed::HALF))
-                            }
-                        ) [
-                            super::pixel::ActorSprite {
-                                state: state.clone(),
-                            },
-                        ]
-                    }
                 }
             }
             View (height: super::shelf::SHADOW, shrink: 0.0, bg_color: DIVIDER)
@@ -196,24 +189,30 @@ fn search(state: model!(DisplayState), metrics: Metrics) -> Entity {
     let query_state = state.clone();
     ui! {
         Column (grow: 1.0, min_height: 0, row_gap: metrics.gap) {
-            Column (
-                height: i32::from(metrics.title) + LABEL_LEADING + metrics.gap * 2,
+            Row (
+                height: i32::from(metrics.body) + LABEL_LEADING + metrics.gap * 2 + 4,
                 shrink: 0.0,
+                min_width: 0,
+                align: AlignItems::Center,
+                column_gap: metrics.gap,
                 padding: Padding::all(metrics.gap),
                 bg_color: PANEL,
-                border_width: 1,
-                border_color: ACCENT
+                border_width: ${ if state.keyboard() { 2 } else { 1 } },
+                border_color: ${ if state.keyboard() { ACCENT } else { DIVIDER } }
             ) {
-                caption (
-                    move || {
-                        let query = query_state.query();
-                        if query.is_empty() { "输入游戏名或文件名".into() } else { query }
-                    },
-                    || FOREGROUND,
-                    metrics.title,
-                    Center,
-                    LABEL_LEADING
-                )
+                search_icon (16)
+                Column (grow: 1.0, min_width: 0) {
+                    caption (
+                        move || {
+                            let query = query_state.query();
+                            if query.is_empty() { "输入游戏名或文件名".into() } else { query }
+                        },
+                        || FOREGROUND,
+                        metrics.body,
+                        Start,
+                        LABEL_LEADING
+                    )
+                }
             }
             if ${ state.keyboard() } {
                 Column (grow: 1.0, min_height: 0, row_gap: metrics.gap) {
@@ -233,32 +232,44 @@ fn search(state: model!(DisplayState), metrics: Metrics) -> Entity {
 }
 
 #[compose]
+pub(super) fn search_icon(size: i32) -> Entity {
+    ui! {
+        Image (
+            src: path!(
+                M 3 0 H 9 V 2 H 11 V 4 H 13 V 9 H 11 V 11 H 9 V 13 H 4 V 11 H 2 V 9 H 0 V 4 H 2 V
+                2 H 3 Z M 4 3 H 3 V 9 H 4 V 10 H 9 V 9 H 10 V 4 H 9 V 3 Z M 11 10 H 13 V 12 H 15
+                V 14 H 16 V 16 H 14 V 15 H 12 V 13 H 10 V 11 Z
+            ),
+            viewbox: 16,
+            width: size,
+            height: size,
+            shrink: 0.0,
+            color: ACCENT
+        )
+    }
+}
+
+#[compose]
 fn keycap(state: model!(DisplayState), index: usize, metrics: Metrics) -> Entity {
+    let selected = state.clone();
+    let motion = state.clone();
     ui! {
         Column (
             grow: 1.0,
             min_width: 0,
             min_height: 0,
-            transform: ${ state.card_motion().card_transform(100 + index) }
-        ) {
-            Column (
-                grow: 1.0,
-                min_width: 0,
-                min_height: 0,
-                justify: JustifyContent::Center,
-                bg_color: ${ if state.selected() == Some(100 + index) { ACCENT } else { PANEL } }
-            ) [
-                FocusTarget::fixed(100 + index),
-            ] {
-                caption (
-                    move || KEYS[index].into(),
-                    move || if state.selected() == Some(100 + index) { ON_ACCENT } else { FOREGROUND },
-                    if KEYS[index].len() == 1 { metrics.title } else { metrics.body },
-                    Center,
-                    LABEL_LEADING
-                )
-            }
-            shadow (metrics)
+            transform: ${ motion.card_motion().card_transform(100 + index) }
+        ) [
+            FocusTarget::fixed(100 + index),
+        ] {
+            keyboard_keycap (
+                move || KEYS[index].into(),
+                move || selected.selected() == Some(100 + index),
+                || mirui::types::Transform::IDENTITY,
+                super::keyboard::search_anchor(index),
+                if KEYS[index].len() == 1 { metrics.title } else { metrics.body },
+                metrics
+            )
         }
     }
 }

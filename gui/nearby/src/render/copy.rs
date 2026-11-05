@@ -27,6 +27,9 @@ pub(super) fn page_heading(view: &View) -> &str {
 }
 
 pub(super) fn loading(view: &View) -> bool {
+    if view.page == Page::Games && view.library.load == nearby_menu::LibraryLoad::Loading {
+        return true;
+    }
     if view.network_only && view.connected && view.phase == Phase::NetworkConnected {
         return view.busy;
     }
@@ -214,6 +217,13 @@ pub(super) fn hint_text(view: &View) -> &str {
         return &view.status;
     }
     if view.launcher.enabled && !view.library.keyboard {
+        if view.library.kind == crate::model::LibraryKind::Search {
+            return if view.launcher.key.is_empty() {
+                "Y 键盘"
+            } else {
+                "X 游玩 · Y 收藏 · START 键盘"
+            };
+        }
         return if view.library.kind == crate::model::LibraryKind::Favorites {
             if view.launcher.key.is_empty() {
                 "Y 排序"

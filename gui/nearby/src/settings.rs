@@ -85,6 +85,22 @@ impl Settings {
     }
 }
 
+impl SettingsHandle {
+    pub fn menu_value(&self, action: nearby_menu::MenuAction) -> &'static str {
+        match action {
+            nearby_menu::MenuAction::CycleTheme => self.palette().label(),
+            nearby_menu::MenuAction::ToggleSound => {
+                if self.sound().enabled {
+                    "开"
+                } else {
+                    "关"
+                }
+            }
+            _ => "",
+        }
+    }
+}
+
 #[cfg(any(target_os = "linux", test))]
 pub fn connect(
     settings: &SettingsHandle,

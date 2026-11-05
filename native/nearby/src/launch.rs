@@ -49,7 +49,7 @@ impl Drop for Scope {
     }
 }
 
-fn append_configuration(args: &mut Vec<String>, path: &Path) -> Result<()> {
+pub(crate) fn append_configuration(args: &mut Vec<String>, path: &Path) -> Result<()> {
     let mut merged = Vec::new();
     let mut retained = Vec::new();
     let mut values = std::mem::take(args).into_iter();
@@ -77,11 +77,7 @@ fn options(
     directory: &Path,
     settings: &crate::game::Settings,
 ) -> Result<Option<PathBuf>> {
-    let overrides = if context.core_id == "tgbdual" {
-        Some("tgbdual_gblink_enable = \"disabled\"\n")
-    } else {
-        crate::core_choice::arcade_options(&context.game_path, &context.core_id)
-    };
+    let overrides = crate::core_choice::solo_options(&context.game_path, &context.core_id);
     if let Some(overrides) = overrides {
         let file = directory.join("core-options.cfg");
         private_write(
@@ -92,7 +88,11 @@ fn options(
         let config = directory.join("launch.cfg");
         private_write(
             &config,
-            format!("core_options_path = \"{}\"\n", file.display()).as_bytes(),
+            format!(
+                "core_options_path = \"{}\"\ngame_specific_options = \"false\"\n",
+                file.display()
+            )
+            .as_bytes(),
         )?;
         fs::set_permissions(&config, fs::Permissions::from_mode(0o644))?;
         Ok(Some(config))
@@ -102,6 +102,9 @@ fn options(
 }
 
 pub fn resolve(frontend: &str, args: &[String]) -> Result<()> {
+    let mut arguments = args.to_vec();
+    let save_ticket = crate::saves::launch::take(&mut arguments)?;
+    let args = &arguments;
     require(
         unsafe { libc::geteuid() } == 0,
         "Launch resolution requires root",
@@ -128,6 +131,7 @@ pub fn resolve(frontend: &str, args: &[String]) -> Result<()> {
         }
         return Ok(());
     }
+    crate::configuration::recover()?;
     let initial = crate::context::parse(frontend, args)?;
     let mut scope = Scope {
         id: random_id()?,
@@ -142,6 +146,11 @@ pub fn resolve(frontend: &str, args: &[String]) -> Result<()> {
     scope.created = true;
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o755))?;
     let (mut context, settings) = crate::arcade::single_player(&directory, &scope.id, &initial)?;
+    if let Some(id) = save_ticket {
+        crate::session::try_while_idle(|| {
+            crate::saves::launch::apply(&id, &mut context, &settings, &directory)
+        })?;
+    }
     let runtime = crate::core_runtime::directory(&context.core_id, context.core_elf_bits)?
         .unwrap_or_default();
     if let Some(config) = options(&context, &directory, &settings)? {

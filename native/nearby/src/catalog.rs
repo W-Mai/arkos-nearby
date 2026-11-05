@@ -36,6 +36,42 @@ mod library_tests {
     use super::*;
 
     #[test]
+    fn pending_library_work_and_errors_are_distinct_from_game_preparation() {
+        let mut browser = Browser::with_inventory(IndexJob::local().unwrap(), true).unwrap();
+        browser.indexing = false;
+        browser.status.clear();
+        browser.levels.push(Level {
+            kind: LibraryPage::Search,
+            path: None,
+            entries: vec![],
+            selected: 0,
+            offset: 0,
+            total: 0,
+        });
+        browser.query = "mario".into();
+        let load = |browser: &Browser| {
+            serde_json::from_value::<nearby_menu::LibraryLoad>(
+                browser.view()["library"]["load"].clone(),
+            )
+            .unwrap()
+        };
+        browser.search_running = true;
+        assert!(!browser.view()["busy"].as_bool().unwrap());
+        assert_eq!(load(&browser), nearby_menu::LibraryLoad::Loading);
+        browser.search_running = false;
+        assert_eq!(load(&browser), nearby_menu::LibraryLoad::Ready);
+        browser.status = "无法读取目录，请返回后重试。".into();
+        assert_eq!(
+            load(&browser),
+            nearby_menu::LibraryLoad::Failed {
+                message: browser.status.clone()
+            }
+        );
+        browser.query_due = Some(crate::system::monotonic());
+        assert_eq!(load(&browser), nearby_menu::LibraryLoad::Loading);
+    }
+
+    #[test]
     fn returning_between_browsers_retains_one_compatible_index() {
         let directory = std::env::temp_dir().join(format!(
             "nearby-shared-index-{}",
@@ -95,7 +131,7 @@ mod library_tests {
         assert_eq!(rows[0]["artwork"], "/roms/nes/3/image.png");
         assert_eq!(rows[1]["artwork"], "");
         let selected = browser.current().unwrap().key();
-        for (columns, rows) in [(3, 2), (2, 1), (4, 2), (3, 1)] {
+        for (columns, rows) in [(3, 2), (2, 1), (4, 2), (3, 1), (3, 3), (2, 4)] {
             let grid = serde_json::from_value(json!({"columns":columns,"rows":rows})).unwrap();
             browser.shelf_layout(grid);
             assert_eq!(browser.current().unwrap().key(), selected);
@@ -107,6 +143,58 @@ mod library_tests {
             browser.dispatch("up").unwrap();
             browser.dispatch("down").unwrap();
             assert_eq!(browser.current().unwrap().key(), selected);
+        }
+        browser.dispatch("shelf_home").unwrap();
+        assert_eq!(browser.current().unwrap().name(), "Game 0");
+        assert!(!browser.exit);
+    }
+
+    #[test]
+    fn list_window_resizes_without_changing_selection_or_replacing_the_index() {
+        let mut browser = Browser::with_inventory(IndexJob::local().unwrap(), true).unwrap();
+        let index = browser.index_job().run();
+        browser.accept_index(index.clone());
+        browser.levels.push(Level {
+            kind: LibraryPage::Platforms,
+            path: None,
+            entries: (0..20)
+                .map(|index| Entry {
+                    path: PathBuf::from(format!("/roms/{index}")),
+                    name: format!("Platform {index}"),
+                    directory: true,
+                    frontend: String::new(),
+                    core: String::new(),
+                    platform: "nes".into(),
+                    count: 1,
+                    image: None,
+                    extensions: String::new(),
+                })
+                .collect(),
+            selected: 9,
+            offset: 0,
+            total: 20,
+        });
+        let key = browser.current().unwrap().key();
+        let epoch = browser.input_epoch;
+        for rows in [2, 1, nearby_menu::LIST_WINDOW_ITEMS, 3] {
+            browser.list_layout(rows);
+            let view = browser.view();
+            let entries = view["entries"].as_array().unwrap();
+            assert_eq!(entries.len(), rows);
+            assert_eq!(
+                entries[view["selected"].as_u64().unwrap() as usize]["key"],
+                key
+            );
+            assert_eq!(browser.input_epoch, epoch);
+            assert!(Arc::ptr_eq(browser.index.as_ref().unwrap(), &index));
+            browser.dispatch("page_down").unwrap();
+            assert_eq!(browser.levels.last().unwrap().selected, 9 + rows);
+            browser.dispatch("page_up").unwrap();
+            assert_eq!(browser.current().unwrap().key(), key);
+        }
+        for rows in [0, nearby_menu::LIST_WINDOW_ITEMS + 1, usize::MAX] {
+            browser.list_layout(rows);
+            assert_eq!(browser.list_rows, 3);
         }
     }
 
@@ -276,6 +364,18 @@ impl Entry {
     pub fn name(&self) -> &str {
         &self.name
     }
+    pub fn frontend(&self) -> &str {
+        &self.frontend
+    }
+    pub fn core(&self) -> &str {
+        &self.core
+    }
+    pub fn platform_name(&self) -> &str {
+        PLATFORMS
+            .iter()
+            .find_map(|(id, name)| (*id == self.platform).then_some(*name))
+            .unwrap_or(&self.platform)
+    }
     pub fn directory(&self) -> bool {
         self.directory
     }
@@ -333,6 +433,7 @@ struct Level {
 
 pub struct Browser {
     shelf: shelf::Grid,
+    list_rows: usize,
     launcher: bool,
     roots: Vec<PathBuf>,
     levels: Vec<Level>,
@@ -406,6 +507,11 @@ fn game_file(path: &Path) -> bool {
 }
 
 impl Browser {
+    pub fn list_layout(&mut self, rows: usize) {
+        if (1..=nearby_menu::LIST_WINDOW_ITEMS).contains(&rows) {
+            self.list_rows = rows;
+        }
+    }
     pub fn shelf_layout(&mut self, grid: shelf::Grid) {
         if grid.valid() {
             self.shelf = grid;
@@ -452,7 +558,10 @@ impl Browser {
         Self::with_inventory(IndexJob::local()?, false)
     }
     pub fn launcher(favorites: bool) -> Result<Self> {
-        let mut browser = Self::with_inventory(IndexJob::launcher()?, true)?;
+        Self::launcher_with_inventory(IndexJob::launcher()?, favorites)
+    }
+    pub(crate) fn launcher_with_inventory(inventory: IndexJob, favorites: bool) -> Result<Self> {
+        let mut browser = Self::with_inventory(inventory, true)?;
         if favorites {
             browser.levels.push(Level {
                 kind: LibraryPage::Favorites,
@@ -529,6 +638,7 @@ impl Browser {
         let entry_total = entries.len();
         let mut browser = Self {
             shelf: shelf::Grid::default(),
+            list_rows: 4,
             launcher,
             roots,
             levels: vec![Level {
@@ -1086,6 +1196,13 @@ impl Browser {
             return Ok(None);
         }
         let favorites = self.kind() == LibraryPage::Favorites;
+        if favorites && action == "shelf_home" {
+            self.input_epoch = crate::system::monotonic();
+            if let Some(level) = self.levels.last_mut() {
+                level.selected = 0;
+            }
+            return Ok(None);
+        }
         let level_index = self.levels.len().saturating_sub(1);
         let is_directory = self
             .levels
@@ -1104,8 +1221,8 @@ impl Browser {
             _ if favorites => 0,
             "up" => -1,
             "down" => 1,
-            "left" | "page_up" => -4,
-            "right" | "page_down" => 4,
+            "left" | "page_up" => -(self.list_rows as isize),
+            "right" | "page_down" => self.list_rows as isize,
             _ => 0,
         };
         if delta != 0 {
@@ -1234,7 +1351,7 @@ impl Browser {
         let visible = if self.kind() == LibraryPage::Favorites {
             self.shelf.capacity()
         } else {
-            4
+            self.list_rows
         };
         let first = if self.kind() == LibraryPage::Favorites {
             self.shelf.first(level.selected)
@@ -1291,9 +1408,22 @@ impl Browser {
                 .filter_map(|entry| entry.image.as_ref())
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect();
+        let load = if self.busy
+            || self.indexing && self.index.is_none()
+            || self.kind() == LibraryPage::Search
+                && (self.query_due.is_some() || self.search_running)
+        {
+            nearby_menu::LibraryLoad::Loading
+        } else if !self.status.is_empty() {
+            nearby_menu::LibraryLoad::Failed {
+                message: self.status.clone(),
+            }
+        } else {
+            nearby_menu::LibraryLoad::Ready
+        };
         json!({
             "platforms":self.kind()==LibraryPage::Platforms,
-            "library":{"kind":level.kind,"query":self.query,"keyboard":self.keyboard && self.kind()==LibraryPage::Search,"key_selected":self.key_selected,"row_selected":level.selected.saturating_sub(first),"sort":self.personal.favorite_sort,"position":if level.entries.is_empty(){0}else{level.offset+level.selected+1},"total":level.total},
+            "library":{"kind":level.kind,"load":load,"query":self.query,"keyboard":self.keyboard && self.kind()==LibraryPage::Search,"key_selected":self.key_selected,"row_selected":level.selected.saturating_sub(first),"sort":self.personal.favorite_sort,"position":if level.entries.is_empty(){0}else{level.offset+level.selected+1},"total":level.total},
             "artwork":level.entries.get(level.selected).and_then(|entry|entry.image.as_ref()).map(|path|path.to_string_lossy().into_owned()).unwrap_or_default(),
             "artwork_neighbors":artwork_neighbors,
             "page":"games","title":match self.kind() {LibraryPage::Platforms=>"选择游戏平台",LibraryPage::Favorites=>"收藏夹",LibraryPage::Search=>"搜索游戏",LibraryPage::Directory=>"选择游戏"},
