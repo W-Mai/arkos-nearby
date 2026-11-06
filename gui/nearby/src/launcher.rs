@@ -4,7 +4,9 @@ use mirui::prelude::*;
 use mirui::ui::{text_input::TextInputSession, widgets::TextDocument};
 
 pub(crate) mod configuration;
+pub(crate) mod management;
 pub(crate) mod saves;
+pub(crate) mod text_entry;
 pub(crate) mod text_input;
 
 const HOLD_MS: u64 = 700;
@@ -19,6 +21,8 @@ pub enum Intent {
         multiplayer: bool,
     },
     Wifi(nearby_menu::wifi::Request),
+    #[cfg(target_os = "linux")]
+    Management(nearby_menu::management::Request),
     #[cfg(target_os = "linux")]
     Configuration(nearby_menu::configuration::Request),
     #[cfg(target_os = "linux")]
@@ -44,6 +48,7 @@ pub struct Launcher {
     view: LauncherView,
     pub(crate) configuration: model!(owned configuration::Editor),
     pub(crate) saves: model!(owned saves::Manager),
+    pub(crate) management: model!(owned management::Manager),
     #[observe]
     revision: u64,
     #[observe]
@@ -94,6 +99,7 @@ impl Default for Launcher {
             view: Default::default(),
             configuration: configuration::Editor::default().into(),
             saves: saves::Manager::default().into(),
+            management: management::Manager::default().into(),
             revision: Default::default(),
             progress: Default::default(),
             selection_age: Default::default(),
@@ -132,6 +138,9 @@ impl Default for Launcher {
 impl Launcher {
     #[observe]
     pub fn menu_selection(&self) -> Option<usize> {
+        if self.management.active() {
+            return Some(self.management.focus());
+        }
         if self.saves.active() {
             return Some(self.saves.selected());
         }
@@ -294,6 +303,7 @@ impl Launcher {
         self.view.items.get(index).and_then(|item| item.level)
     }
     pub fn present(&mut self, view: &View) {
+        self.management.sync(view.launcher.management.as_ref());
         self.configuration
             .sync(view.launcher.configuration.as_ref());
         self.saves.sync(view.launcher.saves.as_ref());
@@ -501,6 +511,11 @@ impl Launcher {
         if !matches!(self.gesture, Gesture::Idle) {
             return;
         }
+        if self.management.active() {
+            self.pending = Some(Intent::Action(Action::Refresh));
+            self.gesture = Gesture::Consumed;
+            return;
+        }
         if self.saves.active() {
             self.saves.input(Action::Refresh);
             self.gesture = Gesture::Consumed;
@@ -545,6 +560,7 @@ impl Launcher {
         self.now = now;
         self.configuration.tick(now);
         self.saves.tick(now);
+        self.management.tick(now);
         if self.wifi_page().pending() {
             let (start, end) = wifi::loading_span(now);
             self.wifi_loading_start = start;
@@ -592,6 +608,10 @@ impl Launcher {
     pub fn saves_input(&mut self, action: Action) {
         self.saves.input(action);
     }
+    pub fn management_input(&mut self, action: Action) {
+        self.management.input(action);
+        self.selected_at = self.now;
+    }
     pub fn configuration_input(&mut self, action: Action) {
         self.configuration.input(action);
     }
@@ -604,10 +624,10 @@ impl Launcher {
             result => {
                 if let wifi::Edit::Send(request) = result {
                     self.pending = Some(Intent::Wifi(request));
-                } else if let wifi::Edit::Text(edit) = result {
-                    if self.input_edits.len() < 64 {
-                        self.input_edits.push_back(edit);
-                    }
+                } else if let wifi::Edit::Text(edit) = result
+                    && self.input_edits.len() < 64
+                {
+                    self.input_edits.push_back(edit);
                 }
                 self.wifi_revision += 1;
                 self.selected_at = self.now;
@@ -923,5 +943,45 @@ mod tests {
         model.present(&View::default());
         model.release(1800);
         assert!(model.pending.is_none());
+    }
+}
+
+#[cfg(test)]
+mod management_contracts {
+    use super::*;
+    use nearby_menu::management::{Device, Entry, View as ManagementView};
+
+    #[test]
+    fn management_routes_keep_their_parent_focus_and_use_the_launcher_input_path() {
+        for entry in [Entry::Device, Entry::Application] {
+            let mut launcher = Launcher::default();
+            let mut view = View::default();
+            view.launcher.enabled = true;
+            view.launcher.overlay = "设备与好友".into();
+            view.launcher.management = Some(ManagementView {
+                epoch: 1,
+                revision: 1,
+                entry,
+                friends: vec![Device {
+                    id: "b".repeat(64),
+                    name: "小林".into(),
+                    address: String::new(),
+                }],
+                device: Device {
+                    id: "a".repeat(64),
+                    name: "我的掌机".into(),
+                    address: String::new(),
+                },
+                ..Default::default()
+            });
+            launcher.present(&view);
+            assert!(launcher.management.active());
+            let title = launcher.management.snapshot_title();
+            launcher.management_input(Action::Down);
+            launcher.management_input(Action::Confirm);
+            launcher.management_input(Action::Back);
+            assert_eq!(launcher.management.snapshot_title(), title);
+            assert_eq!(launcher.management.selected(), 1);
+        }
     }
 }

@@ -322,6 +322,15 @@ fn live() -> Result<(), String> {
                 .push(launcher::Intent::Saves(request.clone()))
         })
         .map_err(|e| format!("Save effects: {e:?}"))?;
+    let pending = Rc::clone(&intents);
+    launcher
+        .management()
+        .on_effect(move |request: &nearby_menu::management::Request| {
+            pending
+                .borrow_mut()
+                .push(launcher::Intent::Management(request.clone()));
+        })
+        .map_err(|error| format!("Management effects: {error:?}"))?;
     let shelf_layouts = Rc::new(RefCell::new(Vec::new()));
     let pending_layouts = Rc::clone(&shelf_layouts);
     render::subscribe_shelf_layout(&app, move |request| {
@@ -363,35 +372,35 @@ fn live() -> Result<(), String> {
                 Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
             }
         }
-        if let Some(latest) = latest {
-            if view.as_ref() != Some(&latest) {
-                sound.present(&latest, render::now(&app));
-                let frame_start = Instant::now();
-                let full = scene.is_none();
-                if let Some(current_scene) = scene.as_mut() {
-                    render::update(current_scene, &latest)?;
-                    render::tick(&mut app)?;
-                } else {
-                    let next_scene = render::draw(&mut app, &latest)?;
-                    scene = Some(next_scene);
-                }
-                metrics.record(frame_start, full);
-                rendered = true;
-                if let Some(error) = flush_error.borrow_mut().take() {
-                    return Err(format!("Framebuffer pwrite: {error}"));
-                }
-                view = Some(latest);
-                next_frame = frame_start + FRAME_INTERVAL;
-                if !first_frame_sent {
-                    platform::record_init("after_frame", serde_json::json!({}))
-                        .map_err(|error| error.to_string())?;
-                    let mut output = io::stdout().lock();
-                    serde_json::to_writer(&mut output, &serde_json::json!({"event":"frame_ready"}))
-                        .map_err(|error| error.to_string())?;
-                    writeln!(output).map_err(|error| error.to_string())?;
-                    output.flush().map_err(|error| error.to_string())?;
-                    first_frame_sent = true;
-                }
+        if let Some(latest) = latest
+            && view.as_ref() != Some(&latest)
+        {
+            sound.present(&latest, render::now(&app));
+            let frame_start = Instant::now();
+            let full = scene.is_none();
+            if let Some(current_scene) = scene.as_mut() {
+                render::update(current_scene, &latest)?;
+                render::tick(&mut app)?;
+            } else {
+                let next_scene = render::draw(&mut app, &latest)?;
+                scene = Some(next_scene);
+            }
+            metrics.record(frame_start, full);
+            rendered = true;
+            if let Some(error) = flush_error.borrow_mut().take() {
+                return Err(format!("Framebuffer pwrite: {error}"));
+            }
+            view = Some(latest);
+            next_frame = frame_start + FRAME_INTERVAL;
+            if !first_frame_sent {
+                platform::record_init("after_frame", serde_json::json!({}))
+                    .map_err(|error| error.to_string())?;
+                let mut output = io::stdout().lock();
+                serde_json::to_writer(&mut output, &serde_json::json!({"event":"frame_ready"}))
+                    .map_err(|error| error.to_string())?;
+                writeln!(output).map_err(|error| error.to_string())?;
+                output.flush().map_err(|error| error.to_string())?;
+                first_frame_sent = true;
             }
         }
         if scene.is_some() && !rendered && Instant::now() >= next_frame {
@@ -449,6 +458,16 @@ fn live() -> Result<(), String> {
                     writeln!(output).map_err(|e| e.to_string())?;
                     output.flush().map_err(|e| e.to_string())?;
                 }
+                launcher::Intent::Management(request) => {
+                    let mut output = io::stdout().lock();
+                    serde_json::to_writer(
+                        &mut output,
+                        &serde_json::json!({"event":"management","request":request}),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    writeln!(output).map_err(|e| e.to_string())?;
+                    output.flush().map_err(|e| e.to_string())?;
+                }
                 launcher::Intent::Wifi(request) => {
                     let mut output = io::stdout().lock();
                     serde_json::to_writer(
@@ -472,6 +491,16 @@ fn live() -> Result<(), String> {
             }
         }
         for mut action in actions {
+            if launcher.management().active() {
+                if action == model::Action::Theme {
+                    action = model::Action::Auxiliary;
+                }
+                sound.input(action, render::now(&app));
+                let previous = launcher.menu_selection();
+                launcher.management_input(action);
+                sound.focus_changed(previous, launcher.menu_selection(), render::now(&app));
+                continue;
+            }
             if launcher.saves().active() {
                 if action == model::Action::Theme {
                     action = model::Action::Auxiliary;

@@ -33,6 +33,15 @@ fn run(args: &[String]) -> Result<i32> {
             println!("{result}");
             Ok(0)
         }
+        Some("update-install") if args.len() == 2 => {
+            println!("{}", arkos_nearby::installer::install_for_update(&args[1])?);
+            Ok(0)
+        }
+        Some("launcher-continue") if args.len() == 2 => {
+            arkos_nearby::updates::consume(&args[1])?;
+            arkos_nearby::home::continued()?;
+            Ok(0)
+        }
         Some("uninstall") if args.len() == 1 => {
             println!("{}", arkos_nearby::installer::uninstall()?);
             Ok(0)
@@ -56,6 +65,18 @@ fn run(args: &[String]) -> Result<i32> {
         Some("manual") => arkos_nearby::manual::run_manual(),
         Some("launcher") if args.len() == 1 => {
             arkos_nearby::home::launch()?;
+            Ok(0)
+        }
+        Some("launcher") if args.len() == 2 && args[1] == "--standalone" => {
+            arkos_nearby::home::launch_standalone()?;
+            Ok(0)
+        }
+        Some("launcher-standalone") if args.len() == 1 => {
+            arkos_nearby::home::standalone()?;
+            Ok(0)
+        }
+        Some("home-dispatch") if args.len() == 1 => {
+            arkos_nearby::home::dispatch()?;
             Ok(0)
         }
         Some("launcher-game-end") if args.len() == 1 => {

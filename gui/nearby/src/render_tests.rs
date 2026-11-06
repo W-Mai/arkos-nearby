@@ -835,8 +835,8 @@ fn labels_use_backend_text_retention_without_nested_offscreen_caches() {
     app.compose(
         root,
         widgets::caption(
-            || "Nearby".into(),
-            || style::FOREGROUND,
+            "Nearby",
+            style::FOREGROUND,
             12,
             mirui::ui::widgets::TextAlign::Start,
             style::LABEL_LEADING,
@@ -4513,4 +4513,750 @@ fn save_operation_progress_has_one_exact_actor_target_and_close_is_deferred() {
         .launcher()
         .saves_input(crate::model::Action::Back);
     assert!(scene.state.launcher().saves().busy());
+}
+
+#[test]
+fn management_name_uses_framework_composition_and_retires_its_input_session() {
+    use crate::model::Action;
+    use nearby_menu::management::{Device, Operation, View as ManagementView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "设备与好友".into();
+        current.launcher.overlay_kind = "management".into();
+        current.launcher.management = Some(ManagementView {
+            epoch: 10,
+            revision: 1,
+            device: Device {
+                id: "a".repeat(64),
+                name: "我的掌机".into(),
+                address: String::new(),
+            },
+            ..Default::default()
+        });
+        let mut scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let launcher = scene.state.launcher();
+        let manager = launcher.management();
+        let sent = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let output = sent.clone();
+        manager
+            .on_effect(move |request: &nearby_menu::management::Request| {
+                output.borrow_mut().push(request.clone())
+            })
+            .unwrap();
+        launcher.management_input(Action::Confirm);
+        paint_at(&mut app, &scene, 1000);
+        assert!(manager.editing());
+        assert!(launcher.input_session().is_some());
+        for _ in 0..4 {
+            launcher.management_input(Action::Auxiliary);
+        }
+        paint_at(&mut app, &scene, 1200);
+        assert!(
+            manager.text().value().is_empty(),
+            "caret starts at the existing name's end: value={:?}, queued={}, selections={:?}",
+            manager.text().value(),
+            manager.text().edit().is_some(),
+            app.world
+                .query::<mirui::ui::widgets::TextEditing>()
+                .iter()
+                .map(|(_, e)| e.selection())
+                .collect::<Vec<_>>()
+        );
+        let mut clock = 1200;
+        for (input, word) in [("wo", "我"), ("de", "的"), ("zhang", "掌"), ("ji", "机")] {
+            let text = manager.text();
+            for ch in input.chars() {
+                let target = "qwertyuiopasdfghjkl'zxcvbnm"
+                    .chars()
+                    .position(|v| v == ch)
+                    .unwrap();
+                while text.selected() < target {
+                    launcher.management_input(Action::Right);
+                }
+                while text.selected() > target {
+                    launcher.management_input(Action::Left);
+                }
+                launcher.management_input(Action::Confirm);
+            }
+            while text.selected() > 0 {
+                launcher.management_input(Action::Left);
+            }
+            launcher.management_input(Action::Up);
+            let pages = text.candidate_count().div_ceil(text.page_size());
+            let mut matched = false;
+            for _ in 0..pages {
+                if let Some(index) =
+                    (0..text.page_size()).find(|i| text.candidate_label(*i) == word)
+                {
+                    for _ in 0..index {
+                        launcher.management_input(Action::Right);
+                    }
+                    launcher.management_input(Action::Confirm);
+                    matched = true;
+                    break;
+                }
+                launcher.management_input(Action::PageDown);
+            }
+            assert!(matched, "missing {word}");
+            clock += 250;
+            paint_at(&mut app, &scene, clock);
+        }
+        assert_eq!(manager.text().value(), "我的掌机");
+        launcher.management_input(Action::Start);
+        paint_at(&mut app, &scene, clock + 250);
+        assert_eq!(sent.borrow().len(), 1);
+        assert!(matches!(&sent.borrow()[0].operation,Operation::Rename{name} if name=="我的掌机"));
+        assert_eq!(sent.borrow()[0].epoch, 10);
+        current.launcher.management = None;
+        current.launcher.overlay.clear();
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, clock + 500);
+        assert!(launcher.input_session().is_none());
+        assert!(manager.text().edit().is_none());
+    }
+}
+
+#[test]
+fn management_navigation_and_update_progress_keep_framework_anchors() {
+    use crate::launcher::management::Page as ManagementPage;
+    use crate::model::Action;
+    use nearby_menu::management::{
+        Device, Entry, Fact, Operation, Package, Update, UpdatePhase, View as ManagementView,
+    };
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "应用管理".into();
+        current.launcher.overlay_kind = "management".into();
+        current.launcher.management = Some(ManagementView {
+            epoch: 20,
+            revision: 1,
+            entry: Entry::Application,
+            version: "0.11.0".into(),
+            profile: "ArkOS".into(),
+            device: Device {
+                id: "a".repeat(64),
+                name: "我的掌机".into(),
+                address: String::new(),
+            },
+            facts: vec![Fact {
+                label: "安装位置".into(),
+                value: "/opt/arkos-nearby".into(),
+            }],
+            ..Default::default()
+        });
+        let mut scene = draw(&mut app, &current).unwrap();
+        let launcher = scene.state.launcher();
+        let manager = launcher.management();
+        let sent = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = sent.clone();
+        manager
+            .on_effect(move |r: &nearby_menu::management::Request| {
+                sink.borrow_mut().push(r.clone())
+            })
+            .unwrap();
+        let mut clock = 800;
+        let mut capture = |app: &mut TestApp, scene: &Scene, name: &str| {
+            clock += 250;
+            paint_at(app, scene, clock);
+            if let Ok(folder) = std::env::var("NEARBY_MANAGEMENT_CAPTURES") {
+                let folder = std::path::Path::new(&folder);
+                std::fs::create_dir_all(folder).unwrap();
+                let file =
+                    std::fs::File::create(folder.join(format!("{name}-{}.png", size[0]))).unwrap();
+                let mut encoder = png::Encoder::new(file, u32::from(size[0]), u32::from(size[1]));
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .unwrap()
+                    .write_image_data(app.backend.framebuffer().read_pixels().unwrap().bytes())
+                    .unwrap();
+            }
+        };
+        capture(&mut app, &scene, "application");
+        let first = app
+            .world
+            .query::<deck::ActionAnchor>()
+            .iter()
+            .find_map(|(e, a)| {
+                (a.1 == deck::ActionLayout::Management
+                    && a.0 == 0
+                    && !mirui::ui::branch::is_effectively_hidden(&app.world, e))
+                .then(|| app.world.get::<ComputedRect>(e).map(|r| r.0))
+                .flatten()
+            })
+            .unwrap();
+        let summary = app
+            .world
+            .query::<Text>()
+            .iter()
+            .find_map(|(e, t)| {
+                (t.resolve(None).contains("Nearby 0.11.0")
+                    && !mirui::ui::branch::is_effectively_hidden(&app.world, e))
+                .then(|| app.world.get::<ComputedRect>(e).map(|r| r.0))
+                .flatten()
+            })
+            .unwrap();
+        assert!(
+            summary.y + summary.h <= first.y,
+            "summary overlaps first action: {summary:?} {first:?}"
+        );
+        launcher.management_input(Action::Confirm);
+        capture(&mut app, &scene, "version");
+        launcher.management_input(Action::Confirm);
+        capture(&mut app, &scene, "fact");
+        assert_eq!(manager.page(), ManagementPage::Detail);
+        launcher.management_input(Action::Back);
+        launcher.management_input(Action::Back);
+        assert_eq!(manager.selected(), 0);
+        for _ in 0..3 {
+            launcher.management_input(Action::Down);
+        }
+        launcher.management_input(Action::Confirm);
+        capture(&mut app, &scene, "package-loading");
+        assert!(matches!(
+            sent.borrow().last().unwrap().operation,
+            Operation::Browse { .. }
+        ));
+        let state = current.launcher.management.as_mut().unwrap();
+        state.revision = sent.borrow().last().unwrap().sequence;
+        state.packages = vec![Package {
+            key: "/roms".into(),
+            name: "游戏卡".into(),
+            directory: true,
+            size: 0,
+        }];
+        update(&mut scene, &current).unwrap();
+        launcher.management_input(Action::Confirm);
+        capture(&mut app, &scene, "card-loading");
+        let state = current.launcher.management.as_mut().unwrap();
+        state.revision = sent.borrow().last().unwrap().sequence;
+        state.directory = "/roms".into();
+        state.packages = vec![Package {
+            key: "/roms/nearby.tar.gz".into(),
+            name: "nearby.tar.gz".into(),
+            directory: false,
+            size: 16_000_000,
+        }];
+        update(&mut scene, &current).unwrap();
+        capture(&mut app, &scene, "packages");
+        launcher.management_input(Action::Confirm);
+        capture(&mut app, &scene, "package-checking");
+        let state = current.launcher.management.as_mut().unwrap();
+        state.revision = sent.borrow().last().unwrap().sequence;
+        state.update = Some(Update {
+            path: "/roms/nearby.tar.gz".into(),
+            version: "0.11.0".into(),
+            digest: "a".repeat(64),
+            compatible: true,
+            reason: "适配当前设备，校验通过".into(),
+            phase: UpdatePhase::Ready,
+        });
+        update(&mut scene, &current).unwrap();
+        capture(&mut app, &scene, "package-ready");
+        assert_eq!(manager.page(), ManagementPage::Update);
+        launcher.management_input(Action::Confirm);
+        capture(&mut app, &scene, "install-confirm");
+        assert_eq!(manager.selected(), 0);
+        launcher.management_input(Action::Down);
+        launcher.management_input(Action::Confirm);
+        capture(&mut app, &scene, "installing");
+        assert!(manager.busy());
+        for action in [Action::Back, Action::Confirm, Action::Down, Action::Refresh] {
+            launcher.management_input(action);
+        }
+        assert_eq!(manager.page(), ManagementPage::Progress);
+        let target = app
+            .world
+            .query::<actor::ActorFrame>()
+            .iter()
+            .find_map(|(e, _)| app.world.get::<FollowBounds>(e))
+            .unwrap();
+        let anchor = app.world.get::<deck::ActionAnchor>(target.target).unwrap();
+        assert_eq!(anchor.1, deck::ActionLayout::ManagementProgress);
+        assert!(target.transition.is_none());
+        let state = current.launcher.management.as_mut().unwrap();
+        state.revision = sent.borrow().last().unwrap().sequence;
+        state.update.as_mut().unwrap().phase = UpdatePhase::Complete;
+        update(&mut scene, &current).unwrap();
+        capture(&mut app, &scene, "installed");
+        assert!(!manager.busy());
+        launcher.management_input(Action::Confirm);
+        capture(&mut app, &scene, "reopening");
+        assert!(matches!(
+            sent.borrow().last().unwrap().operation,
+            Operation::Close
+        ));
+    }
+}
+
+#[test]
+fn management_rows_keep_icon_slots_and_visual_order_during_navigation() {
+    use crate::model::Action;
+    use nearby_menu::management::{Entry, View as ManagementView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "应用管理".into();
+        current.launcher.overlay_kind = "management".into();
+        current.launcher.management = Some(ManagementView {
+            epoch: 20,
+            revision: 1,
+            entry: Entry::Application,
+            version: "0.11.0".into(),
+            profile: "ArkOS".into(),
+            ..Default::default()
+        });
+        let scene = draw(&mut app, &current).unwrap();
+        let launcher = scene.state.launcher();
+        let manager = launcher.management();
+        let mut clock = 800;
+        paint_at(&mut app, &scene, clock);
+        for action in [
+            Action::Down,
+            Action::Down,
+            Action::Down,
+            Action::Up,
+            Action::Up,
+            Action::Up,
+        ] {
+            launcher.management_input(action);
+            clock += 300;
+            paint_at(&mut app, &scene, clock);
+            let mut rows = vec![];
+            for (entity, anchor) in app.world.query::<deck::ActionAnchor>().iter() {
+                if anchor.1 != deck::ActionLayout::Management
+                    || mirui::ui::branch::is_effectively_hidden(&app.world, entity)
+                {
+                    continue;
+                }
+                let Some(bounds) = app.world.get::<ComputedRect>(entity) else {
+                    continue;
+                };
+                let Some(row) = manager.row(anchor.0) else {
+                    continue;
+                };
+                let descendant = |node| {
+                    selection::contains(entity, node, |e| {
+                        app.world.get::<mirui::ui::Parent>(e).map(|p| p.0)
+                    })
+                };
+                let title = app
+                    .world
+                    .query::<Text>()
+                    .iter()
+                    .find_map(|(e, t)| {
+                        (descendant(e) && t.resolve(None) == row.title)
+                            .then(|| app.world.get::<ComputedRect>(e).map(|r| r.0))
+                            .flatten()
+                    })
+                    .expect("row title");
+                let icon = app
+                    .world
+                    .query::<mirui::ui::widgets::Image>()
+                    .iter()
+                    .find_map(|(e, _)| {
+                        descendant(e)
+                            .then(|| app.world.get::<ComputedRect>(e).map(|r| r.0))
+                            .flatten()
+                    })
+                    .expect("row icon");
+                assert!(
+                    icon.x + icon.w <= title.x,
+                    "{size:?} selected={} row={} icon moved after title: {icon:?} {title:?}",
+                    manager.selected(),
+                    anchor.0
+                );
+                let slot = app.world.get::<mirui::ui::Parent>(entity).unwrap().0;
+                let list = app.world.get::<mirui::ui::Parent>(slot).unwrap().0;
+                let slot_rect = app.world.get::<ComputedRect>(slot).unwrap().0;
+                let list_rect = app.world.get::<ComputedRect>(list).unwrap().0;
+                assert!(
+                    slot_rect.y >= list_rect.y
+                        && slot_rect.y + slot_rect.h <= list_rect.y + list_rect.h,
+                    "{size:?} rows={} row={} clipped {slot_rect:?} in {list_rect:?}",
+                    manager.visible_rows(),
+                    anchor.0
+                );
+                rows.push((anchor.0, bounds.0.y));
+            }
+            rows.sort_by_key(|r| r.0);
+            assert!(
+                rows.windows(2).all(|pair| pair[0].1 < pair[1].1),
+                "row order changed: {rows:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn management_reading_preserves_natural_text_and_clamps_to_measured_content() {
+    use crate::model::Action;
+    use nearby_menu::management::{Entry, View as ManagementView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "应用管理".into();
+        current.launcher.overlay_kind = "management".into();
+        let contents = (0..40)
+            .map(|i| format!("路径 {i:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        current.launcher.management = Some(ManagementView {
+            epoch: 20,
+            revision: 1,
+            entry: Entry::Application,
+            version: "0.11.0".into(),
+            profile: contents.clone(),
+            ..Default::default()
+        });
+        let scene = draw(&mut app, &current).unwrap();
+        let launcher = scene.state.launcher();
+        let manager = launcher.management();
+        paint_at(&mut app, &scene, 800);
+        for action in [Action::Confirm, Action::Down, Action::Down, Action::Confirm] {
+            launcher.management_input(action);
+        }
+        paint_at(&mut app, &scene, 1200);
+        let (text_entity, _) = app
+            .world
+            .query::<Text>()
+            .iter()
+            .find(|(e, t)| {
+                t.resolve(None) == contents
+                    && !mirui::ui::branch::is_effectively_hidden(&app.world, *e)
+                    && app.world.get::<ComputedRect>(*e).is_some()
+            })
+            .expect("detail body");
+        let text = app.world.get::<ComputedRect>(text_entity).unwrap().0;
+        let (scroll_entity, _) = app
+            .world
+            .query::<mirui::input::event::scroll::ScrollOffset>()
+            .iter()
+            .find(|(e, _)| {
+                !mirui::ui::branch::is_effectively_hidden(&app.world, *e)
+                    && selection::contains(*e, text_entity, |node| {
+                        app.world.get::<mirui::ui::Parent>(node).map(|p| p.0)
+                    })
+            })
+            .unwrap();
+        let viewport = app.world.get::<ComputedRect>(scroll_entity).unwrap().0;
+        app.with_widget(reading_geometry_probe::view());
+        app.world.insert(
+            scroll_entity,
+            ReadingGeometryProbe {
+                target: text_entity,
+            },
+        );
+        assert!(
+            text.h >= Fixed::from_int(40 * i32::from(style::TITLE_SIZE)),
+            "{size:?}: paragraph compressed: {text:?}; viewport={viewport:?}"
+        );
+        for _ in 0..300 {
+            launcher.management_input(Action::Down);
+        }
+        paint_at(&mut app, &scene, 1600);
+        let offset = app
+            .world
+            .get::<mirui::input::event::scroll::ScrollOffset>(scroll_entity)
+            .unwrap();
+        assert_eq!(
+            offset.y,
+            (text.h - viewport.h).max(Fixed::ZERO),
+            "bottom must expose final line without scrolling past it"
+        );
+        assert_reading_bottom(&app, text_entity, 0);
+        for _ in 0..300 {
+            launcher.management_input(Action::Up);
+        }
+        paint_at(&mut app, &scene, 2000);
+        assert_eq!(manager.detail_scroll(), Fixed::ZERO);
+    }
+}
+
+#[test]
+fn configuration_rows_keep_wrapped_text_inside_stable_ordered_slots() {
+    use crate::model::Action;
+    use nearby_menu::configuration::{Load, Section};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "游戏设置".into();
+        current.launcher.overlay_kind = "configuration".into();
+        let mut config = crate::launcher::configuration::tests::fixture();
+        if let Load::Ready { document } = &mut config.load {
+            for field in &mut document.fields {
+                if field.section == Section::Core {
+                    field.label = format!("{} 画面与声音同步的配置选项", field.label);
+                }
+            }
+        }
+        current.launcher.configuration = Some(config);
+        let scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let launcher = scene.state.launcher();
+        launcher.configuration_input(Action::Down);
+        launcher.configuration_input(Action::Confirm);
+        let mut clock = 1000;
+        for action in
+            std::iter::repeat_n(Action::Down, 24).chain(std::iter::repeat_n(Action::Up, 24))
+        {
+            launcher.configuration_input(action);
+            clock += 160;
+            paint_at(&mut app, &scene, clock);
+            let mut rows = vec![];
+            for (e, a) in app.world.query::<deck::ActionAnchor>().iter() {
+                if a.1 != deck::ActionLayout::Configuration
+                    || mirui::ui::branch::is_effectively_hidden(&app.world, e)
+                {
+                    continue;
+                }
+                let Some(bounds) = app.world.get::<ComputedRect>(e).map(|r| r.0) else {
+                    continue;
+                };
+                for (child, _) in app.world.query::<Text>().iter() {
+                    if selection::contains(e, child, |n| {
+                        app.world.get::<mirui::ui::Parent>(n).map(|p| p.0)
+                    }) && let Some(text) = app.world.get::<ComputedRect>(child).map(|r| r.0)
+                    {
+                        assert!(
+                            text.y >= bounds.y && text.y + text.h <= bounds.y + bounds.h,
+                            "{size:?} row={} text exceeds row: {text:?} {bounds:?}",
+                            a.0
+                        );
+                    }
+                }
+                rows.push((a.0, bounds.y));
+            }
+            rows.sort_by_key(|r| r.0);
+            assert!(
+                rows.windows(2).all(|p| p[0].1 < p[1].1),
+                "{size:?} row order: {rows:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn save_list_slots_include_inter_row_spacing_and_shadow_in_the_viewport_budget() {
+    use crate::model::Action;
+    for size in [
+        [480, 320],
+        [640, 360],
+        [640, 380],
+        [640, 440],
+        [640, 460],
+        [640, 520],
+    ] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "存档".into();
+        current.launcher.overlay_kind = "saves".into();
+        current.launcher.saves = Some(crate::launcher::saves::tests::fixture());
+        let scene = draw(&mut app, &current).unwrap();
+        let launcher = scene.state.launcher();
+        paint_at(&mut app, &scene, 800);
+        for _ in 0..20 {
+            launcher.saves_input(Action::Down);
+        }
+        paint_at(&mut app, &scene, 1200);
+        for (e, a) in app.world.query::<deck::ActionAnchor>().iter() {
+            if a.1 != deck::ActionLayout::SavesList
+                || mirui::ui::branch::is_effectively_hidden(&app.world, e)
+            {
+                continue;
+            }
+            let Some(bounds) = app.world.get::<ComputedRect>(e).map(|r| r.0) else {
+                continue;
+            };
+            let row = app.world.get::<mirui::ui::Parent>(e).unwrap().0;
+            let parent = app.world.get::<mirui::ui::Parent>(row).unwrap().0;
+            let viewport = app.world.get::<ComputedRect>(parent).unwrap().0;
+            let full = app.world.get::<ComputedRect>(row).unwrap().0;
+            assert!(
+                full.y >= viewport.y && full.y + full.h <= viewport.y + viewport.h,
+                "{size:?} row={} clipped: {full:?}, viewport {viewport:?}, action {bounds:?}",
+                a.0
+            );
+        }
+    }
+}
+
+#[test]
+fn save_reading_keeps_complete_paragraphs_and_uses_framework_scroll_bounds() {
+    use crate::model::Action;
+    use nearby_menu::details::Fact;
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "存档".into();
+        current.launcher.overlay_kind = "saves".into();
+        let content = (0..20)
+            .map(|i| format!("/private/session/path/{i:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut saves = crate::launcher::saves::tests::fixture();
+        saves.document.as_mut().unwrap().session = vec![Fact::new("文件", &content)];
+        current.launcher.saves = Some(saves);
+        let scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let launcher = scene.state.launcher();
+        launcher.saves_input(Action::PageUp);
+        paint_at(&mut app, &scene, 1200);
+        let (text_entity, _) = app
+            .world
+            .query::<Text>()
+            .iter()
+            .find(|(e, t)| {
+                t.resolve(None) == content
+                    && !mirui::ui::branch::is_effectively_hidden(&app.world, *e)
+                    && app.world.get::<ComputedRect>(*e).is_some()
+            })
+            .unwrap();
+        let text = app.world.get::<ComputedRect>(text_entity).unwrap().0;
+        assert!(
+            text.h >= Fixed::from_int(20 * i32::from(style::BODY_SIZE)),
+            "{size:?}: paragraph truncated {text:?}"
+        );
+        let bounds_query = app
+            .world
+            .query::<mirui::input::event::scroll::ScrollBounds>();
+        let (scroll_entity, bounds) = bounds_query
+            .iter()
+            .find(|(e, _)| {
+                selection::contains(*e, text_entity, |n| {
+                    app.world.get::<mirui::ui::Parent>(n).map(|p| p.0)
+                })
+            })
+            .unwrap();
+        let maximum = bounds.max_y;
+        app.with_widget(reading_geometry_probe::view());
+        app.world.insert(
+            scroll_entity,
+            ReadingGeometryProbe {
+                target: text_entity,
+            },
+        );
+        for _ in 0..100 {
+            launcher.saves_input(Action::Down);
+        }
+        paint_at(&mut app, &scene, 1600);
+        let offset = app
+            .world
+            .get::<mirui::input::event::scroll::ScrollOffset>(scroll_entity)
+            .unwrap();
+        assert_eq!(offset.y, maximum, "last paragraph line must be reachable");
+        assert_reading_bottom(&app, text_entity, 4);
+        launcher.saves_input(Action::Up);
+        paint_at(&mut app, &scene, 1800);
+        assert_eq!(
+            app.world
+                .get::<mirui::input::event::scroll::ScrollOffset>(scroll_entity)
+                .unwrap()
+                .y,
+            (maximum - Fixed::from_int(24)).max(Fixed::ZERO)
+        );
+    }
+}
+
+#[component]
+struct ReadingGeometryProbe {
+    #[depends_on(mirui::ui::LayoutGeometry)]
+    target: Entity,
+}
+
+fn assert_reading_bottom(app: &TestApp, text: Entity, trailing: i32) {
+    let output = app
+        .world
+        .resource::<mirui::ui::Outputs<mirui::ui::LayoutGeometry>>()
+        .expect("layout geometry outputs");
+    let geometry = output.get(text).expect("prepared text geometry");
+    let corners = geometry
+        .transform()
+        .apply_rect(geometry.border_rect())
+        .unwrap();
+    let bottom = corners[2].y;
+    let clip = geometry.clip();
+    let slack = clip.y + clip.h - bottom;
+    assert!(
+        slack >= Fixed::ZERO && slack <= Fixed::from_int(trailing + 1),
+        "final text line is outside the painted clip: bottom={bottom:?} clip={clip:?}"
+    );
+}
+
+#[view(component = ReadingGeometryProbe)]
+fn reading_geometry_probe(
+    reader: component!(),
+    outputs: res!(mirui::ui::Outputs<mirui::ui::LayoutGeometry>),
+) {
+    let _ = outputs.get(reader.target);
+}
+
+#[test]
+fn retained_reading_scroll_updates_pixels_without_a_geometry_subscriber() {
+    use crate::model::Action;
+    use nearby_menu::details::Fact;
+    let mut app = app([640, 480]);
+    let mut current = view(Page::Games);
+    current.launcher_shelf = Some(Box::new(current.clone()));
+    current.launcher.enabled = true;
+    current.launcher.overlay = "存档".into();
+    current.launcher.overlay_kind = "saves".into();
+    let mut saved = crate::launcher::saves::tests::fixture();
+    let text = "/run/arkos-nearby-tests/a2-layout-8c7747bf6459/".to_owned()
+        + &(0..100)
+            .map(|i| format!("save-directory-{i:03}"))
+            .collect::<Vec<_>>()
+            .join("/")
+        + "/超级炸弹人5.state0";
+    saved.document.as_mut().unwrap().session = vec![Fact::new("文件", &text)];
+    current.launcher.saves = Some(saved);
+    let target = current.clone();
+    current.launcher.saves = None;
+    current.launcher.management = Some(nearby_menu::management::View {
+        epoch: 9001,
+        revision: 1,
+        entry: nearby_menu::management::Entry::Application,
+        profile: "布局项目\n".repeat(50),
+        ..Default::default()
+    });
+    current.launcher.overlay_kind = "management".into();
+    let mut scene = draw(&mut app, &current).unwrap();
+    paint_at(&mut app, &scene, 100);
+    for a in [Action::Confirm, Action::Down, Action::Down, Action::Confirm] {
+        scene.state.launcher().management_input(a);
+    }
+    paint_at(&mut app, &scene, 800);
+    update(&mut scene, &target).unwrap();
+    paint_at(&mut app, &scene, 1000);
+    let launcher = scene.state.launcher();
+    launcher.saves_input(Action::Right);
+    launcher.saves_input(Action::Right);
+    paint_at(&mut app, &scene, 1800);
+    let before = app
+        .backend
+        .framebuffer()
+        .read_pixels()
+        .unwrap()
+        .bytes()
+        .to_vec();
+    for _ in 0..100 {
+        launcher.saves_input(Action::Down);
+    }
+    paint_at(&mut app, &scene, 2400);
+    assert!(launcher.saves().reading_offset() > Fixed::ZERO);
+    assert!(
+        before != app.backend.framebuffer().read_pixels().unwrap().bytes(),
+        "scroll changed offset but not painted pixels"
+    );
 }

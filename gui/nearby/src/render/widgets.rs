@@ -13,51 +13,43 @@ pub(super) fn paragraph(align: TextAlign, lines: u16) -> ParagraphStyle {
         align,
         vertical_align: mirui::ui::widgets::text::TextVerticalAlign::Center,
         overflow: TextOverflow::Ellipsis,
-        max_lines: Some(lines),
+        max_lines: (lines != 0).then_some(lines),
         ..Default::default()
     }
 }
 
 #[compose]
-pub(super) fn caption<T, C>(
-    content: T,
-    color: C,
+pub(super) fn caption(
+    content: prop!(String),
+    color: prop!(ColorToken),
     size: u16,
     align: TextAlign,
     leading: i32,
-) -> Entity
-where
-    T: Fn() -> String + 'static,
-    C: Fn() -> ColorToken + 'static,
-{
+) -> Entity {
     ui! {
         text_block (content, color, size, align, leading, 1)
     }
 }
 
 #[compose]
-pub(super) fn text_block<T, C>(
-    content: T,
-    color: C,
+pub(super) fn text_block(
+    content: prop!(String),
+    color: prop!(ColorToken),
     size: u16,
     align: TextAlign,
     leading: i32,
     lines: u16,
-) -> Entity
-where
-    T: Fn() -> String + 'static,
-    C: Fn() -> ColorToken + 'static,
-{
+) -> Entity {
     ui! {
         Text (
-            text: ${ content() },
+            text: ${ content },
             width: Dimension::percent(100),
             height: Dimension::Content,
             min_width: 0,
             min_height: i32::from(size) + leading,
             font: font(size),
             font_size: size,
-            text_color: ${ color() },
+            text_color: ${ color },
             paragraph: paragraph(align, lines),
             clip_children: true
         ) [
@@ -70,7 +62,7 @@ where
 pub(super) fn label(value: &str, size: u16, color: ColorToken, align: TextAlign) -> Entity {
     let value = value.to_owned();
     ui! {
-        caption (move || value.clone(), move || color, size, align, LABEL_LEADING)
+        caption (${ value.clone() }, ${ color }, size, align, LABEL_LEADING)
     }
 }
 
@@ -83,7 +75,7 @@ pub(super) fn live_label(
     align: TextAlign,
 ) -> Entity {
     ui! {
-        caption (move || state.text(field), move || color, size, align, LABEL_LEADING)
+        caption (${ state.text(field) }, ${ color }, size, align, LABEL_LEADING)
     }
 }
 
@@ -92,8 +84,8 @@ pub(super) fn action_label(state: model!(DisplayState), size: u16) -> Entity {
     let content = state.clone();
     ui! {
         caption (
-            move || content.text(TextField::HostButton),
-            move || if state.enabled() { ON_ACCENT } else { FOREGROUND },
+            ${ content.text(TextField::HostButton) },
+            ${ if state.enabled() { ON_ACCENT } else { FOREGROUND } },
             size,
             Center,
             LABEL_LEADING
@@ -148,13 +140,10 @@ pub(super) fn control_key(key: &str, metrics: Metrics, primary: bool) -> Entity 
 }
 
 #[compose]
-pub(super) fn control_label<T>(content: T, metrics: Metrics) -> Entity
-where
-    T: Fn() -> String + 'static,
-{
+pub(super) fn control_label(content: prop!(String), metrics: Metrics) -> Entity {
     ui! {
         Text (
-            text: ${ content() },
+            text: ${ content },
             width: Dimension::Content,
             min_width: 0,
             padding: Padding {

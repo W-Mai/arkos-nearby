@@ -328,6 +328,18 @@
     "included": true
   },
   {
+    "name": "filetime",
+    "version": "0.2.29",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/alexcrichton/filetime",
+    "checksum": "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759",
+    "license_files": [
+      "docs/licenses/rust/filetime-0.2.29/LICENSE-APACHE",
+      "docs/licenses/rust/filetime-0.2.29/LICENSE-MIT"
+    ],
+    "included": true
+  },
+  {
     "name": "find-msvc-tools",
     "version": "0.1.13",
     "license": "MIT OR Apache-2.0",
@@ -593,6 +605,42 @@
     "included": true
   },
   {
+    "name": "inputx-fsa",
+    "version": "1.4.0",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/goliajp/inputx",
+    "checksum": "3d0a41cb928b25474611e05c2fd46d4766ed549d733da8bd8390aa0b3be34273",
+    "license_files": [
+      "docs/licenses/rust/inputx-fsa-1.4.0/LICENSE-APACHE",
+      "docs/licenses/rust/inputx-fsa-1.4.0/LICENSE-MIT"
+    ],
+    "included": true
+  },
+  {
+    "name": "inputx-pinyin",
+    "version": "1.4.0",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/goliajp/inputx",
+    "checksum": "8f9e65f356ed708b48b3978ab0c5c40b629df5d2866c6f8b23f5bed8927d5aee",
+    "license_files": [
+      "docs/licenses/rust/inputx-pinyin-1.4.0/LICENSE-APACHE",
+      "docs/licenses/rust/inputx-pinyin-1.4.0/LICENSE-JIEBA",
+      "docs/licenses/rust/inputx-pinyin-1.4.0/LICENSE-MIT",
+      "docs/licenses/rust/inputx-pinyin-1.4.0/LICENSE-PYPINYIN",
+      "docs/licenses/rust/inputx-pinyin-1.4.0/LICENSE-UNICODE"
+    ],
+    "included": true
+  },
+  {
+    "name": "inputx-pinyin-data-core",
+    "version": "1.4.0",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/goliajp/inputx",
+    "checksum": "bd9d4915402a3c3a0d01e305a5328000dfb1497ed53a5ae802eeb0534d178e5f",
+    "license_files": [],
+    "included": true
+  },
+  {
     "name": "itoa",
     "version": "1.0.18",
     "license": "MIT OR Apache-2.0",
@@ -825,34 +873,34 @@
   },
   {
     "name": "mirui",
-    "version": "0.53.0",
+    "version": "0.54.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "180a249e0594a77bdfa009eeec97aa01d03d2dcf075ba48cc7d53bddad6c334a",
+    "checksum": "9ccd31857e9b0de08131140bfbbb784bef61aaf9d2f223d1a4afe8fc822e0aaf",
     "license_files": [
-      "docs/licenses/rust/mirui-0.53.0/LICENSE"
+      "docs/licenses/rust/mirui-0.54.0/LICENSE"
     ],
     "included": true
   },
   {
     "name": "mirui-macros",
-    "version": "0.53.0",
+    "version": "0.54.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "fad12105b90ff024b2ca3e4396f9a7e605802d3508a4f527c21a6c726e477578",
+    "checksum": "bb88cd5b635015129b82306be67dafd50669b269624f684d286a312bdfa61530",
     "license_files": [
-      "docs/licenses/rust/mirui-0.53.0/LICENSE"
+      "docs/licenses/rust/mirui-0.54.0/LICENSE"
     ],
     "included": true
   },
   {
     "name": "mirx",
-    "version": "0.53.0",
+    "version": "0.54.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "8002ec721b7a973848fdd1b4d41951776627a5220ddbe6103eccb19555c4811a",
+    "checksum": "7a41c12c89ba96ce028bd3507c37df97f5a28747d14165da621b1b4456c11ef0",
     "license_files": [
-      "docs/licenses/rust/mirui-0.53.0/LICENSE"
+      "docs/licenses/rust/mirui-0.54.0/LICENSE"
     ],
     "included": true
   },
@@ -1421,6 +1469,18 @@
     "checksum": "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02",
     "license_files": [
       "docs/licenses/rust/synstructure-0.14.0/LICENSE"
+    ],
+    "included": true
+  },
+  {
+    "name": "tar",
+    "version": "0.4.46",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/composefs/tar-rs",
+    "checksum": "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840",
+    "license_files": [
+      "docs/licenses/rust/tar-0.4.46/LICENSE-APACHE",
+      "docs/licenses/rust/tar-0.4.46/LICENSE-MIT"
     ],
     "included": true
   },

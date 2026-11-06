@@ -22,7 +22,7 @@ pub(super) fn loading_span(now: u64) -> (Fixed, Fixed) {
     };
     let tail = sample(STRETCH_MS) * Fixed::from_ratio(4, 5);
     let head = sample(0) * Fixed::from_ratio(4, 5) + Fixed::from_ratio(1, 5);
-    if now / TRAVEL_MS % 2 == 0 {
+    if (now / TRAVEL_MS).is_multiple_of(2) {
         (tail, head)
     } else {
         (Fixed::ONE - head, Fixed::ONE - tail)

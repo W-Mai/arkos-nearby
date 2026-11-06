@@ -225,11 +225,11 @@ fn stamp<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> Stamp {
 impl Controller {
     fn sync_background<B: Surface, F: RendererFactory<B>>(&mut self, app: &App<B, F>) {
         let paused = self.model.paused();
-        if paused != self.paused {
-            if let Some(display) = app.world.resource::<DisplayRuntime>() {
-                display.deck.pause_background(paused);
-                self.paused = paused;
-            }
+        if paused != self.paused
+            && let Some(display) = app.world.resource::<DisplayRuntime>()
+        {
+            display.deck.pause_background(paused);
+            self.paused = paused;
         }
     }
 
@@ -454,7 +454,7 @@ impl Controller {
         }
         self.sync_background(app);
         self.frames += 1;
-        if self.frames % 120 == 0 {
+        if self.frames.is_multiple_of(120) {
             self.log(app, "sample", None);
         }
         Ok(())

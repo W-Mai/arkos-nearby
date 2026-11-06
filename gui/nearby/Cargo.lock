@@ -13,6 +13,7 @@ name = "arkos-nearby-gui"
 version = "0.1.0"
 dependencies = [
  "image",
+ "inputx-pinyin",
  "libc",
  "mirui",
  "mirx",
@@ -392,6 +393,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "inputx-fsa"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d0a41cb928b25474611e05c2fd46d4766ed549d733da8bd8390aa0b3be34273"
+
+[[package]]
+name = "inputx-pinyin"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f9e65f356ed708b48b3978ab0c5c40b629df5d2866c6f8b23f5bed8927d5aee"
+dependencies = [
+ "inputx-fsa",
+ "inputx-pinyin-data-core",
+]
+
+[[package]]
+name = "inputx-pinyin-data-core"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd9d4915402a3c3a0d01e305a5328000dfb1497ed53a5ae802eeb0534d178e5f"
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -583,9 +606,9 @@ dependencies = [
 
 [[package]]
 name = "mirui"
-version = "0.53.0"
+version = "0.54.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "180a249e0594a77bdfa009eeec97aa01d03d2dcf075ba48cc7d53bddad6c334a"
+checksum = "9ccd31857e9b0de08131140bfbbb784bef61aaf9d2f223d1a4afe8fc822e0aaf"
 dependencies = [
  "block2",
  "critical-section",
@@ -618,9 +641,9 @@ dependencies = [
 
 [[package]]
 name = "mirui-macros"
-version = "0.53.0"
+version = "0.54.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fad12105b90ff024b2ca3e4396f9a7e605802d3508a4f527c21a6c726e477578"
+checksum = "bb88cd5b635015129b82306be67dafd50669b269624f684d286a312bdfa61530"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -630,9 +653,9 @@ dependencies = [
 
 [[package]]
 name = "mirx"
-version = "0.53.0"
+version = "0.54.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8002ec721b7a973848fdd1b4d41951776627a5220ddbe6103eccb19555c4811a"
+checksum = "7a41c12c89ba96ce028bd3507c37df97f5a28747d14165da621b1b4456c11ef0"
 dependencies = [
  "ttf-parser",
  "wide",

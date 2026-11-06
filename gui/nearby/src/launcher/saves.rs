@@ -32,18 +32,16 @@ pub struct Manager {
     #[observe]
     pub rows: usize,
     #[observe]
+    pub modal_rows: usize,
+    #[observe]
     pub span_start: Fixed,
     #[observe]
     pub span_end: Fixed,
     #[observe]
     pub preview_size: LayoutSize,
     #[observe]
-    geometry: u64,
-    fact_sizes: Vec<Fixed>,
-    #[observe]
     pub reading_offset: Fixed,
-    reading_viewport: Fixed,
-    fact_gap: i32,
+    reading_limit: Fixed,
     chosen: String,
     return_index: usize,
     return_key: String,
@@ -63,17 +61,15 @@ impl Default for Manager {
             selected: 0,
             age: 0,
             rows: 3,
+            modal_rows: 3,
             span_start: Fixed::ZERO,
             span_end: Fixed::ONE,
             preview_size: LayoutSize {
                 width: Fixed::ZERO,
                 height: Fixed::ZERO,
             },
-            geometry: 0,
-            fact_sizes: vec![],
             reading_offset: Fixed::ZERO,
-            reading_viewport: Fixed::ZERO,
-            fact_gap: 0,
+            reading_limit: Fixed::ZERO,
             chosen: String::new(),
             return_index: 0,
             return_key: String::new(),
@@ -243,17 +239,9 @@ impl Manager {
         if (self.tab == Tab::Session || self.page == Page::Location)
             && matches!(action, Action::Up | Action::Down)
         {
-            let count = self.snapshot_facts().len();
-            let height = (0..count)
-                .map(|i| self.snapshot_fact_extent(i))
-                .fold(Fixed::ZERO, |a, b| a + b)
-                + Fixed::from_int(count.saturating_sub(1) as i32 * self.fact_gap);
             self.reading_offset = (self.reading_offset
                 + Fixed::from_int(if action == Action::Up { -24 } else { 24 }))
-            .clamp(
-                Fixed::ZERO,
-                (height - self.reading_viewport).max(Fixed::ZERO),
-            );
+            .clamp(Fixed::ZERO, self.reading_limit);
             return;
         }
         match action {
@@ -356,18 +344,20 @@ impl Manager {
         }
         self.changed_at = self.now;
         if previous != (self.page, self.tab, self.selected) {
-            self.fact_sizes.clear();
             self.reading_offset = Fixed::ZERO;
-            self.geometry += 1;
+            self.reading_limit = Fixed::ZERO;
         }
         self.revision += 1;
     }
-    pub fn reading_viewport(&mut self, height: Fixed, gap: i32) {
-        self.reading_viewport = height;
-        self.fact_gap = gap;
+    pub fn reading_bounds(&mut self, max_y: Fixed) {
+        self.reading_limit = max_y.max(Fixed::ZERO);
+        self.reading_offset = self.reading_offset.clamp(Fixed::ZERO, self.reading_limit);
     }
     pub fn viewport(&mut self, height: Fixed, extent: i32) {
         self.rows = ((height.to_int() / extent.max(1)).max(1) as usize).min(8);
+    }
+    pub fn modal_viewport(&mut self, height: Fixed, extent: i32) {
+        self.modal_rows = ((height.to_int() / extent.max(1)).max(1) as usize).min(8);
     }
     pub fn resize_preview(&mut self, size: LayoutSize) {
         self.preview_size = size;
@@ -537,6 +527,12 @@ impl Manager {
         }
     }
     fn snapshot_facts(&self) -> Vec<Fact> {
+        self.facts_for_page(self.page)
+    }
+    fn snapshot_preview_facts(&self) -> Vec<Fact> {
+        self.facts_for_page(Page::Browse)
+    }
+    fn facts_for_page(&self, page: Page) -> Vec<Fact> {
         {
             let d = self.view.as_ref().and_then(|v| v.document.as_ref());
             if self.tab == Tab::Session {
@@ -545,7 +541,7 @@ impl Manager {
             let Some(r) = self.record() else {
                 return vec![];
             };
-            if self.page == Page::Location {
+            if page == Page::Location {
                 return vec![
                     Fact::new("文件", &r.path),
                     Fact::new("大小", format!("{} 字节", r.bytes)),
@@ -569,13 +565,11 @@ impl Manager {
                     d.map(|d| d.core.as_str()).unwrap_or_default(),
                 ));
             }
-            if matches!(
-                self.page,
-                Page::Confirm(Operation::Load | Operation::Restore)
-            ) || self.page == Page::Confirm(Operation::Delete) && r.kind != Kind::Backup
+            if matches!(page, Page::Confirm(Operation::Load | Operation::Restore))
+                || page == Page::Confirm(Operation::Delete) && r.kind != Kind::Backup
             {
                 facts.push(Fact::new(
-                    if self.page == Page::Confirm(Operation::Load) || r.slot.is_none() {
+                    if page == Page::Confirm(Operation::Load) || r.slot.is_none() {
                         "原进度"
                     } else {
                         "原存档"
@@ -586,47 +580,12 @@ impl Manager {
             facts
         }
     }
-    pub fn fact_height(&mut self, index: usize, height: Fixed) {
-        if index >= 16 {
-            return;
-        }
-        self.fact_sizes.resize(
-            index.max(self.fact_sizes.len().saturating_sub(1)) + 1,
-            Fixed::ZERO,
-        );
-        if self.fact_sizes[index] != height {
-            self.fact_sizes[index] = height;
-            self.geometry += 1;
-        }
-    }
-    fn snapshot_fact_extent(&self, index: usize) -> Fixed {
-        self.fact_sizes
-            .get(index)
-            .copied()
-            .unwrap_or(Fixed::ZERO)
-            .max(Fixed::from_int(12))
-            + Fixed::from_int(4)
-    }
     #[effects]
     fn take_request(&mut self) -> Option<Request> {
         self.request.take()
     }
 }
 impl ManagerHandle {
-    pub fn fact_extent(&self, index: usize) -> Fixed {
-        self.revision();
-        self.geometry();
-        self.snapshot_fact_extent(index)
-    }
-    pub fn facts_extent(&self, gap: i32) -> Fixed {
-        self.revision();
-        self.geometry();
-        let count = self.facts().len();
-        (0..count)
-            .map(|i| self.snapshot_fact_extent(i))
-            .fold(Fixed::ZERO, |a, b| a + b)
-            + Fixed::from_int(count.saturating_sub(1) as i32 * gap)
-    }
     pub fn heading(&self) -> String {
         self.revision();
         match self.page() {
@@ -656,7 +615,7 @@ impl ManagerHandle {
         self.tab();
         let n = self.count();
         let selected = self.selected();
-        let rows = self.rows();
+        let rows = self.modal_rows();
         let first = selected
             .saturating_sub(rows / 2)
             .min(n.saturating_sub(rows));
@@ -697,6 +656,12 @@ impl ManagerHandle {
         self.tab();
         self.preview_size();
         self.snapshot_image_extent()
+    }
+    pub fn preview_facts(&self) -> Vec<Fact> {
+        self.revision();
+        self.tab();
+        self.selected();
+        self.snapshot_preview_facts()
     }
     pub fn facts(&self) -> Vec<Fact> {
         self.revision();
@@ -861,10 +826,7 @@ mod reading_tests {
         model.sync(Some(&view));
         model.input(Action::PageUp);
         assert_eq!(model.tab, Tab::Session);
-        model.reading_viewport(Fixed::from_int(100), 4);
-        for i in 0..8 {
-            model.fact_height(i, Fixed::from_int(48));
-        }
+        model.reading_bounds(Fixed::from_int(344));
         for _ in 0..40 {
             model.input(Action::Down);
             model.input(Action::Confirm);

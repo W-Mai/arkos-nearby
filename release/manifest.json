@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
-  "gui_version": "0.53.0",
+  "gui_version": "0.54.0",
   "files": [
     {
       "name": "arkos-nearby-gui",
-      "sha256": "61013e457dc3d306f5cdd9fd6e2bec2cc8ac04ded5244fe34f88ee7cc38ad430",
-      "size": 11755408,
+      "sha256": "ad9a61c02f36a9f2fdcdfddc37b12609018d04d9f4084433fccc4b28c01b4deb",
+      "size": 25063736,
       "offset": 0,
       "mode": 493
     },
@@ -16,210 +16,210 @@
       "name": "assets/8188eu.ko",
       "sha256": "e099dcd8f6df0e02749d08c4af201bb1d26ca460a369247630782f0888468965",
       "size": 3022808,
-      "offset": 11755408,
+      "offset": 25063736,
       "mode": 420
     },
     {
       "name": "assets/build.json",
       "sha256": "bd20822cabf2f462ea5a00eafd82423b4c87726563e5774f939c0d5a2262f184",
       "size": 1448,
-      "offset": 14778216,
+      "offset": 28086544,
       "mode": 420
     },
     {
       "name": "assets/home-input-build.json",
       "sha256": "a70db9f0cdefb0b4e7204caf6592f02c703e5230a4ad6ae57f85a333f2e34bed",
       "size": 235,
-      "offset": 14779664,
+      "offset": 28087992,
       "mode": 420
     },
     {
       "name": "assets/home-input.so",
       "sha256": "3ef897c804c4d1cc64df17804def0be09cf2adfaedd7c0ed09f251329cd0deb9",
       "size": 9720,
-      "offset": 14779899,
+      "offset": 28088227,
       "mode": 420
     },
     {
       "name": "assets/netplay-compression-build.json",
       "sha256": "3a656453add071fa65873b9091e6683d20c8daa493aceeb158f773c7cc39e39d",
       "size": 2015,
-      "offset": 14789619,
+      "offset": 28097947,
       "mode": 420
     },
     {
       "name": "assets/netplay-compression.so",
       "sha256": "381d05d1ff68ff5f4eca503965f35a6fe99922e280f4e52620e68b21dca0d633",
       "size": 12576,
-      "offset": 14791634,
+      "offset": 28099962,
       "mode": 420
     },
     {
       "name": "assets/wpa_supplicant",
       "sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e",
       "size": 1743784,
-      "offset": 14804210,
+      "offset": 28112538,
       "mode": 493
     },
     {
       "name": "compat/arm64/libgcc_s.so.1",
       "sha256": "3f81f337c558b6a08924b05dc73b5fcc117d39c11ba306a49f1f973b960adc2c",
       "size": 129480,
-      "offset": 16547994,
+      "offset": 29856322,
       "mode": 420
     },
     {
       "name": "compat/arm64/libstdc++.so.6",
       "sha256": "c116f7a27884c399ed3ab89eed9c0150a8f09ed5990b5a36d2c18ac14c0a3d66",
       "size": 2600552,
-      "offset": 16677474,
+      "offset": 29985802,
       "mode": 420
     },
     {
       "name": "compat/arm64/source.json",
       "sha256": "137f6da3a50ffcff389b61132f963a5049f15c140a148bda7389dd4de781d894",
       "size": 2681,
-      "offset": 19278026,
+      "offset": 32586354,
       "mode": 420
     },
     {
       "name": "core-inspect-build.json",
       "sha256": "6c06588204bfabcae6318e6cbe5374abc3b61bc480f622910bdef237063b7b9e",
       "size": 2275,
-      "offset": 19280707,
+      "offset": 32589035,
       "mode": 420
     },
     {
       "name": "core-inspect32",
       "sha256": "4c44440e83846ba69a5aede1a4637697aea1c88ddb80098cd66ca67faac9ab2d",
       "size": 6748,
-      "offset": 19282982,
+      "offset": 32591310,
       "mode": 493
     },
     {
       "name": "core-inspect64",
       "sha256": "3a9c414c0c5d3ae44b7f1944f4e5c578c9b0eb1ef2041bb6367b402f73e78610",
       "size": 8984,
-      "offset": 19289730,
+      "offset": 32598058,
       "mode": 493
     },
     {
       "name": "core-probe-build.json",
       "sha256": "f30989af922f604b17701d20c2e385a1aedbd2505d5b6a4184cd16692e2d1537",
       "size": 1725,
-      "offset": 19298714,
+      "offset": 32607042,
       "mode": 420
     },
     {
       "name": "core-probe64",
       "sha256": "b19a9387a7e52ea9bcedd0d39a08d55fb48c253f30e28656c9ef921b4d5fbc94",
       "size": 13240,
-      "offset": 19300439,
+      "offset": 32608767,
       "mode": 493
     },
     {
       "name": "cores/nestopia_nearby_libretro.so",
       "sha256": "2c276c3338e7df8105213f7c2008a8e2a0cd307a89f40f19fbde05fc2c84f430",
       "size": 5272832,
-      "offset": 19313679,
+      "offset": 32622007,
       "mode": 420
     },
     {
       "name": "cores/owned-core-build.json",
       "sha256": "1b96b863bdbc980bce8bb61e338360d322ee882498dde38a334479529aa6129c",
       "size": 2572,
-      "offset": 24586511,
+      "offset": 37894839,
       "mode": 420
     },
     {
       "name": "font/OFL.txt",
       "sha256": "6b3abf023bf86aeabb68e66894d194cd9760aea0ddf479bf42464093e40f69f8",
       "size": 18641,
-      "offset": 24589083,
+      "offset": 37897411,
       "mode": 420
     },
     {
       "name": "font/font-source.json",
-      "sha256": "e031612d3d5196e20a03e20312740e64b9224beb408790b90db7efdc584e3e39",
-      "size": 1179,
-      "offset": 24607724,
+      "sha256": "ef983d3d68a7e29e7a26e0ffad294de6eb56abb4ad14744c664193c9f8320ea5",
+      "size": 1247,
+      "offset": 37916052,
       "mode": 420
     },
     {
       "name": "licenses/NOTICE.txt",
-      "sha256": "6755d52aa8688f160422cebfc07bdbd7854814c64ddd246117aa03ef1402a81c",
-      "size": 927,
-      "offset": 24608903,
+      "sha256": "f9dd8977c714c32a682cd27c633a3a9a36ccdfc63b9cd10a26983ab00752b27b",
+      "size": 10116,
+      "offset": 37917299,
       "mode": 420
     },
     {
       "name": "licenses/core-probe-ABI-LICENSE.txt",
       "sha256": "33fde21f1c1da14841c616e1d668435965efea826626a8cfe1f85968d7b9fbb9",
       "size": 1067,
-      "offset": 24609830,
+      "offset": 37927415,
       "mode": 420
     },
     {
       "name": "licenses/driver-COPYING.txt",
       "sha256": "af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7",
       "size": 18693,
-      "offset": 24610897,
+      "offset": 37928482,
       "mode": 420
     },
     {
       "name": "licenses/gcc-runtime-COPYING.txt",
       "sha256": "6e5031de1c9c6a678cad8d05046ae6d43f6131c72bf97506a15ac930b6b44988",
       "size": 38536,
-      "offset": 24629590,
+      "offset": 37947175,
       "mode": 420
     },
     {
       "name": "licenses/nestopia-COPYING.txt",
       "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
       "size": 15122,
-      "offset": 24668126,
+      "offset": 37985711,
       "mode": 420
     },
     {
       "name": "licenses/netplay-compression-COPYING.txt",
       "sha256": "d3891b7bea9affc9738fcedf0d2cac581f743092f35d5fe5c3de65eecd28cec1",
       "size": 2444,
-      "offset": 24683248,
+      "offset": 38000833,
       "mode": 420
     },
     {
       "name": "licenses/pinyin-LICENSE.txt",
       "sha256": "dbee1336f5286b3b26fb6b4a71ab1e8d89f80b4073d9c8d2b2b33c06abc3bcbe",
       "size": 1077,
-      "offset": 24685692,
+      "offset": 38003277,
       "mode": 420
     },
     {
       "name": "licenses/ring-LICENSE.txt",
       "sha256": "5fb6716f68e863ec2fdacbe3aa1d0f16e84e5f29e1ab96182f2b62383a2cef4c",
       "size": 16104,
-      "offset": 24686769,
+      "offset": 38004354,
       "mode": 420
     },
     {
       "name": "licenses/wpa-COPYING.txt",
       "sha256": "b878788aa037728ade1983e7a6c9b425ab077382cc1dc5b48f7bb3771c4aa5c3",
       "size": 1866,
-      "offset": 24702873,
+      "offset": 38020458,
       "mode": 420
     },
     {
       "name": "nearby-gui-build.json",
-      "sha256": "4ed74ef9d9c3fcbd1c8998fa23caa1ebfbd6f4937a61fac5505cac4e91765054",
+      "sha256": "7adb566948736210dc9c6cccd88e365340b756b88d76549cdfd86dd4e9d5f4a6",
       "size": 772,
-      "offset": 24704739,
+      "offset": 38022324,
       "mode": 420
     },
     {
       "name": "release-sources.json",
-      "sha256": "ab145a094158358d093634954ba6e3b4757b0404d366427488d623a479460e88",
+      "sha256": "d23af9eb87ccb22a19dea8e47002424b311cf17ec66e9607d8ad2267cd8ba582",
       "size": 8165,
-      "offset": 24705511,
+      "offset": 38023096,
       "mode": 420
     }
   ]

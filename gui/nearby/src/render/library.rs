@@ -203,11 +203,13 @@ fn search(state: model!(DisplayState), metrics: Metrics) -> Entity {
                 search_icon (16)
                 Column (grow: 1.0, min_width: 0) {
                     caption (
-                        move || {
-                            let query = query_state.query();
-                            if query.is_empty() { "输入游戏名或文件名".into() } else { query }
+                        ${
+                            {
+                                let query = query_state.query();
+                                if query.is_empty() { "输入游戏名或文件名".into() } else { query }
+                            }
                         },
-                        || FOREGROUND,
+                        FOREGROUND,
                         metrics.body,
                         Start,
                         LABEL_LEADING
@@ -263,9 +265,9 @@ fn keycap(state: model!(DisplayState), index: usize, metrics: Metrics) -> Entity
             FocusTarget::fixed(100 + index),
         ] {
             keyboard_keycap (
-                move || KEYS[index].into(),
-                move || selected.selected() == Some(100 + index),
-                || mirui::types::Transform::IDENTITY,
+                ${ KEYS[index].to_owned() },
+                ${ selected.selected() == Some(100 + index) },
+                ${ mirui::types::Transform::IDENTITY },
                 super::keyboard::search_anchor(index),
                 if KEYS[index].len() == 1 { metrics.title } else { metrics.body },
                 metrics
@@ -451,7 +453,7 @@ fn cartridge_source(row: model!(Row), _metrics: Metrics) -> Entity {
                     ) {
                         cover (
                             row.cover_bounds(),
-                            move || platform.platform()
+                            ${ platform.platform() }
                         )
                     }
                     cartridge_grip ()

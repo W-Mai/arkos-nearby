@@ -308,7 +308,6 @@ mod tests {
     use super::*;
     use mirui::core::cache::MaxSize;
     use mirui::core::resource::ResourceManager;
-    use std::rc::Rc;
     use std::task::Context;
     use std::time::{Duration, Instant};
 
@@ -382,14 +381,14 @@ mod tests {
         assert_eq!(a.get().cache_revision, 0);
         wait(|| a.get().cache_revision != 0, &images);
         let first = a.get();
-        assert!(Rc::ptr_eq(&first, &b.get()));
+        assert!(mirui::core::cache::Handle::ptr_eq(&first, &b.get()));
         assert_eq!((first.width(), first.height()), (meta.width, meta.height));
         assert!(!first.transient);
         let revision = first.cache_revision;
         images.reload(&name).unwrap();
         wait(|| a.get().cache_revision != revision, &images);
         assert!(first.cache_revision == revision && a.get().cache_revision != 0);
-        assert!(Rc::ptr_eq(&a.get(), &b.get()));
+        assert!(mirui::core::cache::Handle::ptr_eq(&a.get(), &b.get()));
     }
 
     #[test]

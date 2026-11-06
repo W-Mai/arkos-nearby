@@ -41,7 +41,7 @@ pub(super) fn panel(state: model!(Launcher), metrics: Metrics) -> Entity {
     ui! {
         Column (grow: 1.0, min_height: 0, min_width: 0, row_gap: metrics.gap) {
             if ${ !state.wifi_text(1).is_empty() } {
-                text_block (move || notice.wifi_text(1), || WARNING, BODY_SIZE, Start, 0, 2)
+                text_block (${ notice.wifi_text(1) }, WARNING, BODY_SIZE, Start, 0, 2)
             }
             match ${ state.wifi_page() } {
                 Page :: Password | Page :: Hidden => {
@@ -71,8 +71,8 @@ fn scan_label(state: model!(Launcher)) -> Entity {
     ui! {
         Row (height: 16, shrink: 0.0) {
             text_block (
-                move || if status.wifi_scanning() { "扫描中".into() } else { String::new() },
-                || SECONDARY,
+                ${ if status.wifi_scanning() { "扫描中".into() } else { String::new() } },
+                SECONDARY,
                 BODY_SIZE,
                 Start,
                 0,
@@ -92,8 +92,8 @@ fn options(state: model!(Launcher), metrics: Metrics) -> Entity {
                 }
                 Page :: Off => {
                     text_block (
-                        || "Wi-Fi 已关闭".into(),
-                        || FOREGROUND,
+                        "Wi-Fi 已关闭",
+                        FOREGROUND,
                         TITLE_SIZE,
                         Start,
                         0,
@@ -102,8 +102,8 @@ fn options(state: model!(Launcher), metrics: Metrics) -> Entity {
                 }
                 Page :: Empty => {
                     text_block (
-                        || "还没发现网络".into(),
-                        || FOREGROUND,
+                        "还没发现网络",
+                        FOREGROUND,
                         TITLE_SIZE,
                         Start,
                         0,
@@ -112,8 +112,8 @@ fn options(state: model!(Launcher), metrics: Metrics) -> Entity {
                 }
                 Page :: Busy => {
                     text_block (
-                        || "无线网络正在使用中".into(),
-                        || FOREGROUND,
+                        "无线网络正在使用中",
+                        FOREGROUND,
                         TITLE_SIZE,
                         Start,
                         0,
@@ -121,10 +121,10 @@ fn options(state: model!(Launcher), metrics: Metrics) -> Entity {
                     )
                 }
                 Page :: Forget => {
-                    text_block (move || ssid.wifi_text(0), || FOREGROUND, TITLE_SIZE, Start, 0, 2)
+                    text_block (${ ssid.wifi_text(0) }, FOREGROUND, TITLE_SIZE, Start, 0, 2)
                     text_block (
-                        || "删除此网络保存的连接信息".into(),
-                        || SECONDARY,
+                        "删除此网络保存的连接信息",
+                        SECONDARY,
                         BODY_SIZE,
                         Start,
                         0,
@@ -211,24 +211,26 @@ fn row(state: model!(Launcher), index: usize, list: bool, metrics: Metrics) -> E
                 if list {
                     Column (width: 36, shrink: 0.0, min_height: 12) {
                         text_block (
-                            move || {
-                                badge
-                                    .wifi_row(index)
-                                    .map(|r| {
-                                        if r.connected {
-                                            "已连接"
-                                        } else if r.saved {
-                                            "已保存"
-                                        } else if r.security == nearby_menu::wifi::Security::Open {
-                                            "开放"
-                                        } else {
-                                            ""
-                                        }
-                                            .into()
-                                    })
-                                    .unwrap_or_default()
+                            ${
+                                {
+                                    badge
+                                        .wifi_row(index)
+                                        .map(|r| {
+                                            if r.connected {
+                                                "已连接"
+                                            } else if r.saved {
+                                                "已保存"
+                                            } else if r.security == nearby_menu::wifi::Security::Open {
+                                                "开放"
+                                            } else {
+                                                ""
+                                            }
+                                                .to_owned()
+                                        })
+                                        .unwrap_or_default()
+                                }
                             },
-                            || SECONDARY,
+                            SECONDARY,
                             BODY_SIZE,
                             Start,
                             0,
@@ -348,7 +350,7 @@ fn keyboard(state: model!(Launcher), metrics: Metrics) -> Entity {
                 border_color: ACCENT,
                 min_width: 0
             ) [
-                crate::launcher::text_input::WifiEditor,
+                crate::launcher::text_input::InputEditor,
                 mirui::ui::widgets::TextEditing::new(editor),
             ] {
                 Text (
@@ -395,18 +397,20 @@ fn key(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity {
     let selected = state.clone();
     ui! {
         keycap (
-            move || value.wifi_editor(index),
-            move || selected.menu_selection() == Some(index),
-            move || mirui::types::Transform::translate(
-                Fixed::ZERO,
-                Fixed::from_int(
-                    if state.menu_selection() == Some(index) {
-                        super::motion::hop(state.selection_age(), 2.0)
-                    } else {
-                        0
-                    },
-                ),
-            ),
+            ${ value.wifi_editor(index) },
+            ${ selected.menu_selection() == Some(index) },
+            ${
+                mirui::types::Transform::translate(
+                    Fixed::ZERO,
+                    Fixed::from_int(
+                        if state.menu_selection() == Some(index) {
+                            super::motion::hop(state.selection_age(), 2.0)
+                        } else {
+                            0
+                        },
+                    ),
+                )
+            },
             ActionAnchor(index, ActionLayout::WifiKeyboard),
             if index >= 30 { BODY_SIZE } else { TITLE_SIZE },
             metrics
@@ -429,19 +433,21 @@ fn progress(state: model!(Launcher), metrics: Metrics) -> Entity {
                 padding: Padding::all(metrics.gap * 2)
             ) {
                 text_block (
-                    move || match status.wifi_page() {
-                        Page::Cancelling => "正在取消连接".into(),
-                        Page::Restoring => "恢复原来的网络".into(),
-                        _ => {
-                            [
-                                "连接网络",
-                                "获取 IP 地址",
-                                "连接完成",
-                            ][usize::from(status.wifi_stage())]
-                                .into()
+                    ${
+                        match status.wifi_page() {
+                            Page::Cancelling => "正在取消连接".to_owned(),
+                            Page::Restoring => "恢复原来的网络".into(),
+                            _ => {
+                                [
+                                    "连接网络",
+                                    "获取 IP 地址",
+                                    "连接完成",
+                                ][usize::from(status.wifi_stage())]
+                                    .into()
+                            }
                         }
                     },
-                    || FOREGROUND,
+                    FOREGROUND,
                     TITLE_SIZE,
                     Center,
                     0,
@@ -526,8 +532,8 @@ fn fact(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity {
         ) {
             Column (width: 64, min_height: i32::from(BODY_SIZE), shrink: 0.0) {
                 text_block (
-                    move || ["网络", "IP 地址", "网关", "信号", "安全"][index].into(),
-                    || SECONDARY,
+                    ${ ["网络", "IP 地址", "网关", "信号", "安全"][index].to_owned() },
+                    SECONDARY,
                     BODY_SIZE,
                     Start,
                     0,
@@ -536,20 +542,22 @@ fn fact(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity {
             }
             Column (grow: 1.0, min_width: 0, min_height: i32::from(BODY_SIZE)) {
                 text_block (
-                    move || {
-                        info.wifi_info()
-                            .map(|value| match index {
-                                0 => value.ssid,
-                                1 => value.address,
-                                2 => value.gateway,
-                                3 => format!("{}%", value.signal),
-                                _ => value.security.label().into(),
-                            })
-                            .unwrap_or_else(|| {
-                                if index == 0 { "尚未连接".into() } else { String::new() }
-                            })
+                    ${
+                        {
+                            info.wifi_info()
+                                .map(|value| match index {
+                                    0 => value.ssid,
+                                    1 => value.address,
+                                    2 => value.gateway,
+                                    3 => format!("{}%", value.signal),
+                                    _ => value.security.label().into(),
+                                })
+                                .unwrap_or_else(|| {
+                                    if index == 0 { "尚未连接".into() } else { String::new() }
+                                })
+                        }
                     },
-                    || FOREGROUND,
+                    FOREGROUND,
                     BODY_SIZE,
                     Start,
                     0,
@@ -564,10 +572,8 @@ fn stage_label(state: model!(Launcher), stage: usize) -> Entity {
     let current = state.clone();
     ui! {
         text_block (
-            move || ["连接网络", "获取地址", "已连接"][stage].into(),
-            move || {
-                if usize::from(current.wifi_stage()) == stage { FOREGROUND } else { SECONDARY }
-            },
+            ${ ["连接网络", "获取地址", "已连接"][stage].to_owned() },
+            ${ if usize::from(current.wifi_stage()) == stage { FOREGROUND } else { SECONDARY } },
             BODY_SIZE,
             Start,
             0,
@@ -621,9 +627,9 @@ pub(super) fn hints(state: model!(Launcher), metrics: Metrics) -> Entity {
             if ${ state.wifi_page().pending() } {
                 control_key ("B", metrics, true)
                 control_label (
-                    move || {
+                    ${
                         if cancel.wifi_page() == Page::Connecting { "取消" } else { "恢复中" }
-                            .into()
+                            .to_owned()
                     },
                     metrics
                 )
@@ -631,37 +637,37 @@ pub(super) fn hints(state: model!(Launcher), metrics: Metrics) -> Entity {
                 Row (min_width: 0, column_gap: metrics.gap, align: AlignItems::Center) {
                     control_key ("A", metrics, true)
                     control_label (
-                        move || {
-                            if label.wifi_keyboard() {
-                                "输入"
-                            } else if label.wifi_page() == Page::List {
-                                "选择"
-                            } else {
-                                "确认"
+                        ${
+                            {
+                                if label.wifi_keyboard() {
+                                    "输入"
+                                } else if label.wifi_page() == Page::List {
+                                    "选择"
+                                } else {
+                                    "确认"
+                                }
+                                    .to_owned()
                             }
-                                .into()
                         },
                         metrics
                     )
                     control_key ("B", metrics, false)
-                    control_label (|| "返回".into(), metrics)
+                    control_label ("返回", metrics)
                     match ${ state.wifi_page() } {
                         Page :: List => {
                             control_key ("X", metrics, false)
-                            control_label (|| "刷新".into(), metrics)
+                            control_label ("刷新", metrics)
                             control_key ("Y", metrics, false)
-                            control_label (|| "网络信息".into(), metrics)
+                            control_label ("网络信息", metrics)
                         }
                         Page :: Password | Page :: Hidden => {
                             control_key ("X", metrics, false)
-                            control_label (|| "删除".into(), metrics)
+                            control_label ("删除", metrics)
                             control_key ("Y", metrics, false)
-                            control_label (move || echo.wifi_echo(), metrics)
+                            control_label (${ echo.wifi_echo() }, metrics)
                             control_key ("START", metrics, false)
                             control_label (
-                                move || {
-                                    if submit.wifi_page() == Page::Hidden { "下一步" } else { "连接" }.into()
-                                },
+                                ${ if submit.wifi_page() == Page::Hidden { "下一步" } else { "连接" }.to_owned() },
                                 metrics
                             )
                         }

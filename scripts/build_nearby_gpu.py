@@ -51,7 +51,7 @@ def main():
     if not args.linker.is_file():
         raise ValueError("Pass the existing ARM64 GNU C linker")
     inputs = gui.build_inputs()
-    cargo, environment = gui.toolchain("1.92")
+    cargo, environment = gui.toolchain("1.97.0")
     target = build_paths.target("gpu-interface")
     environment.update(
         CARGO_TARGET_DIR=str(target),

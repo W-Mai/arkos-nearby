@@ -1,17 +1,17 @@
 {
   "schema": 1,
-  "runtime_version": "0.11.0",
+  "runtime_version": "0.12.0",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
   "renderer": {
-    "version": "0.53.0",
-    "mirx_version": "0.53.0",
-    "sha256": "61013e457dc3d306f5cdd9fd6e2bec2cc8ac04ded5244fe34f88ee7cc38ad430",
-    "source_sha256": "914de2c68eb9685133b6cb70264df8c21516e3ca71fc7348635a55fb931ebc08",
-    "cargo_lock_sha256": "a6505d7109a30a6d7208ffd1e9b9f60b6f8a44b9f234dbd7a8f04670ca2081ce",
-    "mirui_crate_sha256": "180a249e0594a77bdfa009eeec97aa01d03d2dcf075ba48cc7d53bddad6c334a",
-    "mirui_macros_crate_sha256": "fad12105b90ff024b2ca3e4396f9a7e605802d3508a4f527c21a6c726e477578",
-    "mirx_crate_sha256": "8002ec721b7a973848fdd1b4d41951776627a5220ddbe6103eccb19555c4811a"
+    "version": "0.54.0",
+    "mirx_version": "0.54.0",
+    "sha256": "ad9a61c02f36a9f2fdcdfddc37b12609018d04d9f4084433fccc4b28c01b4deb",
+    "source_sha256": "ebe978b8d6b098df18a67d6c74a6ab30b1196043d09161a79a9ff61d18bcc3b8",
+    "cargo_lock_sha256": "b7c422c4997e01de0af8dd4e05f59e01bb0dd3c2e818790a7d8cab01ee87118f",
+    "mirui_crate_sha256": "9ccd31857e9b0de08131140bfbbb784bef61aaf9d2f223d1a4afe8fc822e0aaf",
+    "mirui_macros_crate_sha256": "bb88cd5b635015129b82306be67dafd50669b269624f684d286a312bdfa61530",
+    "mirx_crate_sha256": "7a41c12c89ba96ce028bd3507c37df97f5a28747d14165da621b1b4456c11ef0"
   },
   "driver": {
     "sha256": "e099dcd8f6df0e02749d08c4af201bb1d26ca460a369247630782f0888468965",

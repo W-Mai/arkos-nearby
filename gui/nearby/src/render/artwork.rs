@@ -7,14 +7,13 @@ use std::time::{Duration, Instant};
 use std::{cell::Cell, rc::Rc};
 
 use mirui::app::{RendererFactory, plugins::ImageResourcesPlugin};
-use mirui::core::cache::MaxSize;
+use mirui::core::cache::{Handle, MaxSize};
 use mirui::core::model::ModelHandle;
 use mirui::core::reactive::Effect;
 use mirui::core::resource::{ResourceHandle, ResourceManager};
 use mirui::prelude::*;
 use mirui::render::texture::{ColorFormat, Texture, TextureMeta};
 use mirui::surface::Surface;
-use mirui::ui::property::{Property, PropertyChange};
 use mirui::ui::widgets::Image;
 
 use super::consoles::console;
@@ -79,7 +78,7 @@ impl CoverBounds {
         self.source.clone()
     }
 
-    fn resolved(&self) -> Option<Rc<Texture<'static>>> {
+    fn resolved(&self) -> Option<Handle<Texture<'static>>> {
         self.signal.as_ref()?.get();
         let texture = self.resource.as_ref()?.get();
         (texture.cache_revision != 0).then_some(texture)
@@ -87,7 +86,7 @@ impl CoverBounds {
 }
 
 impl CoverBoundsHandle {
-    fn image(&self) -> Option<Rc<Texture<'static>>> {
+    fn image(&self) -> Option<Handle<Texture<'static>>> {
         self.binding_revision();
         self.resolved()
     }
@@ -109,20 +108,6 @@ impl CoverBoundsHandle {
         } else {
             String::new()
         }
-    }
-}
-
-struct ArtworkSource;
-
-impl Property for ArtworkSource {
-    type Value = String;
-
-    fn apply(world: &mut mirui::ecs::World, entity: Entity, value: String) -> PropertyChange {
-        if world.get::<Image>(entity).is_some_and(|image| matches!(&image.src, mirui::ui::widgets::image::ImageSource::Texture(token) if token.as_ref()==value)) {
-            return PropertyChange::Unchanged;
-        }
-        world.insert(entity, Image::new(value));
-        PropertyChange::Visual
     }
 }
 
@@ -469,17 +454,17 @@ pub(super) fn preview(state: model!(DisplayState), metrics: Metrics) -> Entity {
         ) {
             cover (
                 state.cover_bounds(),
-                move || state.selected_platform()
+                ${ state.selected_platform() }
             )
         }
     }
 }
 
 #[compose]
-pub(super) fn cover<P>(bounds: model!(CoverBounds), platform: P) -> Entity
-where
-    P: Fn() -> super::consoles::Platform + 'static,
-{
+pub(super) fn cover(
+    bounds: model!(CoverBounds),
+    platform: prop!(super::consoles::Platform),
+) -> Entity {
     let fallback = bounds.clone();
     ui! {
         Column (
@@ -494,7 +479,7 @@ where
             bitmap (bounds)
             if ${ fallback.token().is_none() } {
                 Column (grow: 1.0, min_height: 0, width: Dimension::percent(100)) {
-                    walk ${ std::iter::once(platform()) } with kind by kind {
+                    walk ${ std::iter::once(platform.get()) } with kind by kind {
                         console (kind)
                     }
                 }
@@ -510,9 +495,9 @@ fn bitmap(bounds: model!(CoverBounds)) -> Entity {
     let height = bounds.clone();
     let horizontal = bounds.clone();
     let vertical = bounds.clone();
-    let image = ui! {
+    ui! {
         Image (
-            src: "",
+            src: ${ source.source() },
             visible: ${ visible.token().is_some() },
             position: Position::Absolute,
             shrink: 0.0,
@@ -528,7 +513,5 @@ fn bitmap(bounds: model!(CoverBounds)) -> Entity {
                     - vertical.size().height.max(vertical.size().width / vertical.aspect())) / 2
             }
         )
-    };
-    cx.bind_property::<ArtworkSource>(image, move || source.source());
-    image
+    }
 }

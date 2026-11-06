@@ -5,6 +5,96 @@ pub const ORIGINAL_SHA: &str = "b277c8d1d5a8ed7f81734a55ba591a94a73c71789908782c
 const LINE: &str = "      \"$esdir/emulationstation\" \"$@\"\n      ret=$?";
 const REPLACEMENT: &str = "      LD_PRELOAD=\"/opt/arkos-nearby/assets/home-input.so${LD_PRELOAD:+:$LD_PRELOAD}\" \"$esdir/emulationstation\" \"$@\" &\n      nearby_es_pid=$!\n      sudo -n /opt/arkos-nearby/arkos-nearby home-listen \"$nearby_es_pid\" &\n      nearby_listener_pid=$!\n      wait \"$nearby_es_pid\"\n      ret=$?\n      kill \"$nearby_listener_pid\" 2>/dev/null || true";
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultHome {
+    #[default]
+    Original,
+    Nearby,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Preference {
+    pub schema: u8,
+    pub default_home: DefaultHome,
+}
+
+impl Default for Preference {
+    fn default() -> Self {
+        Self {
+            schema: 1,
+            default_home: DefaultHome::Original,
+        }
+    }
+}
+
+impl Preference {
+    pub fn load_at(path: &std::path::Path) -> Result<Self> {
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                let value: Self = serde_json::from_slice(&bytes)?;
+                require(value.schema == 1, "Unsupported home preference")?;
+                Ok(value)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn load() -> Result<Self> {
+        Self::load_at(&std::path::Path::new(crate::context::INSTALL).join("launcher-home.json"))
+    }
+
+    pub fn save(home: DefaultHome) -> Result<()> {
+        crate::session::while_idle(|| {
+            crate::system::write(
+                &std::path::Path::new(crate::context::INSTALL).join("launcher-home.json"),
+                &Self {
+                    schema: 1,
+                    default_home: home,
+                },
+            )
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForegroundOrigin {
+    #[default]
+    BorrowedEs,
+    StandaloneUnit,
+    OriginalWrapper,
+}
+
+impl ForegroundOrigin {
+    pub fn unit(self) -> &'static str {
+        match self {
+            Self::OriginalWrapper => "emulationstation.service",
+            Self::BorrowedEs | Self::StandaloneUnit => "arkos-nearby-launcher.service",
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ForegroundLease {
+    #[serde(default)]
+    origin: ForegroundOrigin,
+    definition_sha256: String,
+    #[serde(default)]
+    keep_network: bool,
+}
+
+pub fn foreground_origin() -> Result<ForegroundOrigin> {
+    let path = std::path::Path::new("/run/arkos-nearby-rust/home-owner.json");
+    if !path.try_exists()? {
+        return Ok(ForegroundOrigin::BorrowedEs);
+    }
+    Ok(crate::system::read::<ForegroundLease>(path)?.origin)
+}
+
 #[cfg(any(target_os = "linux", test))]
 fn parent_pid(stat: &[u8]) -> Option<u32> {
     std::str::from_utf8(&stat[stat.iter().rposition(|byte| *byte == b')')? + 1..])
@@ -23,7 +113,10 @@ pub fn patched(original: &[u8]) -> Result<Vec<u8>> {
     )?;
     let text = std::str::from_utf8(original)?;
     require(text.matches(LINE).count() == 1, "Home dispatcher differs")?;
-    Ok(text.replacen(LINE, REPLACEMENT, 1).into_bytes())
+    let (first, rest) = text.split_once('\n').ok_or("Missing launcher header")?;
+    require(first.starts_with("#!"), "Missing launcher interpreter")?;
+    let dispatch = "sudo -n /opt/arkos-nearby/arkos-nearby home-dispatch || true\n";
+    Ok(format!("{first}\n{dispatch}{}", rest.replacen(LINE, REPLACEMENT, 1)).into_bytes())
 }
 
 #[derive(Default)]
@@ -67,6 +160,77 @@ mod device {
     const ES: &str = "emulationstation.service";
     const UNIT: &str = "/etc/systemd/system/emulationstation.service";
     const OWNER: &str = "/run/arkos-nearby-rust/home-owner.json";
+    const RETURN_ORIGINAL: &str = "/run/arkos-nearby-rust/home-return-original.json";
+
+    pub fn dispatch() -> Result<()> {
+        if crate::updates::recover_orphaned()? {
+            resume()?;
+        }
+        if Path::new(RETURN_ORIGINAL).try_exists()? {
+            fs::remove_file(RETURN_ORIGINAL)?;
+            return Ok(());
+        }
+        if Preference::load()?.default_home != DefaultHome::Nearby {
+            return Ok(());
+        }
+        session::identity(false)?;
+        require(
+            !Path::new(OWNER).exists(),
+            "Home interface already owns the display",
+        )?;
+        write(
+            Path::new(OWNER),
+            &ForegroundLease {
+                origin: ForegroundOrigin::OriginalWrapper,
+                definition_sha256: crate::content::digest(Path::new(UNIT))?,
+                keep_network: false,
+            },
+        )?;
+        let result = run_launcher(true);
+        let recovery = resume();
+        result.and(recovery)
+    }
+
+    pub fn launch_standalone() -> Result<()> {
+        session::identity(false)?;
+        if best(&["systemctl", "is-active", ES]) == "active" {
+            return launch();
+        }
+        cmd(&[
+            "systemd-run",
+            "--collect",
+            "--unit=arkos-nearby-launcher",
+            "--property=ExecStopPost=/opt/arkos-nearby/arkos-nearby home-resume",
+            "--property=KillMode=control-group",
+            "--property=TimeoutStopSec=10",
+            session::BINARY,
+            "launcher-standalone",
+        ])?;
+        Ok(())
+    }
+
+    pub fn standalone() -> Result<()> {
+        session::identity(false)?;
+        require(
+            best(&["systemctl", "is-active", ES]) != "active",
+            "Original frontend still owns the display",
+        )?;
+        require(
+            !Path::new(OWNER).exists(),
+            "Home interface already owns the display",
+        )?;
+        write(
+            Path::new(OWNER),
+            &ForegroundLease {
+                origin: ForegroundOrigin::StandaloneUnit,
+                definition_sha256: crate::content::digest(Path::new(UNIT))?,
+                keep_network: false,
+            },
+        )?;
+        let result = run_launcher(true);
+        let recovery = resume();
+        result.and(recovery)
+    }
 
     pub fn activate() -> Result<bool> {
         if best(&["systemctl", "is-active", ES]) != "active" {
@@ -250,10 +414,30 @@ mod device {
         )?;
         write(
             Path::new(OWNER),
-            &json!({"definition_sha256":crate::content::digest(Path::new(UNIT))?}),
+            &ForegroundLease {
+                origin: ForegroundOrigin::BorrowedEs,
+                definition_sha256: crate::content::digest(Path::new(UNIT))?,
+                keep_network: false,
+            },
         )?;
         cmd(&["systemctl", "stop", ES])?;
-        let result = if launcher {
+        let result = run_launcher(launcher);
+        let recovery = resume();
+        result.and(recovery)
+    }
+
+    pub fn continued() -> Result<()> {
+        let result = run_launcher_page(true, true);
+        let recovery = resume();
+        result.and(recovery)
+    }
+    fn run_launcher(launcher: bool) -> Result<()> {
+        run_launcher_page(launcher, false)
+    }
+    fn run_launcher_page(launcher: bool, application: bool) -> Result<()> {
+        let result = if application {
+            crate::launcher::run_application()
+        } else if launcher {
             crate::launcher::run()
         } else {
             crate::manual::run_manual()
@@ -272,11 +456,11 @@ mod device {
                 write(Path::new(OWNER), &owner)?;
             }
         }
-        resume()?;
         result.map(|_| ())
     }
 
     pub fn resume() -> Result<()> {
+        crate::updates::recover_orphaned()?;
         if !Path::new(OWNER).is_file() {
             return Ok(());
         }
@@ -294,14 +478,39 @@ mod device {
                 session::recover(&state.id, "home_exit")?;
             }
         }
-        cmd(&["systemctl", "start", ES])?;
+        let origin = foreground_origin()?;
+        if origin != ForegroundOrigin::OriginalWrapper {
+            write(Path::new(RETURN_ORIGINAL), &json!({"return":"original"}))?;
+            cmd(&["systemctl", "start", ES])?;
+        }
         fs::remove_file(OWNER)?;
         Ok(())
     }
 }
 
 #[cfg(target_os = "linux")]
-pub use device::{activate, launch, listen, open, open_launcher, resume};
+pub use device::{
+    activate, continued, dispatch, launch, launch_standalone, listen, open, open_launcher, resume,
+    standalone,
+};
+
+#[cfg(not(target_os = "linux"))]
+pub fn continued() -> Result<()> {
+    Err("Launcher requires Linux".into())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn dispatch() -> Result<()> {
+    Err("Home dispatch requires Linux".into())
+}
+#[cfg(not(target_os = "linux"))]
+pub fn standalone() -> Result<()> {
+    Err("Launcher requires Linux".into())
+}
+#[cfg(not(target_os = "linux"))]
+pub fn launch_standalone() -> Result<()> {
+    Err("Launcher requires Linux".into())
+}
 
 #[cfg(not(target_os = "linux"))]
 pub fn activate() -> Result<bool> {
@@ -332,6 +541,52 @@ pub fn resume() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn foreground_origins_and_legacy_leases_have_closed_unit_ownership() {
+        let old: ForegroundLease = serde_json::from_value(
+            serde_json::json!({"definition_sha256":"a","keep_network":true}),
+        )
+        .unwrap();
+        assert_eq!(old.origin, ForegroundOrigin::BorrowedEs);
+        assert_eq!(old.origin.unit(), "arkos-nearby-launcher.service");
+        assert_eq!(ForegroundOrigin::StandaloneUnit.unit(), old.origin.unit());
+        assert_eq!(
+            ForegroundOrigin::OriginalWrapper.unit(),
+            "emulationstation.service"
+        );
+        assert!(serde_json::from_str::<ForegroundOrigin>("\"other.service\"").is_err());
+    }
+
+    #[test]
+    fn default_home_requires_a_versioned_explicit_preference() {
+        let root = std::env::temp_dir().join(crate::system::random_id().unwrap());
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("launcher-home.json");
+        assert_eq!(
+            Preference::load_at(&file).unwrap().default_home,
+            DefaultHome::Original
+        );
+        for home in [DefaultHome::Original, DefaultHome::Nearby] {
+            crate::system::write(
+                &file,
+                &Preference {
+                    schema: 1,
+                    default_home: home,
+                },
+            )
+            .unwrap();
+            assert_eq!(Preference::load_at(&file).unwrap().default_home, home);
+        }
+        for bytes in [
+            "{}",
+            "{\"schema\":2,\"default_home\":\"nearby\"}",
+            "{\"schema\":1,\"default_home\":\"command\"}",
+        ] {
+            std::fs::write(&file, bytes).unwrap();
+            assert!(Preference::load_at(&file).is_err());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn process_identity_does_not_depend_on_kernel_children_support() {
         assert_eq!(parent_pid(b"1020 (emulationstatio) S 761 761"), Some(761));

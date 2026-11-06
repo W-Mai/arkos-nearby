@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-06
+
+- Refresh retained detail and session pages when programmatic scrolling changes.
+
+- Keep management icons beside their labels when selection changes.
+- Fit save-list rows and shadows within the available viewport.
+- Show complete save-detail paragraphs with bounded scrolling.
+- Clamp expanded diagnostic scrolling to the rendered content.
+
+- Select unfinished Chinese composition before saving from any keyboard row.
+
+- Run local package installers from the application filesystem.
+
+- Install local release packages from the game card with version checks, progress and application restart.
+- Expand diagnostic values with scrolling and restore directory selection when browsing updates.
+
+- Rename devices with Chinese Pinyin, English and symbol input.
+- Manage paired friends with stable selection and removal confirmation.
+- View application versions, startup settings and installation diagnostics.
+- Expand bundled pixel fonts to 22,050 characters.
+
+- Run the Launcher with `launcher --standalone` when EmulationStation is stopped.
+- Save an explicit default-home preference and return to the original game list after leaving Nearby.
+- Bind system tools to the active Launcher service.
+
 ## [0.11.0] - 2026-11-05
 
 - Configure Wi-Fi from the launcher with scanning, password input, connection status and network recovery.

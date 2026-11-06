@@ -241,6 +241,7 @@ pub struct LauncherView {
     pub retained: bool,
     pub details: Option<nearby_menu::details::View>,
     pub wifi: Option<nearby_menu::wifi::View>,
+    pub management: Option<nearby_menu::management::View>,
     pub configuration: Option<nearby_menu::configuration::View>,
     pub saves: Option<nearby_menu::saves::View>,
 }

@@ -236,24 +236,24 @@ impl Editor {
         let Some(document) = self.document() else {
             return vec![];
         };
-        if let Some(id) = &self.source {
-            if let Some(field) = document.fields.iter().find(|f| &f.id == id) {
-                let scope = self.scope.index();
-                return vec![
-                    Fact::new("设置项", &field.label),
-                    Fact::new("当前值", field.label_for(&self.value(field))),
-                    Fact::new("来源", &field.origins[scope]),
-                    Fact::new(
-                        "写入文件",
-                        if field.targets[scope].is_empty() {
-                            "此范围未启用"
-                        } else {
-                            &field.targets[scope]
-                        },
-                    ),
-                    Fact::new("继承值", field.label_for(&field.inherited[scope])),
-                ];
-            }
+        if let Some(id) = &self.source
+            && let Some(field) = document.fields.iter().find(|f| &f.id == id)
+        {
+            let scope = self.scope.index();
+            return vec![
+                Fact::new("设置项", &field.label),
+                Fact::new("当前值", field.label_for(&self.value(field))),
+                Fact::new("来源", &field.origins[scope]),
+                Fact::new(
+                    "写入文件",
+                    if field.targets[scope].is_empty() {
+                        "此范围未启用"
+                    } else {
+                        &field.targets[scope]
+                    },
+                ),
+                Fact::new("继承值", field.label_for(&field.inherited[scope])),
+            ];
         }
         let mut result = document.saves.clone();
         if let Some(projection) = self

@@ -94,6 +94,15 @@ impl Metrics {
     pub fn row_height(self) -> i32 {
         self.sized(40, 44, 68)
     }
+    pub fn management_row_height(self) -> i32 {
+        i32::from(TITLE_SIZE) + i32::from(BODY_SIZE) * 2 + self.shadow_height() + self.gap
+    }
+    pub fn save_row_height(self) -> i32 {
+        self.wifi_row_extent() + i32::from(BODY_SIZE)
+    }
+    pub fn save_row_extent(self) -> i32 {
+        self.save_row_height() + self.gap
+    }
     pub fn library_row_height(self) -> i32 {
         self.sized(40, 48, 80)
     }

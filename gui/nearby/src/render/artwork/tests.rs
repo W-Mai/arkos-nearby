@@ -188,7 +188,7 @@ fn visible_images_share_framework_values_and_survive_reorder_and_page_return() {
     crate::render::update(&mut scene, &shelf).unwrap();
     pump(&mut app, &control, 900);
     assert_eq!(control.count.get(), 6);
-    assert!(Rc::ptr_eq(
+    assert!(mirui::core::cache::Handle::ptr_eq(
         &image,
         &app.world
             .resource::<ResourceManager<Texture<'static>>>()

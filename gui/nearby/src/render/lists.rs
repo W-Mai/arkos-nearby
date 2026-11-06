@@ -274,8 +274,8 @@ pub(super) fn game_rows(state: model!(DisplayState), metrics: Metrics) -> Entity
                             ]
                         }
                         caption (
-                            move || empty.library_placeholder().title().into(),
-                            || SECONDARY,
+                            ${ empty.library_placeholder().title().to_owned() },
+                            SECONDARY,
                             metrics.body,
                             Center,
                             LABEL_LEADING
@@ -330,8 +330,8 @@ fn row_label(row: model!(Row), size: u16, title: bool, lines: u16) -> Entity {
     let colors = row;
     ui! {
         super::widgets::text_block (
-            move || content.label(title),
-            move || {
+            ${ content.label(title) },
+            ${ {
                 if !colors.available() {
                     DISABLED
                 } else if title {
@@ -339,7 +339,7 @@ fn row_label(row: model!(Row), size: u16, title: bool, lines: u16) -> Entity {
                 } else {
                     SECONDARY
                 }
-            },
+            } },
             size,
             Start,
             ROW_LEADING,
@@ -460,6 +460,6 @@ fn list_row(
 #[compose]
 fn discovery_status(state: model!(DisplayState), metrics: Metrics) -> Entity {
     ui! {
-        caption (move || state.status(), || SECONDARY, metrics.small, Start, LABEL_LEADING)
+        caption (${ state.status() }, SECONDARY, metrics.small, Start, LABEL_LEADING)
     }
 }

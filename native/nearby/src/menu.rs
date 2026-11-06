@@ -24,6 +24,7 @@ enum Event {
     ListLayout(usize, bool),
     Launcher(String, String, f64),
     Wifi(nearby_menu::wifi::Request, f64),
+    Management(nearby_menu::management::Request, f64),
     Configuration(nearby_menu::configuration::Request, f64),
     Saves(nearby_menu::saves::Request, f64),
     FrameReady,
@@ -214,6 +215,7 @@ impl MenuSession {
                     controller.configuration_request(request);
                     None
                 }
+                Ok(Some(Event::Management(request, _))) => controller.management_request(request),
                 Ok(Some(Event::Wifi(request, _))) => {
                     controller.wifi_request(request);
                     None
@@ -509,6 +511,7 @@ impl MenuSession {
                         | Event::ShelfLayout(_, _)
                         | Event::ListLayout(_, _)
                         | Event::Launcher(_, _, _)
+                        | Event::Management(_, _)
                         | Event::Wifi(_, _)
                         | Event::Configuration(_, _)
                         | Event::Saves(_, _),

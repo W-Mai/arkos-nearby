@@ -289,7 +289,7 @@ fn wrapper_path(name: &str) -> String {
         format!("usr/local/bin/{name}")
     }
 }
-fn check_idle_ui() -> Result<()> {
+fn check_idle_ui(update_parent: Option<u32>) -> Result<()> {
     for process in fs::read_dir("/proc")?.filter_map(|entry| entry.ok()) {
         if !process
             .file_name()
@@ -299,19 +299,30 @@ fn check_idle_ui() -> Result<()> {
         {
             continue;
         }
+        if process.file_name().to_string_lossy().parse::<u32>().ok() == update_parent {
+            continue;
+        }
         let Ok(bytes) = fs::read(process.path().join("cmdline")) else {
             continue;
         };
         let args: Vec<_> = bytes.split(|byte| *byte == 0).collect();
         let owned = args
-            .iter()
-            .any(|arg| *arg == crate::session::BINARY.as_bytes());
+            .first()
+            .is_some_and(|arg| *arg == crate::session::BINARY.as_bytes());
         require(
             !(owned
                 && args.iter().any(|arg| {
                     matches!(
                         *arg,
-                        b"menu" | b"manual" | b"worker" | b"game" | b"serve" | b"launcher-open"
+                        b"menu"
+                            | b"manual"
+                            | b"worker"
+                            | b"game"
+                            | b"serve"
+                            | b"launcher-open"
+                            | b"launcher-continue"
+                            | b"launcher-standalone"
+                            | b"home-dispatch"
                     )
                 })),
             "Exit the room menu before installing or uninstalling",
@@ -534,7 +545,16 @@ fn install_at(
     )
 }
 
+pub fn recover_update() -> Result<()> {
+    crate::session::while_idle(|| recover_transaction(&Layout::system()))
+}
+pub fn install_for_update(token: &str) -> Result<Value> {
+    install_with_parent(Some(crate::updates::install_permission(token)?))
+}
 pub fn install() -> Result<Value> {
+    install_with_parent(None)
+}
+fn install_with_parent(update_parent: Option<u32>) -> Result<Value> {
     require(
         unsafe { libc::geteuid() } == 0,
         "Run the installer through sudo or the SD-card launcher",
@@ -542,7 +562,7 @@ pub fn install() -> Result<Value> {
     let facts = crate::compat::detect();
     let device = facts.device()?;
     let bundle = Bundle::embedded()?;
-    check_idle_ui()?;
+    check_idle_ui(update_parent)?;
     let mut result = crate::session::while_idle(|| {
         install_at(
             &Layout::system(),
@@ -611,8 +631,14 @@ fn uninstall_at(layout: &Layout) -> Result<Value> {
 }
 pub fn uninstall() -> Result<Value> {
     crate::session::identity(false)?;
-    check_idle_ui()?;
+    check_idle_ui(None)?;
     crate::session::while_idle(|| uninstall_at(&Layout::system()))
+}
+pub fn installation_status() -> Result<Value> {
+    let layout = Layout::system();
+    let record: Record = read(&layout.file("install.json"))?;
+    verify_record(&record, &layout)?;
+    Ok(json!({"files":record.files.len(),"wrappers":record.wrappers.len()}))
 }
 pub fn release_info() -> Result<Value> {
     let bundle = Bundle::embedded()?;

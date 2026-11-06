@@ -87,6 +87,7 @@ impl Tool {
             tool: self,
             uid,
             unit: format!("arkos-nearby-tool-{}", crate::system::random_id()?),
+            foreground: crate::home::foreground_origin()?,
         })
     }
 }
@@ -121,6 +122,7 @@ pub(super) struct Prepared {
     tool: Tool,
     uid: u32,
     unit: String,
+    foreground: crate::home::ForegroundOrigin,
 }
 
 impl Prepared {
@@ -140,8 +142,8 @@ impl Prepared {
                 "--property=TTYReset=yes",
                 "--property=KillMode=control-group",
                 "--property=TimeoutStopSec=10",
-                "--property=BindsTo=arkos-nearby-launcher.service",
-                "--property=After=arkos-nearby-launcher.service",
+                &format!("--property=BindsTo={}", self.foreground.unit()),
+                &format!("--property=After={}", self.foreground.unit()),
                 "--setenv=HOME=/home/ark",
                 &format!("--setenv=XDG_RUNTIME_DIR=/run/user/{}", self.uid),
                 "--setenv=TERM=linux",
@@ -300,6 +302,7 @@ mod tests {
                 tool,
                 uid: 1000,
                 unit: format!("arkos-nearby-tool-{}", "a".repeat(32)),
+                foreground: crate::home::ForegroundOrigin::BorrowedEs,
             };
             let command = prepared.command();
             let args: Vec<_> = command
@@ -440,6 +443,7 @@ mod tests {
                 configuration: Default::default(),
                 saves: Default::default(),
                 saves_from_configuration: false,
+                management: Default::default(),
                 detail_expanded: false,
                 detail_scroll: 0,
                 changed_tab: false,

@@ -181,6 +181,12 @@ impl Display {
                         .ok()
                         .filter(nearby_menu::configuration::Request::valid)
                         .map(|request| Event::Configuration(request, monotonic()))
+                    } else if value["event"] == "management" {
+                        serde_json::from_value::<nearby_menu::management::Request>(
+                            value["request"].clone(),
+                        )
+                        .ok()
+                        .map(|request| Event::Management(request, monotonic()))
                     } else if value["event"] == "wifi" {
                         serde_json::from_value::<nearby_menu::wifi::Request>(
                             value["request"].clone(),
@@ -292,7 +298,7 @@ impl Display {
     pub(super) fn receive(&self) -> std::result::Result<Option<Event>, mpsc::RecvTimeoutError> {
         let delivery = self.receiver.recv_timeout(Duration::from_millis(20))?;
         if delivery.screen.is_some_and(|screen| screen != self.screen)
-            || matches!(&delivery.event, Event::Input(_, at) | Event::Launcher(_,_,at)|Event::Wifi(_,at)|Event::Configuration(_,at)|Event::Saves(_,at) if *at < self.input_epoch)
+            || matches!(&delivery.event, Event::Input(_, at) | Event::Launcher(_,_,at)|Event::Management(_,at)|Event::Wifi(_,at)|Event::Configuration(_,at)|Event::Saves(_,at) if *at < self.input_epoch)
         {
             return Ok(None);
         }

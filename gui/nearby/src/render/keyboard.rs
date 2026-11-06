@@ -9,23 +9,16 @@ use mirui::ui::widgets::TextAlign::Center;
 
 /// One key surface shared by search and private network input.
 #[compose]
-pub(super) fn keycap<T, S, M>(
-    text: T,
-    selected: S,
-    motion: M,
+pub(super) fn keycap(
+    text: prop!(String),
+    selected: prop!(bool),
+    motion: prop!(Transform),
     anchor: ActionAnchor,
     size: u16,
     metrics: Metrics,
-) -> Entity
-where
-    T: Fn() -> String + 'static,
-    S: Fn() -> bool + Clone + 'static,
-    M: Fn() -> Transform + 'static,
-{
-    let fill = selected.clone();
-    let border = selected.clone();
+) -> Entity {
     ui! {
-        Column (grow: 1.0, min_width: 0, min_height: 0, transform: ${ motion() }) {
+        Column (grow: 1.0, min_width: 0, min_height: 0, transform: ${ motion }) {
             Column (
                 grow: 1.0,
                 min_width: 0,
@@ -36,14 +29,14 @@ where
                     ..Default::default()
                 },
                 border_width: 1,
-                border_color: ${ if border() { FOREGROUND } else { DIVIDER } },
-                bg_color: ${ if fill() { ACCENT } else { PANEL } }
+                border_color: ${ if selected.get() { FOREGROUND } else { DIVIDER } },
+                bg_color: ${ if selected.get() { ACCENT } else { PANEL } }
             ) [
                 anchor,
             ] {
                 caption (
                     text,
-                    move || if selected() { ON_ACCENT } else { FOREGROUND },
+                    ${ if selected.get() { ON_ACCENT } else { FOREGROUND } },
                     size,
                     Center,
                     LABEL_LEADING

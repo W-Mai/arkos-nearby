@@ -18,7 +18,7 @@ fn scroll_config(nodes: query!(Entity, ConfigScroll, ScrollOffset), commands: co
     for (entity, node, offset) in nodes {
         let y = node.state.offset();
         if node.state.active() && offset.y != y {
-            commands.insert(entity, ScrollOffset { x: Fixed::ZERO, y });
+            commands.set::<super::scroll::Position>(entity, y);
         }
     }
 }
@@ -55,7 +55,7 @@ pub(super) fn panel(state: model!(Editor), metrics: Metrics) -> Entity {
                 ]
             }
             if ${ !state.status().is_empty() } {
-                text_block (move || status.status(), || WARNING, BODY_SIZE, Start, 0, 2)
+                text_block (${ status.status() }, WARNING, BODY_SIZE, Start, 0, 2)
             }
             Column (
                 grow: 1.0,
@@ -77,8 +77,8 @@ pub(super) fn panel(state: model!(Editor), metrics: Metrics) -> Entity {
                 }
                 if ${ state.section() == Section::Core && state.ready() && state.count() == 0 } {
                     text_block (
-                        || "此核心未提供可编辑选项".into(),
-                        || SECONDARY,
+                        "此核心未提供可编辑选项",
+                        SECONDARY,
                         TITLE_SIZE,
                         Start,
                         0,
@@ -243,10 +243,10 @@ pub(super) fn hints(state: model!(Editor), metrics: Metrics) -> Entity {
         Row (grow: 1.0, min_width: 0, column_gap: metrics.gap, align: AlignItems::Center) {
             if ${ state.confirmable() } {
                 control_key ("A", metrics, true)
-                control_label (move || confirm.confirm_label(), metrics)
+                control_label (${ confirm.confirm_label() }, metrics)
             }
             control_key ("B", metrics, false)
-            control_label (|| "返回".into(), metrics)
+            control_label ("返回", metrics)
             View (grow: 1.0, min_width: 0)
             if ${
                 (state.dirty() || !state.ready() && !state.loading())
@@ -262,7 +262,7 @@ pub(super) fn hints(state: model!(Editor), metrics: Metrics) -> Entity {
                     )
             } {
                 control_key ("Y", metrics, false)
-                control_label (|| "范围".into(), metrics)
+                control_label ("范围", metrics)
             }
         }
     }
@@ -271,6 +271,6 @@ pub(super) fn hints(state: model!(Editor), metrics: Metrics) -> Entity {
 #[compose]
 fn retry_label(state: model!(Editor), metrics: Metrics) -> Entity {
     ui! {
-        control_label (move || if state.ready() { "保存" } else { "重试" }.into(), metrics)
+        control_label (${ if state.ready() { "保存" } else { "重试" }.to_owned() }, metrics)
     }
 }

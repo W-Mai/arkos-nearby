@@ -1,6 +1,7 @@
 use super::actor::actor;
 use super::configuration::{hints as configuration_hints, panel as configuration_panel};
 use super::deck::{ActionAnchor, ActionLayout, ActorScope, Layer};
+use super::management::{hints as management_hints, panel as management_panel};
 use super::saves::{hints as saves_hints, panel as saves_panel};
 use super::wifi::{heading as wifi_heading, hints as wifi_hints, panel as wifi_panel};
 use super::{
@@ -250,7 +251,10 @@ fn graphical_overlay(
                         }
                         View (height: metrics.rule_height(), bg_color: WARNING, shrink: 0.0)
                         Row (grow: 1.0, min_height: 0, column_gap: metrics.gap * 2) {
-                            if ${ state.saves().active() || state.configuration().active() } {
+                            if ${
+                                state.management().active() || state.saves().active()
+                                    || state.configuration().active()
+                            } {
                                 configuration_or_saves_panel (state, metrics)
                             } else {
                                 Column (grow: 1.0, min_height: 0, min_width: 0) {
@@ -308,7 +312,10 @@ fn graphical_overlay(
                                 wifi_hints (state, metrics)
                             } else {
                                 Row (grow: 1.0, min_width: 0) {
-                                    if ${ state.saves().active() || state.configuration().active() } {
+                                    if ${
+                                        state.management().active() || state.saves().active()
+                                            || state.configuration().active()
+                                    } {
                                         configuration_or_saves_hints (state, metrics)
                                     } else {
                                         Row (
@@ -319,33 +326,35 @@ fn graphical_overlay(
                                         ) {
                                             if ${ state.view().overlay_kind == "controls" && state.view().selected < 2 } {
                                                 control_key ("左右", metrics, true)
-                                                control_label (|| "调节".into(), metrics)
+                                                control_label ("调节", metrics)
                                             } else {
                                                 control_key ("A", metrics, true)
                                                 control_label (
-                                                    move || {
-                                                        if hint.view().details.as_ref().is_some_and(|details| details.expanded) {
-                                                            "收起".into()
-                                                        } else if hint
-                                                            .view()
-                                                            .details
-                                                            .as_ref()
-                                                            .is_some_and(|details| {
-                                                                details.section == nearby_menu::details::Section::Storage
-                                                            })
+                                                    ${
                                                         {
-                                                            "查看详情".into()
-                                                        } else if hint
-                                                            .view()
-                                                            .details
-                                                            .as_ref()
-                                                            .is_some_and(|details| {
-                                                                details.section != nearby_menu::details::Section::Overview
-                                                            })
-                                                        {
-                                                            "查看来源".into()
-                                                        } else {
-                                                            "确认".into()
+                                                            if hint.view().details.as_ref().is_some_and(|details| details.expanded) {
+                                                                "收起".to_owned()
+                                                            } else if hint
+                                                                .view()
+                                                                .details
+                                                                .as_ref()
+                                                                .is_some_and(|details| {
+                                                                    details.section == nearby_menu::details::Section::Storage
+                                                                })
+                                                            {
+                                                                "查看详情".into()
+                                                            } else if hint
+                                                                .view()
+                                                                .details
+                                                                .as_ref()
+                                                                .is_some_and(|details| {
+                                                                    details.section != nearby_menu::details::Section::Overview
+                                                                })
+                                                            {
+                                                                "查看来源".into()
+                                                            } else {
+                                                                "确认".into()
+                                                            }
                                                         }
                                                     },
                                                     metrics
@@ -353,10 +362,10 @@ fn graphical_overlay(
                                             }
                                             if ${ state.detail_expanded() } {
                                                 control_key ("上下", metrics, false)
-                                                control_label (|| "滚动".into(), metrics)
+                                                control_label ("滚动", metrics)
                                             }
                                             control_key ("B", metrics, false)
-                                            control_label (|| "返回".into(), metrics)
+                                            control_label ("返回", metrics)
                                             Column (grow: 1.0, min_width: 0) {
                                                 action_reason (state, metrics)
                                             }
@@ -393,10 +402,7 @@ fn scroll_details(
         }
         let y = component.state.detail_offset();
         if offset.y != y {
-            commands.insert(
-                entity,
-                mirui::input::event::scroll::ScrollOffset { x: Fixed::ZERO, y },
-            );
+            commands.set::<super::scroll::Position>(entity, y);
         }
     }
 }
@@ -859,16 +865,18 @@ fn action_value(
             shrink: 0.0
         ) {
             text_block (
-                move || {
-                    state
-                        .item(index)
-                        .map(|item| {
-                            let local = settings.menu_value(item.action);
-                            if local.is_empty() { item.value } else { local.into() }
-                        })
-                        .unwrap_or_default()
+                ${
+                    {
+                        state
+                            .item(index)
+                            .map(|item| {
+                                let local = settings.menu_value(item.action);
+                                if local.is_empty() { item.value } else { local.into() }
+                            })
+                            .unwrap_or_default()
+                    }
                 },
-                move || action_foreground(&foreground.view(), index),
+                ${ action_foreground(&foreground.view(), index) },
                 metrics.small,
                 Center,
                 LABEL_LEADING,
@@ -882,15 +890,17 @@ fn action_value(
 fn action_reason(state: model!(Launcher), metrics: Metrics) -> Entity {
     ui! {
         text_block (
-            move || {
-                let reason = state
-                    .menu_selection()
-                    .and_then(|selected| state.item(selected))
-                    .map(|item| item.reason().to_owned())
-                    .unwrap_or_default();
-                if reason.is_empty() { state.notice() } else { reason }
+            ${
+                {
+                    let reason = state
+                        .menu_selection()
+                        .and_then(|selected| state.item(selected))
+                        .map(|item| item.reason().to_owned())
+                        .unwrap_or_default();
+                    if reason.is_empty() { state.notice() } else { reason }
+                }
             },
-            || SECONDARY,
+            SECONDARY,
             metrics.small,
             Start,
             LABEL_LEADING,
@@ -918,6 +928,8 @@ enum ActionGlyph {
     Network,
     Muted,
     Core,
+    Device,
+    Package,
     Firmware,
     Storage,
 }
@@ -934,6 +946,8 @@ fn action_glyph(action: crate::model::MenuAction) -> ActionGlyph {
         Brightness => ActionGlyph::Brightness,
         ShowControls | ShowGameSettings => ActionGlyph::Settings,
         ShowTools => ActionGlyph::Toolbox,
+        ShowDevice => ActionGlyph::Device,
+        ShowApplication => ActionGlyph::Package,
         SystemInfo | ShowGameDetails | ExpandDetail => ActionGlyph::Info,
         ShowCoreDetails => ActionGlyph::Core,
         ShowFirmwareDetails => ActionGlyph::Firmware,
@@ -1013,6 +1027,18 @@ fn action_icon(state: model!(Launcher), index: usize) -> Entity {
                     } with icon by icon {
                         Image (
                             src: match icon.0 {
+                                ActionGlyph::Device => {
+                                    path!(
+                                        M 2 1 H 7 V 7 H 2 Z M 0 9 H 9 V 16 H 0 Z M 10 4 H 15 V 10 H 10 Z M 11 12
+                                        H 16 V 16 H 11 Z
+                                    )
+                                }
+                                ActionGlyph::Package => {
+                                    path!(
+                                        M 1 4 L 8 0 L 15 4 V 13 L 8 17 L 1 13 Z M 3 5 V 12 L 7 14 V 7 Z M 9 7 V
+                                        14 L 13 12 V 5 Z
+                                    )
+                                }
                                 ActionGlyph::Core => {
                                     path!(
                                         M 4 4 H 12 V 12 H 4 Z M 5 1 H 7 V 4 H 5 Z M 9 1 H 11 V 4 H 9 Z M 5 12 H 7
@@ -1146,28 +1172,32 @@ fn overlay_label(state: model!(Launcher), index: Option<usize>) -> Entity {
     let text = state.clone();
     ui! {
         text_block (
-            move || {
-                index
-                    .map_or_else(
-                        || {
-                            if text.saves().active() {
-                                text.saves().heading()
-                            } else if text.configuration().active() {
-                                text.configuration().heading()
-                            } else {
-                                text.view().overlay
-                            }
-                        },
-                        |index| {
-                            text.view()
-                                .items
-                                .get(index)
-                                .map(|item| item.name.clone())
-                                .unwrap_or_default()
-                        },
-                    )
+            ${
+                {
+                    index
+                        .map_or_else(
+                            || {
+                                if text.management().active() {
+                                    text.management().title()
+                                } else if text.saves().active() {
+                                    text.saves().heading()
+                                } else if text.configuration().active() {
+                                    text.configuration().heading()
+                                } else {
+                                    text.view().overlay
+                                }
+                            },
+                            |index| {
+                                text.view()
+                                    .items
+                                    .get(index)
+                                    .map(|item| item.name.clone())
+                                    .unwrap_or_default()
+                            },
+                        )
+                }
             },
-            move || { index.map_or(FOREGROUND, |index| action_foreground(&state.view(), index)) },
+            ${ index.map_or(FOREGROUND, |index| action_foreground(&state.view(), index)) },
             TITLE_SIZE,
             if index.is_none() { Start } else { Center },
             LABEL_LEADING,
@@ -1260,10 +1290,16 @@ fn catalog_viewport(state: model!(DisplayState), deck: model!(Deck), metrics: Me
 fn configuration_or_saves_panel(state: model!(Launcher), metrics: Metrics) -> Entity {
     ui! {
         Column (grow: 1.0, min_width: 0, min_height: 0) {
-            if ${ state.saves().active() } {
-                saves_panel (state.saves(), metrics)
+            if ${ state.management().active() } {
+                management_panel (state.management(), metrics)
             } else {
-                configuration_panel (state.configuration(), metrics)
+                Column (grow: 1.0, min_width: 0, min_height: 0) {
+                    if ${ state.saves().active() } {
+                        saves_panel (state.saves(), metrics)
+                    } else {
+                        configuration_panel (state.configuration(), metrics)
+                    }
+                }
             }
         }
     }
@@ -1272,10 +1308,16 @@ fn configuration_or_saves_panel(state: model!(Launcher), metrics: Metrics) -> En
 fn configuration_or_saves_hints(state: model!(Launcher), metrics: Metrics) -> Entity {
     ui! {
         Row (grow: 1.0, min_width: 0, min_height: 0) {
-            if ${ state.saves().active() } {
-                saves_hints (state.saves(), metrics)
+            if ${ state.management().active() } {
+                management_hints (state.management(), metrics)
             } else {
-                configuration_hints (state.configuration(), metrics)
+                Row (grow: 1.0, min_width: 0, min_height: 0) {
+                    if ${ state.saves().active() } {
+                        saves_hints (state.saves(), metrics)
+                    } else {
+                        configuration_hints (state.configuration(), metrics)
+                    }
+                }
             }
         }
     }

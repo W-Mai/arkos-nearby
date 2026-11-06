@@ -1,6 +1,7 @@
 mod configuration;
 mod controls;
 mod details;
+mod management;
 pub mod recipes;
 mod saves;
 mod storage;
@@ -28,6 +29,7 @@ pub enum Intent {
     Exit,
     Power(PowerAction),
     Tool(tools::Tool),
+    Updated(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +60,7 @@ enum Overlay {
     Wifi,
     Configuration,
     Saves,
+    Management,
 }
 
 pub struct Controller {
@@ -74,6 +77,7 @@ pub struct Controller {
     configuration: configuration::Service,
     saves: saves::Service,
     saves_from_configuration: bool,
+    management: management::Service,
     detail_expanded: bool,
     detail_scroll: u32,
     pub changed_tab: bool,
@@ -96,6 +100,7 @@ impl Controller {
             configuration: Default::default(),
             saves: Default::default(),
             saves_from_configuration: false,
+            management: Default::default(),
             detail_expanded: false,
             detail_scroll: 0,
             changed_tab: false,
@@ -184,6 +189,8 @@ impl Controller {
                 MenuItem::available(CycleTheme, "切换主题"),
                 MenuItem::available(ToggleSound, "音效开关"),
                 MenuItem::available(ShowControls, "系统控制"),
+                MenuItem::available(ShowDevice, "设备与好友"),
+                MenuItem::available(ShowApplication, "应用管理"),
                 if Self::retained() {
                     MenuItem::available(ManageNetwork, "管理直连网络")
                 } else {
@@ -194,7 +201,9 @@ impl Controller {
             ],
             Some(Overlay::Controls) => self.controls.items(),
             Some(Overlay::Tools) => self.tools.items(),
-            Some(Overlay::Wifi | Overlay::Configuration | Overlay::Saves) => vec![],
+            Some(Overlay::Wifi | Overlay::Configuration | Overlay::Saves | Overlay::Management) => {
+                vec![]
+            }
             Some(Overlay::Exit) => vec![
                 MenuItem::available(Back, "返回"),
                 MenuItem::available(Exit, "退出并恢复 Wi-Fi"),
@@ -224,6 +233,7 @@ impl Controller {
     pub fn view(&mut self) -> Value {
         self.details.poll();
         self.wifi.poll();
+        self.management.poll();
         self.configuration.poll();
         self.saves.poll();
         if self.overlay == Some(Overlay::Saves) && self.saves.close_after && !self.saves.view.busy {
@@ -240,6 +250,7 @@ impl Controller {
             Some(Overlay::Controls) => "系统控制",
             Some(Overlay::Tools) => "系统工具",
             Some(Overlay::Wifi) => self.wifi.title(),
+            Some(Overlay::Management) => "设备与好友",
             Some(Overlay::Configuration) => "游戏设置",
             Some(Overlay::Saves) => "存档",
             Some(Overlay::Exit) => "返回原系统",
@@ -252,8 +263,12 @@ impl Controller {
             Some(Overlay::Details(Section::Storage)) => "存储空间",
             None => "",
         };
-        view["launcher"] = json!({"enabled":true,"tab":self.tab,"navigation":false,"key":game.as_ref().map(Entry::key).unwrap_or_default(),"netplay":game.as_ref().is_some_and(Entry::netplay),"overlay":title,"overlay_kind":match self.overlay {Some(Overlay::Game)=>"game",Some(Overlay::System)=>"system",Some(Overlay::Controls)=>"controls",Some(Overlay::Tools)=>"tools",Some(Overlay::Exit)=>"exit",Some(Overlay::Power)=>"power",Some(Overlay::Network)=>"network",Some(Overlay::Details(_))=>"details",Some(Overlay::Wifi)=>"wifi",Some(Overlay::Configuration)=>"configuration",Some(Overlay::Saves)=>"saves",None=>""},"items":options,"selected":self.selection,"retained":Self::retained()});
+        view["launcher"] = json!({"enabled":true,"tab":self.tab,"navigation":false,"key":game.as_ref().map(Entry::key).unwrap_or_default(),"netplay":game.as_ref().is_some_and(Entry::netplay),"overlay":title,"overlay_kind":match self.overlay {Some(Overlay::Game)=>"game",Some(Overlay::System)=>"system",Some(Overlay::Controls)=>"controls",Some(Overlay::Tools)=>"tools",Some(Overlay::Exit)=>"exit",Some(Overlay::Power)=>"power",Some(Overlay::Network)=>"network",Some(Overlay::Details(_))=>"details",Some(Overlay::Wifi)=>"wifi",Some(Overlay::Configuration)=>"configuration",Some(Overlay::Saves)=>"saves",Some(Overlay::Management)=>"management",None=>""},"items":options,"selected":self.selection,"retained":Self::retained()});
         view["launcher"]["notice"] = self.status.clone().into();
+        if self.overlay == Some(Overlay::Management) {
+            view["launcher"]["management"] =
+                serde_json::to_value(&self.management.view).unwrap_or_default();
+        }
         if self.overlay == Some(Overlay::Wifi) {
             view["launcher"]["overlay_kind"] = "wifi".into();
             view["launcher"]["wifi"] = serde_json::to_value(&self.wifi.view).unwrap_or_default();
@@ -336,7 +351,10 @@ impl Controller {
     }
     pub fn input(&mut self, action: &str) -> Result<Option<Intent>> {
         self.status.clear();
-        if matches!(self.overlay, Some(Overlay::Configuration | Overlay::Saves)) {
+        if matches!(
+            self.overlay,
+            Some(Overlay::Configuration | Overlay::Saves | Overlay::Management)
+        ) {
             return Ok(None);
         }
         if self.overlay == Some(Overlay::Wifi) {
@@ -519,6 +537,16 @@ impl Controller {
                     Ok(None)
                 }
                 MenuAction::ManageNetwork => Ok(Some(Intent::Network)),
+                MenuAction::ShowDevice | MenuAction::ShowApplication => {
+                    self.management
+                        .open(if selected == MenuAction::ShowApplication {
+                            nearby_menu::management::Entry::Application
+                        } else {
+                            nearby_menu::management::Entry::Device
+                        });
+                    self.show(Overlay::Management);
+                    Ok(None)
+                }
                 MenuAction::ShowControls => {
                     self.controls.refresh();
                     self.show(Overlay::Controls);
@@ -718,6 +746,56 @@ impl Controller {
             .take_launch()
             .map(|id| Intent::SavedPlay(entry, id))
     }
+    pub fn management_request(
+        &mut self,
+        request: nearby_menu::management::Request,
+    ) -> Option<Intent> {
+        if self.overlay != Some(Overlay::Management) {
+            return None;
+        }
+        if self.management.view.busy
+            && self
+                .management
+                .view
+                .update
+                .as_ref()
+                .is_some_and(|u| u.phase == nearby_menu::management::UpdatePhase::Installing)
+        {
+            return None;
+        }
+        if request.epoch != self.management.view.epoch {
+            return None;
+        }
+        if matches!(
+            request.operation,
+            nearby_menu::management::Operation::Standalone
+        ) {
+            self.overlay = None;
+            self.tab(0);
+            return None;
+        }
+        if matches!(request.operation, nearby_menu::management::Operation::Close) {
+            if let Some(token) = self.management.token.take() {
+                return Some(Intent::Updated(token));
+            }
+            self.show(Overlay::System);
+            self.selection = self
+                .options()
+                .iter()
+                .position(|item| {
+                    item.action
+                        == if self.management.view.entry == nearby_menu::management::Entry::Device {
+                            MenuAction::ShowDevice
+                        } else {
+                            MenuAction::ShowApplication
+                        }
+                })
+                .unwrap_or(0);
+        } else {
+            self.management.request(request);
+        }
+        None
+    }
     pub fn wifi_request(&mut self, request: nearby_menu::wifi::Request) {
         if self.overlay == Some(Overlay::Wifi) {
             self.wifi.credentials(request);
@@ -742,8 +820,20 @@ impl Controller {
 }
 
 pub fn run() -> Result<i32> {
+    run_page(false)
+}
+pub fn run_application() -> Result<i32> {
+    run_page(true)
+}
+fn run_page(application: bool) -> Result<i32> {
     crate::session::identity(false)?;
     let mut controller = Controller::new()?;
+    if application {
+        controller.overlay = Some(Overlay::Management);
+        controller
+            .management
+            .open(nearby_menu::management::Entry::Application);
+    }
     let mut display = None;
     loop {
         if display.is_none() {
@@ -841,6 +931,10 @@ pub fn run() -> Result<i32> {
                         )?;
                         controller.status = format!("未能完成{}，请重试或返回", tool.name());
                     }
+                }
+                Intent::Updated(token) => {
+                    drop(display.take());
+                    crate::updates::restart(&token)?;
                 }
                 Intent::Exit | Intent::Power(_) => {
                     display
@@ -1052,6 +1146,7 @@ mod menu_tests {
             configuration: Default::default(),
             saves: Default::default(),
             saves_from_configuration: false,
+            management: Default::default(),
             detail_expanded: false,
             detail_scroll: 0,
             changed_tab: false,
@@ -1134,6 +1229,7 @@ mod menu_tests {
                 configuration: Default::default(),
                 saves: Default::default(),
                 saves_from_configuration: false,
+                management: Default::default(),
                 detail_expanded: false,
                 detail_scroll: 0,
                 changed_tab: false,
@@ -1172,6 +1268,7 @@ mod menu_tests {
                 configuration: Default::default(),
                 saves: Default::default(),
                 saves_from_configuration: false,
+                management: Default::default(),
                 detail_expanded: false,
                 detail_scroll: 0,
                 changed_tab: false,

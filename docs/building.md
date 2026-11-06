@@ -4,14 +4,14 @@
 
 源码包含运行程序、GUI、核心查询器、联机压缩辅助库和 Nestopia 状态恢复补丁。构建资产与源码版本配套，归档文件名和 SHA-256 见 [assets.json](../release/assets.json)，嵌入文件清单见 [manifest.json](../release/manifest.json)。发行标签对应的构建资产和上游源码可从 [GitHub Releases](https://github.com/W-Mai/arkos-nearby/releases) 获取，组件来源见 [第三方组件](third-party.md)。
 
-需要 Python 3.11+、Rust 1.92.0、ARM64 musl 标准库、rustfmt、clippy、clang、llvm-ar 和 Ruff。宿主可以是 Linux 或 macOS；交叉构建使用 Rust 自带的 rust-lld。先准备这些工具，再执行下面的构建命令。
+需要 Python 3.11+、Rust 1.97.0（界面）和 1.92.0（运行程序）、ARM64 musl 标准库、rustfmt、clippy、clang、llvm-ar 和 Ruff。宿主可以是 Linux 或 macOS；交叉构建使用 Rust 自带的 rust-lld。先准备这些工具，再执行下面的构建命令。
 
 ## 准备
 
 ```sh
-python3 scripts/build.py prepare /path/to/arkos-nearby-0.11.0-build-assets.tar.gz
+python3 scripts/build.py prepare /path/to/arkos-nearby-0.12.0-build-assets.tar.gz
 cargo +1.92.0 fetch --locked --manifest-path native/nearby/Cargo.toml --target aarch64-unknown-linux-musl
-cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarch64-unknown-linux-musl
+cargo +1.97.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 ```
 
 `fetch` 是显式联网准备。之后构建和检查使用 `--locked --offline`。配置已有的 clang 与 llvm-ar：
@@ -20,7 +20,7 @@ cargo +1.92.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarc
 CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path/to/llvm-ar python3 scripts/build.py build
 ```
 
-输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.53.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
+输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.54.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
 
 GUI 通过 `scripts/build_nearby_gui.py` 构建和检查，直接使用 Cargo.lock 锁定的 registry 包。构建记录包含 mirui、mirui-macros、mirx 的 crate 校验和、应用源码摘要和实际锁文件摘要。页面由 PageView 挂载和释放，焦点框通过 FollowBounds 与共享动画调度跟随目标。灰度位图字体的采样外缘使用 PaintInflate 计入重绘覆盖。源码、Clippy、测试和 ARM64 构建使用同一份未修改的框架包。
 
@@ -46,7 +46,7 @@ CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path
 
 ## 界面截图
 
-界面使用 Fusion Pixel 简体中文像素字体，正文为 12px，标题为 24px。两个字库覆盖 `gui/nearby/assets/nearby-menu-charset.txt` 中的 3856 个字符。字体来源、转换输入和输出摘要见 `font-source.json`，字体及其衍生来源许可证合并保存在 `OFL.txt`。
+界面使用 Fusion Pixel 简体中文像素字体，正文为 12px，标题为 24px。两个字库覆盖 `gui/nearby/assets/nearby-menu-charset.txt` 中的 22,050 个字符。字体来源、转换输入和输出摘要见 `font-source.json`，字体及其衍生来源许可证合并保存在 `OFL.txt`。
 
 重新生成字库时，将来源记录中的 WOFF 解码为 OpenType 文件，使用 ICU 0.11.1 执行 `icu bake-font nearby-pixel.otf --charset-file gui/nearby/assets/nearby-menu-charset.txt --size 12 --bit-depth 1 --format gray -O /tmp/nearby-font`；将字号改为 24 生成标题字库。将产物分别命名为 `nearby-menu-12.mirx` 和 `nearby-title-24.mirx`，并更新来源记录中的摘要与大小。
 

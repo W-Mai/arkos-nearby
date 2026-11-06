@@ -105,7 +105,15 @@ pub(super) fn follow(
     });
     let (selection, action_layout) = if layer == Layer::Actions {
         let menu = runtime.state.launcher().view();
-        let layout = if let Some(wifi) = &menu.wifi {
+        let layout = if menu.management.is_some() {
+            if runtime.state.launcher().management().progressing()
+                && runtime.state.launcher().management().busy()
+            {
+                ActionLayout::ManagementProgress
+            } else {
+                ActionLayout::Management
+            }
+        } else if let Some(wifi) = &menu.wifi {
             if wifi.page.keyboard() {
                 ActionLayout::WifiKeyboard
             } else if wifi.page.pending() {
@@ -140,7 +148,9 @@ pub(super) fn follow(
         (
             if matches!(
                 layout,
-                ActionLayout::WifiProgress | ActionLayout::SavesProgress
+                ActionLayout::WifiProgress
+                    | ActionLayout::SavesProgress
+                    | ActionLayout::ManagementProgress
             ) {
                 Some(0)
             } else {
@@ -151,9 +161,19 @@ pub(super) fn follow(
     } else {
         (state.selected(), ActionLayout::Grid)
     };
-    let target = if layer == Layer::Actions && runtime.state.launcher().detail_expanded() {
+    let target = if layer == Layer::Actions
+        && (runtime.state.launcher().detail_expanded()
+            || (runtime.state.launcher().management().active()
+                && runtime.state.launcher().management().reading()))
+    {
         scopes.iter().find_map(|(entity, scope)| {
-            let active = matches!(scope, ActorScope::Reading);
+            let active = if runtime.state.launcher().management().active()
+                && runtime.state.launcher().management().reading()
+            {
+                matches!(scope, ActorScope::ManagementReading)
+            } else {
+                matches!(scope, ActorScope::Reading)
+            };
             (active && inside(*entity)).then_some(*entity)
         })
     } else {
@@ -180,7 +200,9 @@ pub(super) fn follow(
                     entity,
                     if matches!(
                         action_layout,
-                        ActionLayout::WifiProgress | ActionLayout::SavesProgress
+                        ActionLayout::WifiProgress
+                            | ActionLayout::SavesProgress
+                            | ActionLayout::ManagementProgress
                     ) {
                         FollowBounds::new(target)
                     } else {

@@ -11,24 +11,44 @@ use mirui::ui::widgets::{
 };
 use nearby_menu::saves::Tab;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Facts {
+    Preview,
+    Panel,
+    Reading,
+}
+
+fn fact_values(
+    state: &crate::launcher::saves::ManagerHandle,
+    context: Facts,
+) -> Vec<nearby_menu::details::Fact> {
+    if context == Facts::Preview {
+        state.preview_facts()
+    } else {
+        state.facts()
+    }
+}
+
 #[compose]
 pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
     let modal_layout = ActionLayout::SavesModal;
     let list_layout = ActionLayout::SavesList;
+    let preview_facts = Facts::Preview;
+    let panel_facts = Facts::Panel;
     let identity = state.clone();
     let status = state.clone();
     let notice = state.clone();
     let failure = state.clone();
     ui! {
         Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: metrics.gap) {
-            text_block (move || identity.identity(), || SECONDARY, BODY_SIZE, Start, 0, 1)
+            text_block (${ identity.identity() }, SECONDARY, BODY_SIZE, Start, 0, 1)
             Row (height: 24, shrink: 0.0, column_gap: metrics.gap) {
                 walk 0_usize..3 with index {
                     tab (state, index, metrics)
                 }
             }
             if ${ !state.busy() && !state.modal() && !state.status().is_empty() } {
-                text_block (move || notice.status(), || ACCENT, BODY_SIZE, Start, 0, 1)
+                text_block (${ notice.status() }, ACCENT, BODY_SIZE, Start, 0, 1)
             }
             if ${ state.busy() } {
                 Column (
@@ -38,7 +58,7 @@ pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
                     justify: JustifyContent::Center,
                     row_gap: metrics.gap * 3
                 ) {
-                    text_block (move || status.status(), || FOREGROUND, TITLE_SIZE, Center, 0, 2)
+                    text_block (${ status.status() }, FOREGROUND, TITLE_SIZE, Center, 0, 2)
                     View (height: 8, bg_color: PANEL, container: true) {
                         View (
                             position: Position::Absolute,
@@ -61,10 +81,16 @@ pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
                 }
             } else {
                 Column (grow: 1.0, min_width: 0, min_height: 0, container: true) {
-                    Row (grow: 1.0, min_height: 0, min_width: 0, column_gap: metrics.gap * 2) {
+                    Row (
+                        grow: 1.0,
+                        min_height: 0,
+                        min_width: 0,
+                        column_gap: metrics.gap * 2,
+                        clip_children: true
+                    ) {
                         if ${ state.tab() == Tab::Session } {
                             Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: metrics.gap) {
-                                reading (state, metrics)
+                                reading (state, metrics, false)
                                 View (height: 2, width: 2) [
                                     ActionAnchor(0, ActionLayout::SavesList),
                                 ]
@@ -78,12 +104,18 @@ pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
                                 clip_children: true
                             ) {
                                 walk ${ state.list_window() } with index by index {
-                                    row (state, index, metrics, list_layout)
+                                    row (state, index, metrics, list_layout, false)
                                 }
-                            } on SizeChanged { state.viewport(event.new.height, metrics.wifi_row_extent() + 14); }
+                            } on SizeChanged {
+                                state
+                                    .viewport(
+                                        event.new.height + Fixed::from_int(metrics.gap),
+                                        metrics.save_row_extent(),
+                                    );
+                            }
                             Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: metrics.gap) {
                                 preview (state, metrics)
-                                facts (state, metrics)
+                                facts (state, metrics, preview_facts)
                             }
                         }
                     }
@@ -117,8 +149,14 @@ pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
                                         row_gap: metrics.gap
                                     ) {
                                         walk ${ state.window() } with index by index {
-                                            row (state, index, metrics, modal_layout)
+                                            row (state, index, metrics, modal_layout, false)
                                         }
+                                    } on SizeChanged {
+                                        state
+                                            .modal_viewport(
+                                                event.new.height + Fixed::from_int(metrics.gap),
+                                                metrics.save_row_extent(),
+                                            );
                                     }
                                 } else {
                                     Column (
@@ -129,8 +167,8 @@ pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
                                     ) {
                                         if ${ state.page() == Page::Room } {
                                             text_block (
-                                                || "退出房间后可管理单机存档".into(),
-                                                || FOREGROUND,
+                                                "退出房间后可管理单机存档",
+                                                FOREGROUND,
                                                 TITLE_SIZE,
                                                 Start,
                                                 0,
@@ -139,8 +177,8 @@ pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
                                         }
                                         if ${ state.page() == Page::Failure } {
                                             text_block (
-                                                move || failure.status(),
-                                                || WARNING,
+                                                ${ failure.status() },
+                                                WARNING,
                                                 BODY_SIZE,
                                                 Start,
                                                 0,
@@ -149,20 +187,19 @@ pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
                                         }
                                         Column (grow: 1.0, min_height: 0, min_width: 0) {
                                             if ${ state.page() == Page::Location } {
-                                                reading (state, metrics)
+                                                reading (state, metrics, true)
                                             } else {
-                                                facts (state, metrics)
+                                                facts (state, metrics, panel_facts)
                                             }
                                         }
-                                        View (grow: 1.0, min_height: 0)
                                         Row (
-                                            height: metrics.wifi_row_extent() + 12,
+                                            height: metrics.save_row_height(),
                                             min_width: 0,
                                             shrink: 0.0,
                                             column_gap: metrics.gap
                                         ) {
                                             walk ${ 0_usize..state.count() } with index by index {
-                                                row (state, index, metrics, modal_layout)
+                                                row (state, index, metrics, modal_layout, true)
                                             }
                                         }
                                     }
@@ -210,12 +247,23 @@ fn tab(state: model!(Manager), index: usize, _metrics: Metrics) -> Entity {
     }
 }
 #[compose]
-fn row(state: model!(Manager), index: usize, metrics: Metrics, layout: ActionLayout) -> Entity {
+fn row(
+    state: model!(Manager),
+    index: usize,
+    metrics: Metrics,
+    layout: ActionLayout,
+    horizontal: bool,
+) -> Entity {
     let modal = layout == ActionLayout::SavesModal;
     let name = state.clone();
     let detail = state.clone();
     ui! {
-        Column (grow: 1.0, min_width: 0, height: metrics.wifi_row_extent() + 12, shrink: 0.0) {
+        Column (
+            grow: if horizontal { 1.0 } else { 0.0 },
+            min_width: 0,
+            height: metrics.save_row_height(),
+            shrink: 0.0
+        ) {
             Row (
                 grow: 1.0,
                 min_height: 0,
@@ -256,8 +304,8 @@ fn row(state: model!(Manager), index: usize, metrics: Metrics, layout: ActionLay
                 View (width: 3, height: 24, shrink: 0.0, bg_color: ACCENT)
                 Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: 2) {
                     text_block (
-                        move || if modal { name.row(index).0 } else { name.record_row(index).0 },
-                        || FOREGROUND,
+                        ${ if modal { name.row(index).0 } else { name.record_row(index).0 } },
+                        FOREGROUND,
                         TITLE_SIZE,
                         Start,
                         0,
@@ -265,8 +313,8 @@ fn row(state: model!(Manager), index: usize, metrics: Metrics, layout: ActionLay
                     )
                     if ${ !modal && !state.record_row(index).1.is_empty() } {
                         text_block (
-                            move || detail.record_row(index).1,
-                            || SECONDARY,
+                            ${ detail.record_row(index).1 },
+                            SECONDARY,
                             BODY_SIZE,
                             Start,
                             0,
@@ -280,39 +328,58 @@ fn row(state: model!(Manager), index: usize, metrics: Metrics, layout: ActionLay
     }
 }
 #[compose]
-fn facts(state: model!(Manager), metrics: Metrics) -> Entity {
+fn facts(state: model!(Manager), metrics: Metrics, context: Facts) -> Entity {
     ui! {
         Column (
             min_width: 0,
-            height: ${ state.facts_extent(metrics.gap) },
+            height: Dimension::Content,
             shrink: 0.0,
             row_gap: metrics.gap
         ) {
-            walk ${ 0_usize..state.facts().len() } with index by index {
-                fact (state, index)
+            walk ${ 0_usize..fact_values(&state, context).len() } with index by index {
+                fact (state, index, context)
             }
         }
     }
 }
 #[compose]
-fn fact(state: model!(Manager), index: usize) -> Entity {
+fn fact(state: model!(Manager), index: usize, context: Facts) -> Entity {
     let label = state.clone();
     let value = state.clone();
     ui! {
-        Row (min_width: 0, height: ${ state.fact_extent(index) }, shrink: 0.0, column_gap: 4) {
-            Column (width: 60, min_height: i32::from(BODY_SIZE), shrink: 0.0) {
+        Row (
+            min_width: 0,
+            height: Dimension::Content,
+            shrink: 0.0,
+            column_gap: 4,
+            padding: Padding {
+                bottom: 4.into(),
+                ..Default::default()
+            }
+        ) {
+            Column (
+                width: 60,
+                height: Dimension::Content,
+                min_height: i32::from(BODY_SIZE),
+                shrink: 0.0
+            ) {
                 text_block (
-                    move || label.facts().get(index).map(|f| f.label.clone()).unwrap_or_default(),
-                    || SECONDARY,
+                    ${ fact_values(&label, context).get(index).map(|f| f.label.clone()).unwrap_or_default() },
+                    SECONDARY,
                     BODY_SIZE,
                     Start,
                     0,
                     1
                 )
             }
-            Column (grow: 1.0, min_width: 0, min_height: i32::from(BODY_SIZE)) {
+            Column (
+                grow: 1.0,
+                height: Dimension::Content,
+                min_width: 0,
+                min_height: i32::from(BODY_SIZE)
+            ) {
                 Text (
-                    text: ${ value.facts().get(index).map(|f| f.value.clone()).unwrap_or_default() },
+                    text: ${ fact_values(&value, context).get(index).map(|f| f.value.clone()).unwrap_or_default() },
                     height: Dimension::Content,
                     width: Dimension::percent(100),
                     min_width: 0,
@@ -320,10 +387,10 @@ fn fact(state: model!(Manager), index: usize) -> Entity {
                     font: font(BODY_SIZE),
                     font_size: BODY_SIZE,
                     text_color: FOREGROUND,
-                    paragraph: super::widgets::paragraph(Start, 6)
+                    paragraph: super::widgets::paragraph(Start, if context == Facts::Reading { 0 } else { 6 })
                 ) [
                     FONT_PAINT,
-                ] on SizeChanged { state.fact_height(index, event.new.height); }
+                ]
             }
         }
     }
@@ -386,18 +453,18 @@ pub(super) fn hints(state: model!(Manager), metrics: Metrics) -> Entity {
         Row (grow: 1.0, min_width: 0, align: AlignItems::Center, column_gap: metrics.gap) {
             if ${ !state.busy() && state.tab() != Tab::Session } {
                 control_key ("A", metrics, true)
-                control_label (|| "确认".into(), metrics)
+                control_label ("确认", metrics)
             }
             control_key ("B", metrics, false)
-            control_label (|| "返回".into(), metrics)
+            control_label ("返回", metrics)
             View (grow: 1.0, min_width: 0)
             if ${ !state.busy() && state.page() == Page::Browse && state.tab() != Tab::Session } {
                 control_key ("X", metrics, false)
-                control_label (|| "操作".into(), metrics)
+                control_label ("操作", metrics)
             }
             if ${ !state.modal() && !state.busy() } {
                 control_key ("左右", metrics, false)
-                control_label (|| "分区".into(), metrics)
+                control_label ("分区", metrics)
             }
         }
     }
@@ -406,30 +473,40 @@ pub(super) fn hints(state: model!(Manager), metrics: Metrics) -> Entity {
 #[component]
 pub(super) struct SaveReading {
     state: model!(Manager),
+    location: bool,
 }
 #[system(order=Animation)]
 fn scroll_reading(
     nodes: query!(
         Entity,
         SaveReading,
-        mirui::input::event::scroll::ScrollOffset
+        mirui::input::event::scroll::ScrollOffset,
+        mirui::input::event::scroll::ScrollBounds
     ),
     commands: commands!(),
 ) {
-    for (entity, node, offset) in nodes {
+    for (entity, node, offset, bounds) in nodes {
+        if !node.state.active()
+            || if node.location {
+                node.state.page() != Page::Location
+            } else {
+                node.state.tab() != Tab::Session || node.state.modal()
+            }
+        {
+            continue;
+        }
+        node.state.reading_bounds(bounds.max_y);
         let y = node.state.reading_offset();
-        if node.state.active() && offset.y != y {
-            commands.insert(
-                entity,
-                mirui::input::event::scroll::ScrollOffset { x: Fixed::ZERO, y },
-            );
+        if offset.y != y {
+            commands.set::<super::scroll::Position>(entity, y);
         }
     }
 }
 #[view(component=SaveReading,systems=[scroll_reading::system()])]
 pub(super) fn save_reading() {}
 #[compose]
-fn reading(state: model!(Manager), metrics: Metrics) -> Entity {
+fn reading(state: model!(Manager), metrics: Metrics, location: bool) -> Entity {
+    let context = Facts::Reading;
     ui! {
         Column (grow: 1.0, min_width: 0, min_height: 0, clip_children: true) [
             mirui::input::event::scroll::ScrollOffset::default(),
@@ -439,9 +516,10 @@ fn reading(state: model!(Manager), metrics: Metrics) -> Entity {
             },
             SaveReading {
                 state: state.clone(),
+                location,
             },
         ] {
-            facts (state, metrics)
-        } on SizeChanged { state.reading_viewport(event.new.height, metrics.gap); }
+            facts (state, metrics, context)
+        }
     }
 }

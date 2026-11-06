@@ -4,11 +4,11 @@
 
 **R36S 双机附近联机**
 
-[![Release](https://img.shields.io/badge/release-v0.11.0-a33d2e?style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.11.0) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v0.12.0-a33d2e?style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.12.0) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
 
 选好游戏，创建房间，和身边的朋友一起玩。
 
-[下载安装](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.11.0) · [使用说明](docs/installation.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
+[下载安装](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.12.0) · [使用说明](docs/installation.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
 
 <img src="docs/assets/nearby-dual-demo.svg" alt="双机联机界面演示：创建房间、搜索加入、确认就绪与主题切换" width="840" />
 
@@ -26,7 +26,8 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 - **系统控制** — 调节音量和亮度，连接 Wi-Fi，查看存储空间，关机或重启。
 - **仅组网** — 连接后返回系统，打开 Ports 中的局域网游戏。
 - **搜索身边的房间** — 打开工具即可搜索，选中房间后加入，按 X 刷新列表；主页按 FN + X 快速打开。
-- **记住常玩的朋友** — 首次连接由房主确认，之后使用保存的配对信息。
+- **设备与好友** — 用中文、英文或符号修改设备名称，查看和管理已配对好友。
+- **应用管理** — 查看版本与诊断，从游戏卡安装更新包。
 - **8-bit 音效** — 选中、确认、发现房间和准备完成时播放对应提示音。
 - **玩完回到游戏列表** — 退出游戏后恢复之前连接的 Wi-Fi。
 
@@ -34,7 +35,7 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 适用配置：**ArkOS4Clone 08262026 · Linux 4.4.189 · RTL8188EU 无线芯片 · 640×480 屏幕**。详细要求见 [设备兼容性](docs/compatibility.md#设备配置)。在两台掌机上安装同一版本：
 
-1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases/download/v0.11.0/arkos-nearby-0.11.0-arm64.tar.gz)。
+1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases/download/v0.12.0/arkos-nearby-0.12.0-arm64.tar.gz)。
 2. 解压，将 `arkos-nearby` 文件夹放入游戏卡的 `ports` 目录。
 3. 在掌机 **Ports** 中打开 **Install Nearby Multiplayer**，安装完成后重启掌机。
 
@@ -70,7 +71,7 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 系统游戏列表、启动器和联机房间共用核心选择规则，当前核心标明「工具优化」或「设备原有」。加入房间时使用房主确定的核心，完成游戏内容核对后开局。
 
-**START** 打开设置面板，可切换主题、音效，管理直连网络，或选择「返回原系统」退出启动器。保留直连网络时，启动单机可以选择继续保持连接或先恢复 Wi-Fi。
+**START** 打开设置面板，可切换主题、音效，管理直连网络、设备与好友，查看应用版本、诊断和安装更新包。启动设置可将 Nearby 设为默认首页，独立启动器接管首页后提供游戏浏览、启动与系统工具；选择「返回原系统」回到系统游戏列表。保留直连网络时，启动单机可以选择继续保持连接或先恢复 Wi-Fi。
 
 ## 仅组网
 

@@ -8,11 +8,13 @@ use mirui::surface::Surface;
 use mirui::ui::text_input::{InputMethod, TextInputChanged};
 
 #[component]
-pub(crate) struct WifiEditor;
+pub(crate) struct InputEditor;
 
 #[derive(Clone)]
 pub(crate) enum Edit {
     Insert(String),
+    Preedit(String),
+    Cancel,
     Backspace,
     Submit,
 }
@@ -43,13 +45,30 @@ impl<B: Surface, F: RendererFactory<B>> Plugin<B, F> for EditorFocus {
 
 #[system(order = Animation)]
 fn edit(launcher: model!(Launcher), commands: commands!()) {
-    if launcher.wifi_keyboard()
-        && let Some(session) = launcher.input_session()
-    {
-        if let Some(edit) = launcher.input_edit() {
-            launcher.finish_input_edit();
+    if let Some(session) = launcher.input_session() {
+        let management = launcher.management();
+        let naming = management.editing();
+        if naming && !management.text().prepared() {
+            return;
+        }
+        if !naming && !launcher.wifi_keyboard() {
+            return;
+        }
+        let edit = if naming {
+            management.text().edit()
+        } else {
+            launcher.input_edit()
+        };
+        if let Some(edit) = edit {
+            if naming {
+                management.text().finish_edit();
+            } else {
+                launcher.finish_input_edit();
+            }
             match edit {
                 Edit::Insert(text) => commands.text_input().commit(session, text),
+                Edit::Preedit(text) => commands.text_input().preedit(session, text, None),
+                Edit::Cancel => commands.text_input().cancel(session),
                 Edit::Backspace | Edit::Submit => commands.text_input().key(
                     session,
                     Key {
@@ -70,8 +89,8 @@ fn edit(launcher: model!(Launcher), commands: commands!()) {
 }
 
 fn focus_editor(world: &mut mirui::ecs::World, launcher: super::LauncherHandle) {
-    let target = if launcher.wifi_keyboard() {
-        world.query::<WifiEditor>().iter().find_map(|(entity, _)| {
+    let target = if launcher.wifi_keyboard() || launcher.management().editing() {
+        world.query::<InputEditor>().iter().find_map(|(entity, _)| {
             let mut node = entity;
             loop {
                 if mirui::ui::branch::is_effectively_hidden(world, node) {
@@ -87,12 +106,30 @@ fn focus_editor(world: &mut mirui::ecs::World, launcher: super::LauncherHandle) 
     } else {
         None
     };
+    if launcher.management().editing() {
+        let text = launcher.management().text();
+        if !text.prepared()
+            && let Some(entity) = target
+        {
+            let end = text.value().len();
+            if let Some(editor) = world.get_mut::<mirui::ui::widgets::TextEditing>(entity)
+                && editor
+                    .set_selection(mirui::ui::widgets::text_editing::TextSelection {
+                        anchor: end,
+                        cursor: end,
+                    })
+                    .is_ok()
+            {
+                text.prepare_editor();
+            }
+        }
+    }
     let current = world
         .resource::<FocusState>()
         .and_then(|focus| focus.focused);
-    if target.is_some() || current.is_some_and(|entity| world.has::<WifiEditor>(entity)) {
-        if let Some(focus) = world.resource_mut::<FocusState>() {
-            focus.focused = target;
-        }
+    if (target.is_some() || current.is_some_and(|entity| world.has::<InputEditor>(entity)))
+        && let Some(focus) = world.resource_mut::<FocusState>()
+    {
+        focus.focused = target;
     }
 }

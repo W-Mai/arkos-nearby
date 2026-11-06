@@ -159,22 +159,22 @@ fn footer_controls(view: PageKey, state: model!(DisplayState), metrics: Metrics)
         ) {
             if ${ state.confirm_visible() } {
                 control_key ("A", metrics, true)
-                control_label (move || confirm.confirm(), metrics)
+                control_label (${ confirm.confirm() }, metrics)
             }
             if ${
                 !state.launcher().view().enabled
                     || (state.launcher().view().tab != 0 && !state.busy())
             } {
                 control_key ("B", metrics, false)
-                control_label (move || back.back(), metrics)
+                control_label (${ back.back() }, metrics)
             }
             if matches!(view.page, Page::Rooms | Page::Lobby) {
                 control_key ("X", metrics, false)
-                control_label (|| "刷新".into(), metrics)
+                control_label ("刷新", metrics)
             }
             if ${ state.can_switch_theme() } {
                 control_key ("Y", metrics, false)
-                control_label (|| "主题".into(), metrics)
+                control_label ("主题", metrics)
             }
             Text (
                 text: ${ state.hint() },
@@ -191,14 +191,14 @@ fn footer_controls(view: PageKey, state: model!(DisplayState), metrics: Metrics)
             ]
             if ${ state.launcher().view().enabled && !state.busy() } {
                 control_key ("SELECT", metrics, false)
-                control_label (|| "联机".into(), metrics)
+                control_label ("联机", metrics)
             }
             if ${
                 state.launcher().view().enabled && !state.busy()
                     && state.library_kind() != crate::model::LibraryKind::Search
             } {
                 control_key ("START", metrics, false)
-                control_label (|| "设置".into(), metrics)
+                control_label ("设置", metrics)
             }
         }
     }

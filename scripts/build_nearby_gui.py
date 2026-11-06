@@ -191,7 +191,7 @@ def linux_environment(cargo, environment):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("check", "build", "snapshot"))
-    parser.add_argument("--toolchain", default="1.92")
+    parser.add_argument("--toolchain", default="1.97.0")
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--view", type=Path)
     parser.add_argument("--output", type=Path)

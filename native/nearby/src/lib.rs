@@ -30,6 +30,7 @@ pub mod readiness;
 pub mod saves;
 pub mod session;
 pub mod system;
+pub mod updates;
 pub mod wifi;
 
 #[cfg(test)]

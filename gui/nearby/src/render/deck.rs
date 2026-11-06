@@ -19,6 +19,7 @@ pub(super) enum Layer {
 #[component]
 pub(super) enum ActorScope {
     Reading,
+    ManagementReading,
     Layer(Layer),
     Pane(crate::model::Page),
 }
@@ -35,6 +36,8 @@ pub(super) enum ActionLayout {
     Levels,
     Details,
     Configuration,
+    Management,
+    ManagementProgress,
     SavesList,
     SavesModal,
     SavesProgress,

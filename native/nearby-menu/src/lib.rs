@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod configuration;
 pub mod details;
+pub mod management;
 pub mod saves;
 pub mod shelf;
 pub mod wifi;
@@ -35,6 +36,8 @@ pub enum MenuAction {
     CycleTheme,
     ToggleSound,
     ShowControls,
+    ShowDevice,
+    ShowApplication,
     ShowTools,
     OpenWifi,
     NetworkInfo,

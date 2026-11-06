@@ -13,6 +13,8 @@ const EMBEDDED: &[u8] = include_bytes!(env!("ARKOS_NEARBY_BUNDLE"));
 #[cfg(not(feature = "release-bundle"))]
 const EMBEDDED: &[u8] = &[];
 
+const MAX_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
+
 pub const ALLOWED: &[&str] = &[
     "arkos-nearby-gui",
     "core-inspect32",
@@ -82,15 +84,15 @@ impl Bundle {
     }
     pub fn decode(packed: &[u8]) -> Result<Self> {
         require(
-            packed.len() <= 32 * 1024 * 1024,
+            packed.len() as u64 <= MAX_BUNDLE_BYTES,
             "Release bundle is oversized",
         )?;
         let mut data = Vec::new();
         flate2::read::GzDecoder::new(packed)
-            .take(32 * 1024 * 1024 + 1)
+            .take(MAX_BUNDLE_BYTES + 1)
             .read_to_end(&mut data)?;
         require(
-            data.len() >= 12 && data.len() <= 32 * 1024 * 1024 && data[..8] == *b"ARKNP001",
+            data.len() >= 12 && data.len() as u64 <= MAX_BUNDLE_BYTES && data[..8] == *b"ARKNP001",
             "Invalid release bundle",
         )?;
         let length = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
@@ -103,7 +105,7 @@ impl Bundle {
             manifest.schema == 1
                 && manifest.profile == PROFILE
                 && manifest.kernel_sha256 == KERNEL_SHA
-                && manifest.gui_version == "0.53.0"
+                && manifest.gui_version == "0.54.0"
                 && !manifest.version.is_empty(),
             "Unsupported release profile",
         )?;
