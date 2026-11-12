@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -5,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::Entry;
-use crate::context::{Context, INSTALL};
+use crate::context::Context;
 use crate::system::{Lock, read, wall_time, write};
 use crate::{Result, require};
 
@@ -46,7 +47,7 @@ pub(super) fn key(path: &Path) -> String {
 
 impl Library {
     pub fn load(root: &Path) -> Result<Self> {
-        let path = root.join("library.json");
+        let path = root.join(arkos::application::LIBRARY.local());
         if !path.exists() {
             return Ok(Self::default());
         }
@@ -72,7 +73,7 @@ impl Library {
             serde_json::to_vec(&value)?.len() as u64 <= MAX_BYTES,
             "Library record is full",
         )?;
-        write(&root.join("library.json"), &value)?;
+        write(&root.join(arkos::application::LIBRARY.local()), &value)?;
         Ok(value)
     }
 
@@ -121,7 +122,7 @@ pub(crate) fn record_play(context: &Context) {
 }
 
 pub(crate) fn record_path(path: &Path) {
-    if let Err(error) = Library::used(&PathBuf::from(INSTALL), path) {
+    if let Err(error) = Library::used(&PathBuf::from(arkos::PATHS.personal), path) {
         eprintln!("Could not record library use: {error}");
     }
 }

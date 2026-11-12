@@ -21,7 +21,7 @@ class RendererBoundary(unittest.TestCase):
     def test_verified_gpu_is_reused_without_starting_a_software_build(self):
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory)
-            (assets / "nearby-gui-build.json").write_text(
+            (assets / "howff-gui-build.json").write_text(
                 json.dumps({"backend": "sdl-gpu"})
             )
             with (
@@ -36,7 +36,7 @@ class RendererBoundary(unittest.TestCase):
     def test_stale_gpu_inputs_fail_without_falling_back_to_software(self):
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory)
-            (assets / "nearby-gui-build.json").write_text(
+            (assets / "howff-gui-build.json").write_text(
                 json.dumps({"backend": "sdl-gpu"})
             )
             with (

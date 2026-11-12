@@ -1,7 +1,8 @@
+use howff_menu::input::{Generation, Sourced};
+use howff_platform::arkos;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::Path;
-use std::process::{ChildStdin, Command, Stdio};
+use std::process::ChildStdin;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -13,11 +14,11 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{Event, OwnedChild, log};
-use crate::context::INSTALL;
 use crate::system::{mkdir, monotonic};
 use crate::{Result, require};
 
 struct Delivery {
+    generation: Option<Generation>,
     screen: Option<u64>,
     event: Event,
 }
@@ -31,6 +32,7 @@ pub(super) struct Replies {
 impl Replies {
     pub(super) fn send(&self, event: Event) {
         let _ = self.sender.send(Delivery {
+            generation: None,
             screen: Some(self.screen),
             event,
         });
@@ -49,6 +51,8 @@ pub(super) struct Display {
     screen: u64,
     input_epoch: f64,
     previous: Value,
+    generation: Generation,
+    target: Option<super::input::Target>,
 }
 
 impl Display {
@@ -59,7 +63,7 @@ impl Display {
         Self::open_mode(true)
     }
     fn open_mode(launcher: bool) -> Result<Self> {
-        let root = Path::new("/run/arkos-nearby-rust/ui");
+        let root = arkos::runtime::UI.path();
         mkdir(root)?;
         let lock = crate::system::Lock::try_acquire(&root.join("interface.lock"))?;
         let mut display = Self::spawn(launcher, Arc::new(AtomicBool::new(false)))?;
@@ -68,24 +72,15 @@ impl Display {
     }
 
     fn spawn(launcher: bool, stopping: Arc<AtomicBool>) -> Result<Self> {
-        let logs = Path::new(INSTALL).join("logs");
+        let logs = arkos::application::LOGS.path().to_path_buf();
         mkdir(&logs)?;
         log(json!({"phase":"gui-spawn"}))?;
         let gui = OwnedChild(
-            Command::new(format!("{INSTALL}/arkos-nearby-gui"))
-                .env(
-                    "ARKOS_NEARBY_LAUNCHER_INPUT",
-                    if launcher { "1" } else { "0" },
-                )
-                .env("SDL_INPUT_LINUX_KEEP_KBD", "1")
-                .env("SDL_RENDER_BATCHING", "1")
-                .env("TERM", "linux")
-                .env("LANG", "C.UTF-8")
-                .env("LC_ALL", "C.UTF-8")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::from(File::create(logs.join("native-gui.log"))?))
-                .spawn()?,
+            crate::platform::system::gui_command(
+                launcher,
+                File::create(logs.join("native-gui.log"))?,
+            )
+            .spawn()?,
         );
         let mut display = Self::connect(gui)?;
         display.stopping = stopping;
@@ -151,6 +146,14 @@ impl Display {
                     break;
                 }
                 if let Ok(value) = serde_json::from_slice::<Value>(&line) {
+                    let (value, generation) = if value.get("generation").is_some() {
+                        let Ok(input) = serde_json::from_value::<Sourced<Value>>(value) else {
+                            continue;
+                        };
+                        (input.payload, Some(input.generation))
+                    } else {
+                        (value, None)
+                    };
                     let event = if value == json!({"event":"frame_ready"}) {
                         Some(Event::FrameReady)
                     } else if value["event"] == "shelf_layout" {
@@ -163,36 +166,36 @@ impl Display {
                         value["rows"]
                             .as_u64()
                             .filter(|rows| {
-                                (1..=nearby_menu::LIST_WINDOW_ITEMS as u64).contains(rows)
+                                (1..=howff_menu::LIST_WINDOW_ITEMS as u64).contains(rows)
                             })
                             .zip(value["launcher"].as_bool())
                             .map(|(rows, launcher)| Event::ListLayout(rows as usize, launcher))
                     } else if value["event"] == "saves" {
-                        serde_json::from_value::<nearby_menu::saves::Request>(
+                        serde_json::from_value::<howff_menu::saves::Request>(
                             value["request"].clone(),
                         )
                         .ok()
-                        .filter(nearby_menu::saves::Request::valid)
+                        .filter(howff_menu::saves::Request::valid)
                         .map(|request| Event::Saves(request, monotonic()))
                     } else if value["event"] == "configuration" {
-                        serde_json::from_value::<nearby_menu::configuration::Request>(
+                        serde_json::from_value::<howff_menu::configuration::Request>(
                             value["request"].clone(),
                         )
                         .ok()
-                        .filter(nearby_menu::configuration::Request::valid)
+                        .filter(howff_menu::configuration::Request::valid)
                         .map(|request| Event::Configuration(request, monotonic()))
                     } else if value["event"] == "management" {
-                        serde_json::from_value::<nearby_menu::management::Request>(
+                        serde_json::from_value::<howff_menu::management::Request>(
                             value["request"].clone(),
                         )
                         .ok()
                         .map(|request| Event::Management(request, monotonic()))
                     } else if value["event"] == "wifi" {
-                        serde_json::from_value::<nearby_menu::wifi::Request>(
+                        serde_json::from_value::<howff_menu::wifi::Request>(
                             value["request"].clone(),
                         )
                         .ok()
-                        .filter(nearby_menu::wifi::Request::valid)
+                        .filter(howff_menu::wifi::Request::valid)
                         .map(|request| Event::Wifi(request, monotonic()))
                     } else if value["event"] == "launcher"
                         && matches!(value["action"].as_str(), Some("launch" | "multiplayer"))
@@ -230,6 +233,7 @@ impl Display {
                     if let Some(event) = event {
                         if input_sender
                             .send(Delivery {
+                                generation,
                                 screen: None,
                                 event,
                             })
@@ -241,6 +245,7 @@ impl Display {
                 }
             }
             let _ = input_sender.send(Delivery {
+                generation: None,
                 screen: None,
                 event: Event::Eof,
             });
@@ -257,18 +262,22 @@ impl Display {
             screen: 0,
             input_epoch,
             previous: Value::Null,
+            generation: Generation::FIRST,
+            target: None,
         })
     }
 
     pub(super) fn begin_screen(&mut self) -> Replies {
-        let first = self.screen == 0;
+        let first = self.screen == 0 && self.target.is_none();
         self.screen += 1;
         // Keep the connection epoch for the first screen so a real edge that
         // arrives during startup remains actionable; later screens rebase it
         // to discard input queued for the previous view.
         if !first {
+            self.generation.advance();
             self.input_epoch = monotonic();
         }
+        self.target = None;
         Replies {
             screen: self.screen,
             sender: self.sender.clone(),
@@ -280,11 +289,29 @@ impl Display {
     }
 
     pub(super) fn present(&mut self, view: Value) -> Result<()> {
+        let context = self
+            .target
+            .as_ref()
+            .map_or(0, super::input::Target::context);
+        self.present_in(view, context)
+    }
+
+    pub(super) fn present_in(&mut self, mut view: Value, context: u64) -> Result<()> {
         let gui = self.gui.as_mut().ok_or("The graphical interface stopped")?;
         require(
             gui.0.try_wait()?.is_none(),
             "The graphical interface stopped",
         )?;
+        let target = super::input::Target::new(&view, context);
+        if self
+            .target
+            .as_ref()
+            .is_some_and(|previous| previous != &target)
+        {
+            self.generation.advance();
+        }
+        self.target = Some(target);
+        view["input_generation"] = serde_json::to_value(self.generation)?;
         if view != self.previous {
             let stdin = self.stdin.as_mut().ok_or("GUI has no input channel")?;
             serde_json::to_writer(&mut *stdin, &view)?;
@@ -297,7 +324,9 @@ impl Display {
 
     pub(super) fn receive(&self) -> std::result::Result<Option<Event>, mpsc::RecvTimeoutError> {
         let delivery = self.receiver.recv_timeout(Duration::from_millis(20))?;
-        if delivery.screen.is_some_and(|screen| screen != self.screen)
+        if delivery.event.requires_input_generation()
+            && delivery.generation != Some(self.generation)
+            || delivery.screen.is_some_and(|screen| screen != self.screen)
             || matches!(&delivery.event, Event::Input(_, at) | Event::Launcher(_,_,at)|Event::Management(_,at)|Event::Wifi(_,at)|Event::Configuration(_,at)|Event::Saves(_,at) if *at < self.input_epoch)
         {
             return Ok(None);
@@ -321,11 +350,20 @@ impl Drop for Display {
 
 #[cfg(test)]
 mod tests {
+    mod interleavings;
+
     use super::*;
+    use std::process::{Command, Stdio};
     use std::time::Instant;
 
     fn display() -> Display {
-        let gui = OwnedChild(Command::new("sh").args(["-c", "printf '{\"event\":\"frame_ready\"}\\n'; while IFS= read -r line; do printf '\"confirm\"\\n'; done"])
+        let gui = OwnedChild(Command::new("python3").args(["-u", "-c", r#"import json,sys
+print(json.dumps({"event":"frame_ready"}),flush=True)
+for line in sys.stdin:
+    view=json.loads(line)
+    for value in view.get("_test_messages", [{"generation":view["input_generation"],"payload":"confirm"}]):
+        print(json.dumps(value),flush=True)
+"#])
             .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap());
         let display = Display::connect(gui).unwrap();
         assert!(matches!(next(&display), Event::FrameReady));
@@ -344,12 +382,88 @@ mod tests {
     }
 
     #[test]
+    fn late_old_page_confirm_cannot_open_the_new_home_menu() {
+        let mut display = display();
+        display.begin_screen();
+        display.present(json!({"page":"lobby"})).unwrap();
+        assert!(matches!(next(&display), Event::Input(_, _)));
+        let old = display.generation;
+        display.begin_screen();
+        let current = display.generation;
+        display
+            .present(json!({"page":"games","_test_messages":[
+                old.bind("confirm"), current.bind("start")
+            ]}))
+            .unwrap();
+        assert!(display.receive().unwrap().is_none());
+        assert!(matches!(next(&display), Event::Input(action, _) if action == "start"));
+        for selected in 0..12 {
+            display
+                .present(json!({"page":"games","selected":selected}))
+                .unwrap();
+            assert_eq!(display.generation, current);
+            assert!(matches!(next(&display), Event::Input(action, _) if action == "confirm"));
+        }
+    }
+
+    #[test]
+    fn unbound_inputs_are_rejected_but_current_actions_and_lifecycle_are_kept() {
+        let mut display = display();
+        let generation = display.generation;
+        display
+            .present(json!({"page":"games","_test_messages":[
+                "confirm", Generation::default().bind("confirm"), generation.bind("right")
+            ]}))
+            .unwrap();
+        assert!(display.receive().unwrap().is_none());
+        assert!(display.receive().unwrap().is_none());
+        assert!(matches!(next(&display), Event::Input(action, _) if action == "right"));
+        for event in [
+            Event::Input("start".into(), monotonic()),
+            Event::ShelfLayout(
+                crate::catalog::shelf::Grid {
+                    columns: 1,
+                    rows: 1,
+                },
+                true,
+            ),
+            Event::ListLayout(4, true),
+            Event::Launcher("launch".into(), "a".repeat(64), monotonic()),
+            Event::Wifi(
+                howff_menu::wifi::Request::Hidden {
+                    epoch: 1,
+                    ssid: "camp".into(),
+                },
+                monotonic(),
+            ),
+            Event::Configuration(
+                howff_menu::configuration::Request::Close { epoch: 1 },
+                monotonic(),
+            ),
+            Event::Saves(howff_menu::saves::Request::Close { epoch: 1 }, monotonic()),
+            Event::Management(
+                howff_menu::management::Request {
+                    epoch: 1,
+                    sequence: 1,
+                    operation: howff_menu::management::Operation::Close,
+                },
+                monotonic(),
+            ),
+        ] {
+            assert!(event.requires_input_generation());
+        }
+        assert!(!Event::FrameReady.requires_input_generation());
+        assert!(!Event::Eof.requires_input_generation());
+        assert!(!Event::Status(0, json!({})).requires_input_generation());
+    }
+
+    #[test]
     fn first_input_is_kept_when_it_arrives_before_the_first_frame() {
         let gui = OwnedChild(
             Command::new("sh")
                 .args([
                     "-c",
-                    "printf '\"confirm\"\\n'; sleep 0.05; printf '{\"event\":\"frame_ready\"}\\n'; sleep 1",
+                    "printf '{\"generation\":1,\"payload\":\"confirm\"}\\n'; sleep 0.05; printf '{\"event\":\"frame_ready\"}\\n'; sleep 1",
                 ])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -377,9 +491,12 @@ mod tests {
             screen: 0,
             input_epoch: at,
             previous: Value::Null,
+            generation: Generation::FIRST,
+            target: None,
         };
         sender
             .send(Delivery {
+                generation: Some(Generation::FIRST),
                 screen: None,
                 event: Event::Input("confirm".into(), at),
             })
@@ -421,6 +538,7 @@ mod tests {
                     assert!(crate::system::Lock::try_acquire(&path).is_err());
                     sender
                         .send(Delivery {
+                            generation: None,
                             screen: None,
                             event: Event::Input("back".into(), monotonic()),
                         })
@@ -594,6 +712,7 @@ mod tests {
         display
             .sender
             .send(Delivery {
+                generation: None,
                 screen: None,
                 event: Event::Input("back".into(), old_input - 1.0),
             })

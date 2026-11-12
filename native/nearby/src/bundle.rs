@@ -9,14 +9,14 @@ use crate::protocol::hex;
 use crate::{Result, require};
 
 #[cfg(feature = "release-bundle")]
-const EMBEDDED: &[u8] = include_bytes!(env!("ARKOS_NEARBY_BUNDLE"));
+const EMBEDDED: &[u8] = include_bytes!(env!("HOWFF_BUNDLE"));
 #[cfg(not(feature = "release-bundle"))]
 const EMBEDDED: &[u8] = &[];
 
 const MAX_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
 
 pub const ALLOWED: &[&str] = &[
-    "arkos-nearby-gui",
+    "howff-gui",
     "core-inspect32",
     "core-inspect64",
     "core-probe64",
@@ -29,7 +29,7 @@ pub const ALLOWED: &[&str] = &[
     "assets/home-input.so",
     "assets/home-input-build.json",
     "core-inspect-build.json",
-    "nearby-gui-build.json",
+    "howff-gui-build.json",
     "font/OFL.txt",
     "font/font-source.json",
     "licenses/NOTICE.txt",
@@ -61,12 +61,26 @@ pub struct Asset {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
+    pub product: String,
     pub schema: u8,
     pub version: String,
     pub profile: String,
     pub kernel_sha256: String,
     pub gui_version: String,
     pub files: Vec<Asset>,
+}
+impl Manifest {
+    pub(crate) fn validate_profile(&self) -> Result<()> {
+        require(
+            self.product == "howff"
+                && self.schema == 1
+                && self.profile == PROFILE
+                && self.kernel_sha256 == KERNEL_SHA
+                && !self.version.is_empty()
+                && self.version.len() <= 64,
+            "Unsupported Howff release profile",
+        )
+    }
 }
 pub struct Bundle {
     pub manifest: Manifest,
@@ -92,7 +106,7 @@ impl Bundle {
             .take(MAX_BUNDLE_BYTES + 1)
             .read_to_end(&mut data)?;
         require(
-            data.len() >= 12 && data.len() as u64 <= MAX_BUNDLE_BYTES && data[..8] == *b"ARKNP001",
+            data.len() >= 12 && data.len() as u64 <= MAX_BUNDLE_BYTES && data[..8] == *b"HOWFF001",
             "Invalid release bundle",
         )?;
         let length = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
@@ -101,12 +115,9 @@ impl Bundle {
             "Invalid release manifest length",
         )?;
         let manifest: Manifest = serde_json::from_slice(&data[12..12 + length])?;
+        manifest.validate_profile()?;
         require(
-            manifest.schema == 1
-                && manifest.profile == PROFILE
-                && manifest.kernel_sha256 == KERNEL_SHA
-                && manifest.gui_version == "0.54.0"
-                && !manifest.version.is_empty(),
+            manifest.gui_version == "0.56.0",
             "Unsupported release profile",
         )?;
         let start = 12 + length;
@@ -156,6 +167,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn embedded_bundle_requires_explicit_howff_identity() {
+        use std::io::Write;
+        let bundle = Bundle::embedded().unwrap();
+        for product in [None, Some("external")] {
+            let mut manifest = serde_json::to_value(&bundle.manifest).unwrap();
+            if let Some(product) = product {
+                manifest["product"] = product.into();
+            } else {
+                manifest.as_object_mut().unwrap().remove("product");
+            }
+            let header = serde_json::to_vec(&manifest).unwrap();
+            let mut bytes = b"HOWFF001".to_vec();
+            bytes.extend_from_slice(&(header.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&header);
+            bytes.extend_from_slice(&bundle.data[bundle.start..]);
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            encoder.write_all(&bytes).unwrap();
+            assert!(Bundle::decode(&encoder.finish().unwrap()).is_err());
+        }
+    }
+
+    #[test]
     fn embedded_renderer_matches_its_manifest_and_build_record() {
         let bundle = Bundle::embedded().expect("The built release must decode");
         let asset = |name: &str| {
@@ -167,8 +201,8 @@ mod tests {
                 .expect("The release contains its renderer and build record")
         };
         let report: serde_json::Value =
-            serde_json::from_slice(bundle.bytes(asset("nearby-gui-build.json"))).unwrap();
-        let renderer = asset("arkos-nearby-gui");
+            serde_json::from_slice(bundle.bytes(asset("howff-gui-build.json"))).unwrap();
+        let renderer = asset("howff-gui");
         assert_eq!(report["mirui"], bundle.manifest.gui_version);
         let target = match report["backend"].as_str() {
             Some("sdl-gpu") => "aarch64-unknown-linux-gnu",

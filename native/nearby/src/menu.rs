@@ -1,5 +1,5 @@
+use howff_platform::arkos;
 use std::fs;
-use std::path::Path;
 use std::process::Child;
 use std::sync::{Arc, mpsc};
 use std::thread;
@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use crate::Result;
-use crate::context::{Context, INSTALL};
+use crate::context::Context;
 use crate::flow::{Flow, FlowExit, Request};
 use crate::purpose::SessionPurpose;
 use crate::system::{mkdir, monotonic, wall_time, write};
@@ -23,10 +23,10 @@ enum Event {
     ShelfLayout(crate::catalog::shelf::Grid, bool),
     ListLayout(usize, bool),
     Launcher(String, String, f64),
-    Wifi(nearby_menu::wifi::Request, f64),
-    Management(nearby_menu::management::Request, f64),
-    Configuration(nearby_menu::configuration::Request, f64),
-    Saves(nearby_menu::saves::Request, f64),
+    Wifi(howff_menu::wifi::Request, f64),
+    Management(howff_menu::management::Request, f64),
+    Configuration(howff_menu::configuration::Request, f64),
+    Saves(howff_menu::saves::Request, f64),
     FrameReady,
     Eof,
     Status(u64, Value),
@@ -34,6 +34,28 @@ enum Event {
     Action(Request, Value, bool),
     Prepared(std::result::Result<Box<Context>, String>),
     Searched(crate::catalog::SearchResult),
+}
+
+impl Event {
+    fn requires_input_generation(&self) -> bool {
+        match self {
+            Self::Input(..)
+            | Self::ShelfLayout(..)
+            | Self::ListLayout(..)
+            | Self::Launcher(..)
+            | Self::Wifi(..)
+            | Self::Management(..)
+            | Self::Configuration(..)
+            | Self::Saves(..) => true,
+            Self::FrameReady
+            | Self::Eof
+            | Self::Status(..)
+            | Self::Scan(..)
+            | Self::Action(..)
+            | Self::Prepared(..)
+            | Self::Searched(..) => false,
+        }
+    }
 }
 
 enum Outcome {
@@ -63,7 +85,7 @@ impl Drop for OwnedChild {
 }
 
 pub fn log(values: Value) -> Result<()> {
-    let root = Path::new(INSTALL).join("logs");
+    let root = arkos::application::LOGS.path().to_path_buf();
     mkdir(&root)?;
     let path = root.join("last-session-native.json");
     let mut record = if values["phase"] == "context" {
@@ -86,6 +108,7 @@ pub fn log(values: Value) -> Result<()> {
 }
 
 mod display;
+mod input;
 
 pub struct MenuSession {
     display: display::Display,
@@ -200,7 +223,8 @@ impl MenuSession {
                 let replies = sender.clone();
                 thread::spawn(move || replies.send(Event::Searched(job.run())));
             }
-            self.display.present(controller.view())?;
+            let context = controller.browser().input_epoch.to_bits();
+            self.display.present_in(controller.view(), context)?;
             if let Some(intent) = controller.save_launch() {
                 return Ok(intent);
             }
@@ -348,18 +372,9 @@ impl MenuSession {
         let mut preparing = None;
         let result = (|| -> Result<Outcome> {
             let mut flow = if mode_picker {
-                let connected = !crate::session::best(&[
-                    "nmcli",
-                    "-g",
-                    "IP4.ADDRESS",
-                    "device",
-                    "show",
-                    "wlan0",
-                ])
-                .is_empty();
                 self.lobby_flow
                     .take()
-                    .unwrap_or_else(|| Flow::lobby(context, connected))
+                    .unwrap_or_else(|| Flow::lobby(context, crate::platform::radio::has_ipv4()))
             } else if purpose == SessionPurpose::NetworkOnly {
                 Flow::network()
             } else {
@@ -386,7 +401,8 @@ impl MenuSession {
                         let sender = sender.clone();
                         thread::spawn(move || sender.send(Event::Searched(job.run())));
                     }
-                    self.display.present(browser.view())?;
+                    self.display
+                        .present_in(browser.view(), browser.input_epoch.to_bits())?;
                     match self.display.receive() {
                         Ok(Some(Event::ShelfLayout(grid, false))) => browser.shelf_layout(grid),
                         Ok(Some(Event::ListLayout(rows, false))) => browser.list_layout(rows),
@@ -479,7 +495,7 @@ impl MenuSession {
                 }
                 let mut view = flow.view();
                 view["return_to_launcher"] = self.launcher.into();
-                self.display.present(view)?;
+                self.display.present_in(view, flow.input_epoch.to_bits())?;
                 match self.display.receive() {
                     Ok(Some(Event::Input(action, at))) => {
                         if !self.display.stopped() {

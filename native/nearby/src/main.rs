@@ -1,22 +1,19 @@
 use std::env;
 use std::path::Path;
 
-use arkos_nearby::{Result, require};
-use arkos_nearby::{context, menu, session};
+use howff::{Result, require};
+use howff::{context, menu, session};
 use serde_json::{Value, json};
 
 fn run(args: &[String]) -> Result<i32> {
     match args.first().map(String::as_str) {
         Some("--version") => {
-            println!(
-                "arkos-nearby {} (native room runtime)",
-                env!("CARGO_PKG_VERSION")
-            );
+            println!("howff {}", env!("CARGO_PKG_VERSION"));
             Ok(0)
         }
         Some("--help") | None => {
             println!(
-                "arkos-nearby install [--interactive]\narkos-nearby uninstall\narkos-nearby update RELEASE_PATH\narkos-nearby doctor\narkos-nearby release-info\narkos-nearby identity show|reset|name NAME\narkos-nearby friends [forget DEVICE_ID]\narkos-nearby menu --frontend <retroarch|retroarch32> -- <launch args>\narkos-nearby action <name> <context.json> <payload.json>\narkos-nearby status\narkos-nearby network <status|scan|create|join|approve|detach|cancel> [JSON]\narkos-nearby manual\narkos-nearby launcher\nWorker modes: worker, serve, game, game-recover, recover <session-id>"
+                "howff install [--interactive]\nhowff uninstall\nhowff update RELEASE_PATH\nhowff doctor\nhowff release-info\nhowff identity show|reset|name NAME\nhowff friends [forget DEVICE_ID]\nhowff menu --frontend <retroarch|retroarch32> -- <launch args>\nhowff action <name> <context.json> <payload.json>\nhowff status\nhowff network <status|scan|create|join|approve|detach|cancel> [JSON]\nhowff manual\nhowff launcher\nWorker modes: worker, serve, game, game-recover, recover <session-id>"
             );
             Ok(0)
         }
@@ -26,91 +23,91 @@ fn run(args: &[String]) -> Result<i32> {
             Ok(0)
         }
         Some("install") if args.len() == 1 || args.len() == 2 && args[1] == "--interactive" => {
-            let result = arkos_nearby::installer::install()?;
+            let result = howff::installer::install()?;
             if args.len() == 2 {
-                arkos_nearby::manual::install_result(&result)?;
+                howff::manual::install_result(&result)?;
             }
             println!("{result}");
             Ok(0)
         }
         Some("update-install") if args.len() == 2 => {
-            println!("{}", arkos_nearby::installer::install_for_update(&args[1])?);
+            println!("{}", howff::installer::install_for_update(&args[1])?);
             Ok(0)
         }
         Some("launcher-continue") if args.len() == 2 => {
-            arkos_nearby::updates::consume(&args[1])?;
-            arkos_nearby::home::continued()?;
+            howff::updates::consume(&args[1])?;
+            howff::home::continued()?;
             Ok(0)
         }
         Some("uninstall") if args.len() == 1 => {
-            println!("{}", arkos_nearby::installer::uninstall()?);
+            println!("{}", howff::installer::uninstall()?);
             Ok(0)
         }
         Some("release-info") if args.len() == 1 => {
-            println!("{}", arkos_nearby::installer::release_info()?);
+            println!("{}", howff::installer::release_info()?);
             Ok(0)
         }
         Some("update") if args.len() == 2 => {
-            println!("{}", arkos_nearby::installer::update(Path::new(&args[1]))?);
+            println!("{}", howff::installer::update(Path::new(&args[1]))?);
             Ok(0)
         }
         Some("doctor") => {
-            let facts = arkos_nearby::compat::detect();
+            let facts = howff::compat::detect();
             println!(
                 "{}",
                 json!({"supported":facts.problems().is_empty(),"problems":facts.problems(),"facts":facts})
             );
             Ok(if facts.problems().is_empty() { 0 } else { 2 })
         }
-        Some("manual") => arkos_nearby::manual::run_manual(),
+        Some("manual") => howff::manual::run_manual(),
         Some("launcher") if args.len() == 1 => {
-            arkos_nearby::home::launch()?;
+            howff::home::launch()?;
             Ok(0)
         }
         Some("launcher") if args.len() == 2 && args[1] == "--standalone" => {
-            arkos_nearby::home::launch_standalone()?;
+            howff::home::launch_standalone()?;
             Ok(0)
         }
         Some("launcher-standalone") if args.len() == 1 => {
-            arkos_nearby::home::standalone()?;
+            howff::home::standalone()?;
             Ok(0)
         }
         Some("home-dispatch") if args.len() == 1 => {
-            arkos_nearby::home::dispatch()?;
+            howff::home::dispatch()?;
             Ok(0)
         }
         Some("launcher-game-end") if args.len() == 1 => {
-            arkos_nearby::launcher::recipes::finish()?;
+            howff::launcher::recipes::finish()?;
             Ok(0)
         }
         Some("resolve-launch") if args.len() >= 4 && args[1] == "--frontend" && args[3] == "--" => {
-            arkos_nearby::launch::resolve(&args[2], &args[4..])?;
+            howff::launch::resolve(&args[2], &args[4..])?;
             Ok(0)
         }
         Some("launch-end") if args.len() == 2 => {
-            arkos_nearby::launch::finish(&args[1])?;
+            howff::launch::finish(&args[1])?;
             Ok(0)
         }
         Some("launcher-open") if args.len() == 2 => {
-            arkos_nearby::home::open_launcher(args[1].parse()?)?;
+            howff::home::open_launcher(args[1].parse()?)?;
             Ok(0)
         }
         Some("home-listen" | "home-open") if args.len() == 2 => {
             let pid = args[1].parse::<u32>()?;
             if args[0] == "home-listen" {
-                arkos_nearby::home::listen(pid)?;
+                howff::home::listen(pid)?;
             } else {
-                arkos_nearby::home::open(pid)?;
+                howff::home::open(pid)?;
             }
             Ok(0)
         }
         Some("home-resume") if args.len() == 1 => {
-            arkos_nearby::wifi::recover_pending()?;
-            arkos_nearby::home::resume()?;
+            howff::wifi::recover_pending()?;
+            howff::home::resume()?;
             Ok(0)
         }
         Some("wifi-recover") if args.len() == 2 => {
-            arkos_nearby::wifi::recover(&args[1])?;
+            howff::wifi::recover(&args[1])?;
             Ok(0)
         }
         Some("network") if (2..=3).contains(&args.len()) => {
@@ -123,7 +120,7 @@ fn run(args: &[String]) -> Result<i32> {
                 "{}",
                 session::action_for(
                     &args[1],
-                    &arkos_nearby::purpose::SessionIntent::NetworkOnly,
+                    &howff::purpose::SessionIntent::NetworkOnly,
                     &payload
                 )?
             );
@@ -133,17 +130,17 @@ fn run(args: &[String]) -> Result<i32> {
             let value = match args.get(1).map(String::as_str) {
                 Some("show") => {
                     session::identity(false)?;
-                    json!(arkos_nearby::identity::load()?.public)
+                    json!(howff::identity::load()?.public)
                 }
                 Some("reset") => {
-                    arkos_nearby::identity::reset()?;
-                    json!(arkos_nearby::identity::load()?.public)
+                    howff::identity::reset()?;
+                    json!(howff::identity::load()?.public)
                 }
                 Some("name") if args.len() == 3 => {
-                    arkos_nearby::identity::rename(&args[2])?;
-                    json!(arkos_nearby::identity::load()?.public)
+                    howff::identity::rename(&args[2])?;
+                    json!(howff::identity::load()?.public)
                 }
-                _ => return Err("Usage: arkos-nearby identity show|reset|name NAME".into()),
+                _ => return Err("Usage: howff identity show|reset|name NAME".into()),
             };
             println!("{value}");
             Ok(0)
@@ -151,22 +148,19 @@ fn run(args: &[String]) -> Result<i32> {
         Some("friends") => {
             session::identity(false)?;
             if args.get(1).is_some_and(|value| value == "forget") && args.len() == 3 {
-                arkos_nearby::identity::forget(&args[2])?;
+                howff::identity::forget(&args[2])?;
             } else {
-                require(
-                    args.len() == 1,
-                    "Usage: arkos-nearby friends [forget DEVICE_ID]",
-                )?;
+                require(args.len() == 1, "Usage: howff friends [forget DEVICE_ID]")?;
             }
-            println!("{}", arkos_nearby::identity::summary()?);
+            println!("{}", howff::identity::summary()?);
             Ok(0)
         }
         Some("pair") => {
             let value = match args.get(1).map(String::as_str) {
-                Some("show") if args.len() == 2 => arkos_nearby::pairing::show()?,
-                Some("new") if args.len() == 2 => arkos_nearby::pairing::new_code()?,
-                Some("use") if args.len() == 3 => arkos_nearby::pairing::set(&args[2])?,
-                _ => return Err("Usage: arkos-nearby pair show|new|use CODE".into()),
+                Some("show") if args.len() == 2 => howff::pairing::show()?,
+                Some("new") if args.len() == 2 => howff::pairing::new_code()?,
+                Some("use") if args.len() == 3 => howff::pairing::set(&args[2])?,
+                _ => return Err("Usage: howff pair show|new|use CODE".into()),
             };
             println!("{value}");
             Ok(0)
@@ -184,7 +178,7 @@ fn run(args: &[String]) -> Result<i32> {
         Some("menu") => {
             session::identity(false)?;
             if session::state().is_ok_and(|state| {
-                state.purpose == arkos_nearby::purpose::SessionPurpose::NetworkOnly
+                state.purpose == howff::purpose::SessionPurpose::NetworkOnly
                     && (!state.closed() || !state.network_restored)
             }) && menu::run_network()?
             {
@@ -205,7 +199,7 @@ fn run(args: &[String]) -> Result<i32> {
                 offset += 1;
             }
             menu::log(
-                json!({"phase":"context","started_at":arkos_nearby::system::wall_time(),"frontend":frontend,"argv":&args[offset..]}),
+                json!({"phase":"context","started_at":howff::system::wall_time(),"frontend":frontend,"argv":&args[offset..]}),
             )?;
             let context = match context::parse(&frontend, &args[offset..]) {
                 Ok(context) => {
@@ -228,7 +222,7 @@ fn run(args: &[String]) -> Result<i32> {
                 "Action requires a local context file and payload",
             )?;
             session::identity(false)?;
-            let context: context::Context = arkos_nearby::system::read(Path::new(&args[2]))?;
+            let context: context::Context = howff::system::read(Path::new(&args[2]))?;
             let payload: Value = serde_json::from_str(&args[3])?;
             println!("{}", session::action(&args[1], &context, &payload)?);
             Ok(0)
@@ -239,19 +233,19 @@ fn run(args: &[String]) -> Result<i32> {
                 "worker" => session::worker(&args[1])?,
                 "serve" => {
                     session::identity(false)?;
-                    arkos_nearby::http::serve(&args[1])?;
+                    howff::http::serve(&args[1])?;
                 }
-                "game" => arkos_nearby::game::run(&args[1])?,
+                "game" => howff::game::run(&args[1])?,
                 "game-recover" => {
                     session::identity(false)?;
-                    arkos_nearby::game::detached_recover(&args[1])?;
+                    howff::game::detached_recover(&args[1])?;
                 }
                 _ => {
                     println!(
                         "{}",
                         session::recover(
                             &args[1],
-                            &env::var("ARKOS_NEARBY_RECOVERY").unwrap_or_else(|_| "exit".into())
+                            &env::var("HOWFF_RECOVERY").unwrap_or_else(|_| "exit".into())
                         )?
                     );
                 }
@@ -263,13 +257,13 @@ fn run(args: &[String]) -> Result<i32> {
 }
 fn main() {
     let dhcp_callback =
-        env::var_os("ARKOS_NEARBY_DHCP_SESSION").is_some() && env::var_os("reason").is_some();
+        env::var_os("HOWFF_DHCP_SESSION").is_some() && env::var_os("reason").is_some();
     if dhcp_callback
         || env::args_os().next().is_some_and(|path| {
             Path::new(&path).file_name() == Some(std::ffi::OsStr::new("dhcp-hook"))
         })
     {
-        let result = arkos_nearby::radio::dhcp_hook();
+        let result = howff::radio::dhcp_hook();
         if let Err(error) = &result {
             eprintln!("DHCP lease callback: {error}");
         }

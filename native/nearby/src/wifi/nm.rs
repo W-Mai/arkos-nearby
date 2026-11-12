@@ -1,6 +1,7 @@
 use super::{Access, Driver, Snapshot};
 use crate::{Result, require, system};
-use nearby_menu::wifi::{Info, Network, Secret, Security, valid_ssid};
+use howff_menu::wifi::{Info, Network, Secret, Security, valid_ssid};
+use howff_platform::arkos;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -10,7 +11,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-const JOURNAL: &str = "/run/arkos-nearby-rust/wifi-operation.json";
+const JOURNAL: &str = arkos::runtime::WIFI_OPERATION.as_str();
 pub(super) struct NetworkManager;
 impl Driver for NetworkManager {
     fn snapshot(&mut self, refresh: bool) -> Result<Snapshot> {
@@ -357,7 +358,7 @@ impl NetworkManager {
             let pass_path = password.to_string_lossy();
             if !secret.value().is_empty() {
                 require(
-                    nearby_menu::wifi::valid_psk(secret.value()),
+                    howff_menu::wifi::valid_psk(secret.value()),
                     "密码格式不正确",
                 )?;
                 system::private_write(
@@ -469,7 +470,7 @@ impl Transaction {
                 "--collect",
                 &format!("--unit={unit}"),
                 "--on-active=55s",
-                &format!("{}/arkos-nearby", crate::context::INSTALL),
+                arkos::application::EXECUTABLE.as_str(),
                 "wifi-recover",
                 &record.token,
             ],

@@ -1,7 +1,6 @@
-use std::path::Path;
+use howff_platform::arkos;
 
 use crate::content::digest;
-use crate::context::INSTALL;
 use crate::{Result, require};
 
 pub const LIBRARIES: [(&str, &str); 2] = [
@@ -19,7 +18,7 @@ pub fn directory(core_id: &str, bits: u8) -> Result<Option<String>> {
     if core_id != "mame" || bits != 64 {
         return Ok(None);
     }
-    let root = Path::new(INSTALL).join("compat/arm64");
+    let root = arkos::application::CORE_RUNTIME.path().to_path_buf();
     for (name, sha256) in LIBRARIES {
         require(
             digest(&root.join(name))? == sha256,

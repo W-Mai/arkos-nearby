@@ -873,34 +873,34 @@
   },
   {
     "name": "mirui",
-    "version": "0.54.0",
+    "version": "0.56.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "9ccd31857e9b0de08131140bfbbb784bef61aaf9d2f223d1a4afe8fc822e0aaf",
+    "checksum": "c1fe6aa364fb4d7feb43e085cec92dd7480e8a35758dd9234277584c61f500b9",
     "license_files": [
-      "docs/licenses/rust/mirui-0.54.0/LICENSE"
+      "docs/licenses/rust/mirui-0.56.0/LICENSE"
     ],
     "included": true
   },
   {
     "name": "mirui-macros",
-    "version": "0.54.0",
+    "version": "0.56.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "bb88cd5b635015129b82306be67dafd50669b269624f684d286a312bdfa61530",
+    "checksum": "a6e7004d8a3a6be495a765c36418b120dbe011a0de889f26fbfcd9bf686fb1c4",
     "license_files": [
-      "docs/licenses/rust/mirui-0.54.0/LICENSE"
+      "docs/licenses/rust/mirui-0.56.0/LICENSE"
     ],
     "included": true
   },
   {
     "name": "mirx",
-    "version": "0.54.0",
+    "version": "0.56.0",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/mirui",
-    "checksum": "7a41c12c89ba96ce028bd3507c37df97f5a28747d14165da621b1b4456c11ef0",
+    "checksum": "e81734fa8e9d0796dadd9cdb244825c5de8fcf7eb1b1ef16e8321edacd9ac61f",
     "license_files": [
-      "docs/licenses/rust/mirui-0.54.0/LICENSE"
+      "docs/licenses/rust/mirui-0.56.0/LICENSE"
     ],
     "included": true
   },
@@ -1486,12 +1486,12 @@
   },
   {
     "name": "textflow-rs",
-    "version": "0.3.3",
+    "version": "0.3.4",
     "license": "MIT",
     "repository": "https://github.com/W-Mai/textflow",
-    "checksum": "39541497ef2198cd8aede26d2c728b745353100bacb52ab4c794af1164e0a915",
+    "checksum": "4429387c08d30b12d7cab34b28aef1ef8def8b4a267091291e5fae3959b18ae3",
     "license_files": [
-      "docs/licenses/rust/textflow-rs-0.3.3/LICENSE"
+      "docs/licenses/rust/textflow-rs-0.3.4/LICENSE"
     ],
     "included": true
   },

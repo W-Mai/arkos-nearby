@@ -216,7 +216,7 @@ impl Feedback {
                 if view.launcher.wifi.as_ref().is_some_and(|wifi| {
                     matches!(
                         wifi.page,
-                        nearby_menu::wifi::Page::List | nearby_menu::wifi::Page::Empty
+                        howff_menu::wifi::Page::List | howff_menu::wifi::Page::Empty
                     )
                 }) =>
             {
@@ -305,24 +305,24 @@ impl Feedback {
         let old = previous?;
         if let Some(wifi) = next.launcher.wifi.as_ref() {
             let before = old.launcher.wifi.as_ref();
-            if wifi.page == nearby_menu::wifi::Page::Success
+            if wifi.page == howff_menu::wifi::Page::Success
                 && before.is_none_or(|v| v.page != wifi.page)
             {
                 return Some(Cue::Ready);
             }
             if matches!(
                 wifi.page,
-                nearby_menu::wifi::Page::Failed | nearby_menu::wifi::Page::Password
+                howff_menu::wifi::Page::Failed | howff_menu::wifi::Page::Password
             ) && !wifi.notice.is_empty()
                 && before.is_none_or(|v| v.notice != wifi.notice)
             {
                 return Some(Cue::Error);
             }
-            if wifi.page == nearby_menu::wifi::Page::List
+            if wifi.page == howff_menu::wifi::Page::List
                 && before.is_some_and(|v| {
                     matches!(
                         v.page,
-                        nearby_menu::wifi::Page::Restoring | nearby_menu::wifi::Page::Cancelling
+                        howff_menu::wifi::Page::Restoring | howff_menu::wifi::Page::Cancelling
                     )
                 })
             {
@@ -532,11 +532,11 @@ mod tests {
         assert_eq!(feedback.input(Action::Confirm, &view, 1000), None);
         view.launcher.overlay_kind.clear();
         view.launcher.items[0].action = crate::model::MenuAction::Back;
-        view.launcher.items[0].availability = nearby_menu::Availability::Unavailable {
+        view.launcher.items[0].availability = howff_menu::Availability::Unavailable {
             reason: "Unavailable".into(),
         };
         assert_eq!(feedback.input(Action::Confirm, &view, 1001), None);
-        view.launcher.items[0].availability = nearby_menu::Availability::Available;
+        view.launcher.items[0].availability = howff_menu::Availability::Available;
         assert_eq!(
             feedback.input(Action::Confirm, &view, 1002),
             Some(Cue::Confirm)

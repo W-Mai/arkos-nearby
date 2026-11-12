@@ -38,6 +38,7 @@ def source_record():
         raise ValueError("Owned core source identity differs")
     checked(SOURCE / "state-footer.patch", record["patch_sha256"])
     checked(SOURCE / "COPYING", record["license_sha256"])
+    checked(SOURCE / record["info_filename"], record["info_sha256"])
     return record
 
 

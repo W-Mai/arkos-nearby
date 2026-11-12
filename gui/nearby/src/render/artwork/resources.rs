@@ -57,13 +57,7 @@ pub(super) struct ArtworkDecoder {
 
 impl ArtworkDecoder {
     pub(super) fn new() -> Self {
-        Self::with_roots(vec![
-            PathBuf::from("/roms"),
-            PathBuf::from("/roms2"),
-            PathBuf::from("/opt/arkos-nearby/saves/backups"),
-            PathBuf::from("/home/ark/.config/retroarch"),
-            PathBuf::from("/home/ark/.config/retroarch32"),
-        ])
+        Self::with_roots(howff_platform::content::paths().artwork_roots())
     }
 
     fn with_roots(roots: Vec<PathBuf>) -> Self {

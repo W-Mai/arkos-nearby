@@ -1,9 +1,10 @@
 use crate::model::Action;
-use mirui::prelude::*;
-use nearby_menu::configuration::{
+use howff_menu::configuration::{
     Change, Document, Field, Id, Load, Request, Scope, Section, Value, View,
 };
-use nearby_menu::details::Fact;
+use howff_menu::details::Fact;
+use howff_menu::input::{Generation, Sourced};
+use mirui::prelude::*;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
@@ -23,6 +24,7 @@ pub struct Row {
 
 #[model]
 pub struct Editor {
+    input_generation: Generation,
     view: Option<View>,
     shown: bool,
     #[observe]
@@ -56,6 +58,7 @@ pub struct Editor {
 impl Default for Editor {
     fn default() -> Self {
         Self {
+            input_generation: Generation::default(),
             view: None,
             shown: false,
             revision: 0,
@@ -83,6 +86,13 @@ impl Default for Editor {
 
 #[model]
 impl Editor {
+    pub fn bind_input(&mut self, generation: Generation) {
+        if self.input_generation != generation {
+            self.request = None;
+            self.input_generation = generation;
+        }
+    }
+
     pub fn sync(&mut self, view: Option<&View>) {
         let shown = view.is_some();
         if self.shown != shown {
@@ -713,8 +723,9 @@ impl Editor {
         self.scroll();
     }
     #[effects]
-    fn take_request(&mut self) -> Option<Request> {
-        self.request.take()
+    fn take_input(&mut self) -> Option<Sourced<Request>> {
+        self.take_request()
+            .map(|request| self.input_generation.bind(request))
     }
 }
 
@@ -784,11 +795,11 @@ pub(crate) mod tests {
     use super::*;
     pub fn fixture() -> View {
         let boolean = vec![
-            nearby_menu::configuration::Choice {
+            howff_menu::configuration::Choice {
                 value: Value::Bool(false),
                 label: "关闭".into(),
             },
-            nearby_menu::configuration::Choice {
+            howff_menu::configuration::Choice {
                 value: Value::Bool(true),
                 label: "开启".into(),
             },
@@ -942,7 +953,7 @@ pub(crate) mod tests {
             id: Id::AutoLoad,
             value: Some(Value::Bool(true)),
         };
-        view.projection = Some(nearby_menu::configuration::Projection {
+        view.projection = Some(howff_menu::configuration::Projection {
             scope: Scope::Game,
             changes: vec![change.clone()],
             facts: vec![Fact::new("SRAM 文件", "/new.srm")],
@@ -975,7 +986,7 @@ pub(crate) mod tests {
         ];
         let mut facts = document.saves.clone();
         facts[0].value = "槽位 5".into();
-        view.projection = Some(nearby_menu::configuration::Projection {
+        view.projection = Some(howff_menu::configuration::Projection {
             scope: Scope::Game,
             changes: vec![change.clone()],
             facts,
@@ -1036,5 +1047,34 @@ mod save_return_tests {
         editor.input(Action::Back);
         assert_eq!(editor.section, Section::Home);
         assert_eq!(editor.selected, 3);
+    }
+}
+
+impl Editor {
+    fn take_request(&mut self) -> Option<Request> {
+        self.request.take()
+    }
+}
+
+#[cfg(test)]
+mod input_contract {
+    use super::*;
+
+    #[test]
+    fn queued_requests_keep_their_origin_and_rebinding_discards_unsent_requests() {
+        let mut model = Editor::default();
+        let mut generation = Generation::FIRST;
+        model.bind_input(generation);
+        model.selected = 3;
+        model.request = Some(Request::Close { epoch: 1 });
+        let queued = model.take_input().unwrap();
+        model.request = Some(Request::Close { epoch: 1 });
+        generation.advance();
+        model.bind_input(generation);
+        assert!(model.take_input().is_none());
+        assert_eq!(queued.generation, Generation::FIRST);
+        assert_eq!(model.selected, 3);
+        model.request = Some(Request::Close { epoch: 1 });
+        assert_eq!(model.take_input().unwrap().generation, generation);
     }
 }

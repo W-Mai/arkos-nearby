@@ -1,7 +1,7 @@
 mod nm;
 
 use crate::Result;
-use nearby_menu::wifi::{Info, Network, Page, Request, Secret, Security, View, valid_ssid};
+use howff_menu::wifi::{Info, Network, Page, Request, Secret, Security, View, valid_ssid};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},

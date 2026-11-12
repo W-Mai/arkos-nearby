@@ -2,8 +2,8 @@ use crate::catalog::Entry;
 use crate::configuration::Snapshot;
 use crate::saves::{Identity, Store, launch};
 use crate::{Result, require};
-use nearby_menu::details::Fact;
-use nearby_menu::saves::{Document, Request, View};
+use howff_menu::details::Fact;
+use howff_menu::saves::{Document, Request, View};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 
@@ -114,9 +114,9 @@ fn worker(incoming: Receiver<Work>, outgoing: SyncSender<Reply>) {
                                 launch = Some(launch::issue(context, store.paths(), intent)?);
                             }
                             view.notice = match operation {
-                                nearby_menu::saves::Operation::Backup => "备份已完成",
-                                nearby_menu::saves::Operation::Delete => "存档已删除",
-                                nearby_menu::saves::Operation::Restore => "存档已恢复",
+                                howff_menu::saves::Operation::Backup => "备份已完成",
+                                howff_menu::saves::Operation::Delete => "存档已删除",
+                                howff_menu::saves::Operation::Restore => "存档已恢复",
                                 _ => "正在启动游戏",
                             }
                             .into();
@@ -285,7 +285,7 @@ mod tests {
             "id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "self_mac":"02:00:00:00:00:01",
             "role":"host", "phase":"closed", "stage":"", "step":"", "context_key":[],
             "room":{"id":"room", "ssid":"room", "bssid":"02:00:00:00:00:01", "signal":0, "token":"token", "name":"Room A", "same_game_hint":false},
-            "original_uuid":"", "radio_before":"enabled", "services_before":[true,true],
+            "original_uuid":"", "radio_before":"enabled", "services_before":{"NetworkManager.service":{"active":true,"enabled":"enabled"},"wpa_supplicant.service":{"active":true,"enabled":"enabled"}},
             "driver_owned":false, "mounts":[], "deadline":0.0, "claim_deadline":0.0,
             "network_restored":true, "recovery_errors":["NetworkManager"], "timings":[], "stage_started":0.0
         })).unwrap();

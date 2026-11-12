@@ -48,5 +48,7 @@
     "linker": "rust-lld from Rust 1.92",
     "strip": "llvm-strip from LLVM 18",
     "recipe": "scripts/build_owned_cores.py"
-  }
+  },
+  "info_filename": "nestopia_libretro.info",
+  "info_sha256": "75e385b59cd44decd96f449b1549c62cdd3834f9e3e72e43e7f333408687d8c5"
 }

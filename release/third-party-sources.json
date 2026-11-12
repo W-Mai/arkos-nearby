@@ -18,15 +18,15 @@
     "released_binary_sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e"
   },
   "rust": {
-    "source_archive": "arkos-nearby-0.12.0-rust-sources.tar.gz",
+    "source_archive": "howff-0.13.0-rust-sources.tar.gz",
     "locked_crates": 196,
     "included_crates": 196
   },
   "netplay_compression": {
     "schema": 1,
-    "sha256": "381d05d1ff68ff5f4eca503965f35a6fe99922e280f4e52620e68b21dca0d633",
-    "bytes": 12576,
-    "source_sha256": "77be206f0160e8c33ccf1ade4201deb9ac662c71584f47f57db20c9d906ed0dc",
+    "sha256": "b3439305d945e1ca4187131cf176d7b97a377e908555f85088dda387c3eb55bb",
+    "bytes": 11392,
+    "source_sha256": "f93c08c5a6d9d3007571a171d75cd6b464f826f10a50e4ae590b35bda49f9c23",
     "frontend_sha256": "81f3cf1b8850f9457730346d3f973dfb03d5316d62c4bb92b1654372bbc86e77",
     "abi": {
       "schema": 1,
@@ -60,7 +60,7 @@
       "libc.so.6"
     ],
     "maximum_glibc": "2.17",
-    "compiler": "Apple clang version 21.0.0 (clang-2100.3.20.102)",
+    "compiler": "Homebrew clang version 23.1.3",
     "linker": "LLD 21.1.3 (https://github.com/rust-lang/llvm-project.git 4f74b76fb69688474e073fb26b316d9ea571388f) (compatible with GNU linkers)",
     "flags": [
       "--target=aarch64-linux-gnu",
@@ -129,7 +129,9 @@
       "linker": "rust-lld from Rust 1.92",
       "strip": "llvm-strip from LLVM 18",
       "recipe": "scripts/build_owned_cores.py"
-    }
+    },
+    "info_filename": "nestopia_libretro.info",
+    "info_sha256": "75e385b59cd44decd96f449b1549c62cdd3834f9e3e72e43e7f333408687d8c5"
   },
   "owned_core_source_package": {
     "filename": "nestopia-7dfdc25-footer1-source.tar.gz",
@@ -184,14 +186,14 @@
     "sha256": "b19a9387a7e52ea9bcedd0d39a08d55fb48c253f30e28656c9ef921b4d5fbc94"
   },
   "renderer": {
-    "version": "0.54.0",
-    "mirx_version": "0.54.0",
-    "sha256": "ad9a61c02f36a9f2fdcdfddc37b12609018d04d9f4084433fccc4b28c01b4deb",
-    "source_sha256": "ebe978b8d6b098df18a67d6c74a6ab30b1196043d09161a79a9ff61d18bcc3b8",
-    "cargo_lock_sha256": "b7c422c4997e01de0af8dd4e05f59e01bb0dd3c2e818790a7d8cab01ee87118f",
-    "mirui_crate_sha256": "9ccd31857e9b0de08131140bfbbb784bef61aaf9d2f223d1a4afe8fc822e0aaf",
-    "mirui_macros_crate_sha256": "bb88cd5b635015129b82306be67dafd50669b269624f684d286a312bdfa61530",
-    "mirx_crate_sha256": "7a41c12c89ba96ce028bd3507c37df97f5a28747d14165da621b1b4456c11ef0"
+    "version": "0.56.0",
+    "mirx_version": "0.56.0",
+    "sha256": "d80acc881ebd5ee64c44c82996dbfc1376caf32fc4d7f8aaa8abcdab10163fa4",
+    "source_sha256": "103476a929616de65a6c36fdcb08b248c07db8cca272093b90a24c15c0e7ac5a",
+    "cargo_lock_sha256": "0aafcfdf6efcbf0ddd0ad5ef4f9c86550704eb4e1dabc64ff3b0194745ebda89",
+    "mirui_crate_sha256": "c1fe6aa364fb4d7feb43e085cec92dd7480e8a35758dd9234277584c61f500b9",
+    "mirui_macros_crate_sha256": "a6e7004d8a3a6be495a765c36418b120dbe011a0de889f26fbfcd9bf686fb1c4",
+    "mirx_crate_sha256": "e81734fa8e9d0796dadd9cdb244825c5de8fcf7eb1b1ef16e8321edacd9ac61f"
   },
   "sdl2": {
     "version": "2.32.10",

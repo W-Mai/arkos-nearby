@@ -1,9 +1,10 @@
+use howff_platform::arkos;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::context::{Context, INSTALL};
+use crate::context::Context;
 use crate::game::{Settings, settings};
 use crate::session::{State, best, current, progress};
 use crate::system::{command, mkdir, monotonic, private_write, write};
@@ -74,7 +75,7 @@ fn stop_probe(unit: &str, root: &Path) -> Result<()> {
 }
 
 pub fn stop_launch(root: &Path, id: &str) -> Result<()> {
-    stop_probe(&format!("arkos-nearby-launch-{id}"), root)
+    stop_probe(&format!("howff-launch-{id}"), root)
 }
 
 struct Scope<'a> {
@@ -157,7 +158,7 @@ fn probe(scope: &Scope<'_>, context: &Context, settings: &Settings) -> Result<()
         arguments.push(format!("--setenv=LD_LIBRARY_PATH={runtime}"));
     }
     arguments.extend([
-        format!("{INSTALL}/core-probe64"),
+        arkos::application::CORE_PROBE.as_str().into(),
         context.core_path.to_string_lossy().into_owned(),
         context.game_path.to_string_lossy().into_owned(),
         system.to_string_lossy().into_owned(),
@@ -179,9 +180,9 @@ fn probe(scope: &Scope<'_>, context: &Context, settings: &Settings) -> Result<()
         "elapsed_ms":(monotonic()-started)*1000.0,"result":outcome.as_ref().ok(),
         "error":outcome.as_ref().err().map(|error| error.to_string().chars().take(4096).collect::<String>())});
     write(&scope.root.join("core-probe.json"), &record)?;
-    mkdir(&Path::new(INSTALL).join("logs"))?;
+    mkdir(arkos::application::LOGS.path())?;
     write(
-        &Path::new(INSTALL).join("logs/last-core-probe.json"),
+        &arkos::application::LOGS.path().join("last-core-probe.json"),
         &record,
     )?;
     outcome.map(|_| ())
@@ -196,7 +197,7 @@ pub fn single_player(root: &Path, id: &str, original: &Context) -> Result<(Conte
         &Scope {
             state: None,
             root: root.into(),
-            unit: format!("arkos-nearby-launch-{id}"),
+            unit: format!("howff-launch-{id}"),
             id: id.into(),
         },
         original,
@@ -243,9 +244,11 @@ fn select(scope: &Scope<'_>, original: &Context) -> Result<(Context, Settings)> 
             "error":selected.as_ref().err().map(|error|error.to_string().chars().take(4096).collect::<String>())}));
         let record = json!({"session_id":scope.id,"attempts":attempts,"origin":selected.as_ref().ok().map(|(context,_)|context.origin())});
         write(&scope.root.join("core-selection.json"), &record)?;
-        mkdir(&Path::new(INSTALL).join("logs"))?;
+        mkdir(arkos::application::LOGS.path())?;
         write(
-            &Path::new(INSTALL).join("logs/last-core-selection.json"),
+            &arkos::application::LOGS
+                .path()
+                .join("last-core-selection.json"),
             &record,
         )?;
         match selected {

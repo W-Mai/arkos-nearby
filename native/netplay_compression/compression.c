@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define OWNED_LIBRARY "/opt/arkos-nearby/assets/netplay-compression.so"
+#define OWNED_LIBRARY "/opt/howff/assets/netplay-compression.so"
 #define BACKEND_ADDRESS UINT64_C(0x11262d8)
 #define NETPLAY_SET_IN_RETURN UINT64_C(0xad34e0)
 #define NETPLAY_SET_OUT_RETURN UINT64_C(0xad350c)
@@ -72,7 +72,7 @@ static bool executable_matches(void) {
 }
 
 static bool owned_config(const char *path) {
-  const char *prefix = "/run/arkos-nearby-rust/";
+  const char *prefix = "/run/howff/";
   if (strncmp(path, prefix, strlen(prefix)))
     return false;
   const char *id = path + strlen(prefix);

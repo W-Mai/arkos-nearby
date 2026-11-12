@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum Home {
     #[default]
     Original,
-    Nearby,
+    Howff,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

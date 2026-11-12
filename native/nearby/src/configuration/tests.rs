@@ -1,5 +1,5 @@
 use super::*;
-use nearby_menu::configuration::{Change, Document, Id, Scope, Value};
+use howff_menu::configuration::{Change, Document, Id, Scope, Value};
 use std::fs;
 use std::path::PathBuf;
 
@@ -65,7 +65,7 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
-fn field(snapshot: &Snapshot, id: Id) -> &nearby_menu::configuration::Field {
+fn field(snapshot: &Snapshot, id: Id) -> &howff_menu::configuration::Field {
     snapshot
         .document
         .fields

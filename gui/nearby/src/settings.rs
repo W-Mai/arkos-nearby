@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[cfg(any(target_os = "linux", test))]
-pub const SOUND_FILE: &str = "/opt/arkos-nearby/ui-sound.json";
+pub const SOUND_FILE: &str = howff_platform::arkos::application::SOUND.as_str();
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -86,10 +86,10 @@ impl Settings {
 }
 
 impl SettingsHandle {
-    pub fn menu_value(&self, action: nearby_menu::MenuAction) -> &'static str {
+    pub fn menu_value(&self, action: howff_menu::MenuAction) -> &'static str {
         match action {
-            nearby_menu::MenuAction::CycleTheme => self.palette().label(),
-            nearby_menu::MenuAction::ToggleSound => {
+            howff_menu::MenuAction::CycleTheme => self.palette().label(),
+            howff_menu::MenuAction::ToggleSound => {
                 if self.sound().enabled {
                     "开"
                 } else {

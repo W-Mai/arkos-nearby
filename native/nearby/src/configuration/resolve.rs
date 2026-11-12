@@ -1,7 +1,8 @@
 use super::files::{self, Graph, Values};
 use crate::{Result, require};
-use nearby_menu::configuration::{Change, Choice, Document, Field, Id, Scope, Section, Value};
-use nearby_menu::details::Fact;
+use howff_menu::configuration::{Change, Choice, Document, Field, Id, Scope, Section, Value};
+use howff_menu::details::Fact;
+use howff_platform::arkos;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -80,16 +81,15 @@ fn config_path(value: Option<&str>, fallback: &Path, env: &Environment) -> PathB
 
 impl Snapshot {
     pub fn environment(context: &crate::context::Context) -> Result<Environment> {
-        let home = PathBuf::from("/home/ark");
-        let controller =
-            std::fs::canonicalize("/dev/input/by-path/platform-odroidgo3-joypad-event-joystick")
-                .ok()
-                .and_then(|path| {
-                    path.file_name()
-                        .map(|name| Path::new("/sys/class/input").join(name).join("device/name"))
-                })
-                .and_then(|path| std::fs::read_to_string(path).ok())
-                .map(|text| text.trim().to_string());
+        let home = PathBuf::from(arkos::home::ROOT);
+        let controller = std::fs::canonicalize(howff_platform::arkos::input::JOYSTICK.as_str())
+            .ok()
+            .and_then(|path| {
+                path.file_name()
+                    .map(|name| Path::new("/sys/class/input").join(name).join("device/name"))
+            })
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(|text| text.trim().to_string());
         Ok(Environment {
             access: Some(files::Access {
                 uid: crate::session::cmd(&["id", "-u", "ark"])?.trim().parse()?,

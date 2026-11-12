@@ -9,7 +9,7 @@
 ## 准备
 
 ```sh
-python3 scripts/build.py prepare /path/to/arkos-nearby-0.12.0-build-assets.tar.gz
+python3 scripts/build.py prepare /path/to/BUILD_ASSETS.tar.gz
 cargo +1.92.0 fetch --locked --manifest-path native/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 cargo +1.97.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarch64-unknown-linux-musl
 ```
@@ -20,21 +20,27 @@ cargo +1.97.0 fetch --locked --manifest-path gui/nearby/Cargo.toml --target aarc
 CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path/to/llvm-ar python3 scripts/build.py build
 ```
 
-输出为 `dist/arkos-nearby` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.54.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
+输出为 `dist/howff` 和 `dist/SHA256SUMS`。所有 Cargo 编译目录位于 `/tmp/arkos-rust-build/public/`，直接 Cargo 命令使用 `/tmp/arkos-rust-build/public-cargo/`。GUI 固定 mirui 和 mirx 0.56.0，页面使用 `#[compose]`、`ui!` 与 Flex 布局，文字按可用空间换行或省略。构建记录和安装资产校验读取 Cargo.toml 与 Cargo.lock 中的实际版本。
 
-GUI 通过 `scripts/build_nearby_gui.py` 构建和检查，直接使用 Cargo.lock 锁定的 registry 包。构建记录包含 mirui、mirui-macros、mirx 的 crate 校验和、应用源码摘要和实际锁文件摘要。页面由 PageView 挂载和释放，焦点框通过 FollowBounds 与共享动画调度跟随目标。灰度位图字体的采样外缘使用 PaintInflate 计入重绘覆盖。源码、Clippy、测试和 ARM64 构建使用同一份未修改的框架包。
+GUI 通过 `scripts/build_howff_gui.py` 构建和检查，直接使用 Cargo.lock 锁定的 registry 包。构建记录包含 mirui、mirui-macros、mirx 的 crate 校验和、应用源码摘要和实际锁文件摘要。页面由 PageView 挂载和释放，焦点框通过 FollowBounds 与共享动画调度跟随目标。灰度位图字体的采样外缘使用 PaintInflate 计入重绘覆盖。源码、Clippy、测试和 ARM64 构建使用同一份未修改的框架包。
 
 `gui/nearby/src/model.rs` 定义显示协议；`native/nearby-menu/` 定义 GUI 与 runtime 共用的菜单动作和可用状态，包含在源码摘要与导出中。`render.rs` 负责安装与 Scene 入口。`render/state.rs` 发布显示状态，`copy.rs` 提供状态文案，`style.rs` 和 `font.rs` 管理尺寸、颜色与字体，`widgets.rs` 组合公共控件。`chrome.rs`、`choices.rs`、`lists.rs`、`sessions.rs` 和 `pages.rs` 构成页面，`composition.rs` 挂载 PageView，`selection.rs` 管理页面内焦点。网络、游戏核对和会话清理仍属于 native runtime。
+
+`native/nearby-platform/` 提供两端共享的 ArkOS 位置表，区分程序、配置、个人数据、缓存与运行记录，并登记 ROM、前端配置和系统工具位置。安装器使用同一记录生成入口和启动包装器。两个共享 crate 都参与 GUI / runtime 的源码摘要、离线检查与源码导出。
 
 Options 和主页 FN + X 使用直接入口，游戏启动前的 X 入口携带当前游戏。`MenuSession` 连接附近房间、模式选择、游戏列表与房间流程；`menu/display.rs` 持有 GUI 进程、手柄映射和消息通道。后台回复按屏幕会话隔离，输入保留接收时间检查。`home.rs` 的快捷键监听随前台 EmulationStation 进程运行，进入工具时移交显示，退出后恢复前台。
 
 `native/home_input/` 在 EmulationStation 的 SDL 事件入口消费 FN + X 的 X 按下及松开，保留独立 X 和其他按键。启动器仅为该前端加载 `home-input.so`，子程序继承其余环境。使用已有 ARM64 GNU 编译器和 SDL2 头文件执行 `python3 scripts/build_home_input.py build --compiler /path/to/aarch64-linux-gnu-clang --sdl-include /path/to/SDL2/include`；构建产物和来源校验记录一起进入安装包。
 
-`catalog/metadata.rs` 读取本机游戏列表名称、截图和数量；`catalog/matching.rs` 在客户端取得房间描述后匹配本地内容。候选项以会话内标识选择，准备完成仍需核对模拟器、核心和内容身份。`render/artwork.rs` 异步读取选中游戏的截图，通过资源管理器和 Image 控件显示；过期选择的读取结果会被丢弃，图片保持原始比例。
+`native/nearby/src/platform/content.rs` 提供游戏目录、元数据和本地启动配方；`platform/arkos/` 读取 ES 配置、游戏名称、截图与每游戏覆盖。`catalog/` 共用目录快照、搜索索引与客户端匹配，`core_choice` 决定核心顺序。元数据读取和目录修订使用同一个来源路径，原索引快照继续复用。
+
+`nearby-platform::content` 分别提供 ROM 根、artwork 授权根和两种索引位置。`render/artwork.rs` 通过原有 Mirui Loader、Texture、资源管理器和 Image 控件异步显示图片，保留预取、缓存和过期选择处理。客户端取得房间描述后匹配本地内容，准备完成时核对模拟器、核心和内容身份。
+
+`native/nearby/src/platform/radio.rs` 提供无线接管与恢复接口，`platform/arkos/` 管理驱动、私有 supplicant、DHCP、服务快照、启动期限和原连接恢复。游戏与仅组网会话共用同一后端；会话日志读取旧服务布尔记录及具名记录，公共会话在完整恢复后释放网络所有权。
 
 准备的发行资产包含静态GLES界面，常规构建核验后复用这份程序。修改GUI源码后，按[GPU构建说明](gpu-rendering.md)重新生成界面到`build/assets/`，再执行构建与质量检查。`release/manifest.json`和`release/assets.json`保留已发行安装资产的身份；构建时将当前GUI、字体许可证及来源记录放入新的本地bundle。
 
-准备发行归档时，先完成构建和校验，再执行 `python3 scripts/package.py --binary dist/arkos-nearby --expected-sha256 VERIFIED_SHA256`。将 `VERIFIED_SHA256` 替换为构建结果的 SHA-256。程序核对摘要与 ARM64 ELF 类型，打包安装脚本、使用说明和许可证。
+准备发行归档时，先完成构建和校验，再执行 `python3 scripts/package.py --binary dist/howff --expected-sha256 VERIFIED_SHA256`。将 `VERIFIED_SHA256` 替换为构建结果的 SHA-256。程序核对摘要与 ARM64 ELF 类型，打包可执行文件、安装脚本、使用说明、校验值和版本清单。组件许可证随可执行文件安装。
 
 ## 质量检查
 
@@ -53,7 +59,7 @@ CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path
 发行版使用 SDL2/GLES 界面；静态链接构建命令及显示检查见 [GPU 界面构建](gpu-rendering.md)。`scripts/build.py build` 生成 framebuffer 安装程序。
 
 ```sh
-python3 scripts/build_nearby_gui.py snapshot --view docs/screenshots/views/room-choice.json --output /tmp/arkos-room-choice.png
+python3 scripts/build_howff_gui.py snapshot --view docs/screenshots/views/room-choice.json --output /tmp/arkos-room-choice.png
 ```
 
 截图使用相同的场景和字体渲染代码，输入仅包含显示状态。`docs/screenshots/views/` 保存 README 截图所用的示例状态。
@@ -68,7 +74,7 @@ python3 scripts/build_nearby_gui.py snapshot --view docs/screenshots/views/room-
 python3 gui/nearby/examples/dual_demo/export.py --output /tmp/nearby-dual-demo.webp
 ```
 
-Cargo 产物沿用 GUI 的外部缓存目录，1120×780 PNG 帧默认保存到 `/tmp/arkos-nearby-demo-frames`。`--frames` 指定帧目录，`--width` 设置成品宽度，`--quality` 设置编码质量，默认 75；`--lossless` 使用无损编码，`--reuse-frames` 复用已有帧进行编码。`gui/nearby/examples/dual_demo/story.rs` 定义分镜与镜头，`scene.rs` 定义宣传画面，`gui/nearby/src/dual_demo.rs` 负责逐帧渲染和导出。
+Cargo 产物沿用 GUI 的外部缓存目录，1120×780 PNG 帧默认保存到 `/tmp/howff-demo-frames`。`--frames` 指定帧目录，`--width` 设置成品宽度，`--quality` 设置编码质量，默认 75；`--lossless` 使用无损编码，`--reuse-frames` 复用已有帧进行编码。`gui/nearby/examples/dual_demo/story.rs` 定义分镜与镜头，`scene.rs` 定义宣传画面，`gui/nearby/src/dual_demo.rs` 负责逐帧渲染和导出。
 
 生成适合分享的 H.264 MP4，默认保留 1120×780 分辨率、25 fps 和完整 20 秒内容：
 
@@ -84,7 +90,7 @@ python3 gui/nearby/examples/dual_demo/export.py --output /tmp/nearby-dual-demo.m
 python3 gui/nearby/examples/dual_demo/svg.py --output /tmp/nearby-dual-demo.svg
 ```
 
-导出器通过 mirui SceneRenderer 捕获两个菜单与宣传场景，保存绘制顺序和裁剪，将像素字形转为共享路径，并生成 CSS 动画时间轴。相邻且互不重叠的静态矩形合并为路径，裁剪范围完全覆盖的矩形省去裁剪层，暂未出现的图形按时间轴退出绘制。中间场景和 PNG 帧默认写入 `/tmp/arkos-nearby-svg`；`--frames` 指定目录，`--reuse-scenes` 复用其中的 `scenes.json`。SVG 的播放开销取决于浏览器对矢量节点和动画的处理能力。
+导出器通过 mirui SceneRenderer 捕获两个菜单与宣传场景，保存绘制顺序和裁剪，将像素字形转为共享路径，并生成 CSS 动画时间轴。相邻且互不重叠的静态矩形合并为路径，裁剪范围完全覆盖的矩形省去裁剪层，暂未出现的图形按时间轴退出绘制。中间场景和 PNG 帧默认写入 `/tmp/howff-svg`；`--frames` 指定目录，`--reuse-scenes` 复用其中的 `scenes.json`。SVG 的播放开销取决于浏览器对矢量节点和动画的处理能力。
 
 ## 核心查询器
 

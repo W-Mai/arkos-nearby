@@ -2,7 +2,7 @@
 
 ## 安装提示不支持
 
-执行 `sudo /path/to/arkos-nearby doctor`，按 `problems` 检查内核、无线 USB ID、屏幕格式和系统工具。具体配置见 [设备兼容性](compatibility.md#设备配置)。
+执行 `sudo /path/to/howff doctor`，按 `problems` 检查内核、无线 USB ID、屏幕格式和系统工具。具体配置见 [设备兼容性](compatibility.md#设备配置)。
 
 ## 找不到附近房间
 
@@ -18,15 +18,15 @@
 
 ## 退出期间 SSH 断开
 
-附近联机会暂时离开普通 Wi-Fi，原 IP 上的 SSH 不可用。正常退出并等待恢复后查看当前 IP。启动失败有独立的 300 秒恢复期限；游戏启动得到原生连接确认后取消启动计时器。诊断日志持久保存在 `/opt/arkos-nearby/logs/`。
+附近联机会暂时离开普通 Wi-Fi，原 IP 上的 SSH 不可用。正常退出并等待恢复后查看当前 IP。启动失败有独立的 300 秒恢复期限；游戏启动得到原生连接确认后取消启动计时器。诊断日志持久保存在 `/opt/howff/logs/`。
 
 ## 图形界面打不开
 
-先退出游戏和房间，再重新打开 Options 入口。检查 `/opt/arkos-nearby/logs/` 中的启动记录。报告时附上版本、`doctor` 结果、打开方式、游戏名称和所用核心。
+先退出游戏和房间，再重新打开 Options 入口。检查 `/opt/howff/logs/` 中的启动记录。报告时附上版本、`doctor` 结果、打开方式、游戏名称和所用核心。
 
 ## 菜单音效
 
-菜单使用 8-bit 音效提示选择、确认、房间就绪和连接结果，音量跟随掌机系统音量。可在 `/opt/arkos-nearby/ui-sound.json` 设置 `{"enabled":true,"gain":96}`；`gain` 范围为 0–255，`enabled` 设为 `false` 可静音。修改后重新打开联机菜单生效。启动日志中的 `ui_audio` 记录音频输出状态。
+菜单使用 8-bit 音效提示选择、确认、房间就绪和连接结果，音量跟随掌机系统音量。可在 `/opt/howff/ui-sound.json` 设置 `{"enabled":true,"gain":96}`；`gain` 范围为 0–255，`enabled` 设为 `false` 可静音。修改后重新打开联机菜单生效。启动日志中的 `ui_audio` 记录音频输出状态。
 
 ## 报告问题
 

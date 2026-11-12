@@ -1,7 +1,8 @@
 use crate::model::Action;
+use howff_menu::details::Fact;
+use howff_menu::input::{Generation, Sourced};
+use howff_menu::saves::{Kind, Operation, Record, Request, SourceMatch, Tab, View};
 use mirui::prelude::*;
-use nearby_menu::details::Fact;
-use nearby_menu::saves::{Kind, Operation, Record, Request, SourceMatch, Tab, View};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Page {
@@ -16,6 +17,7 @@ pub enum Page {
 
 #[model]
 pub struct Manager {
+    input_generation: Generation,
     view: Option<View>,
     #[observe]
     revision: u64,
@@ -53,6 +55,7 @@ pub struct Manager {
 impl Default for Manager {
     fn default() -> Self {
         Self {
+            input_generation: Generation::default(),
             view: None,
             revision: 0,
             shown: false,
@@ -82,6 +85,13 @@ impl Default for Manager {
 }
 #[model]
 impl Manager {
+    pub fn bind_input(&mut self, generation: Generation) {
+        if self.input_generation != generation {
+            self.request = None;
+            self.input_generation = generation;
+        }
+    }
+
     pub fn sync(&mut self, view: Option<&View>) {
         self.shown = view.is_some();
         let Some(view) = view else {
@@ -581,8 +591,9 @@ impl Manager {
         }
     }
     #[effects]
-    fn take_request(&mut self) -> Option<Request> {
-        self.request.take()
+    fn take_input(&mut self) -> Option<Sourced<Request>> {
+        self.take_request()
+            .map(|request| self.input_generation.bind(request))
     }
 }
 impl ManagerHandle {
@@ -735,7 +746,7 @@ pub(crate) mod tests {
             .collect();
         View {
             epoch: 4,
-            document: Some(nearby_menu::saves::Document {
+            document: Some(howff_menu::saves::Document {
                 title: "超级炸弹人5".into(),
                 core: "Snes9x".into(),
                 revision: "c".repeat(64),
@@ -922,5 +933,34 @@ mod identity_tests {
         ));
         manager.sync(Some(&view));
         assert_eq!(manager.page, Page::Failure);
+    }
+}
+
+impl Manager {
+    fn take_request(&mut self) -> Option<Request> {
+        self.request.take()
+    }
+}
+
+#[cfg(test)]
+mod input_contract {
+    use super::*;
+
+    #[test]
+    fn queued_requests_keep_their_origin_and_rebinding_discards_unsent_requests() {
+        let mut model = Manager::default();
+        let mut generation = Generation::FIRST;
+        model.bind_input(generation);
+        model.selected = 3;
+        model.request = Some(Request::Close { epoch: 1 });
+        let queued = model.take_input().unwrap();
+        model.request = Some(Request::Close { epoch: 1 });
+        generation.advance();
+        model.bind_input(generation);
+        assert!(model.take_input().is_none());
+        assert_eq!(queued.generation, Generation::FIRST);
+        assert_eq!(model.selected, 3);
+        model.request = Some(Request::Close { epoch: 1 });
+        assert_eq!(model.take_input().unwrap().generation, generation);
     }
 }

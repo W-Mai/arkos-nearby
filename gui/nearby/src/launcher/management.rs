@@ -1,7 +1,8 @@
 use super::text_entry::TextEntry;
 use crate::model::Action;
+use howff_menu::input::{Generation, Sourced};
+use howff_menu::management::{Entry, Fact, Home, Operation, Request, UpdatePhase, View};
 use mirui::prelude::*;
-use nearby_menu::management::{Entry, Fact, Home, Operation, Request, UpdatePhase, View};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Page {
@@ -43,6 +44,7 @@ fn row(
 
 #[model]
 pub struct Manager {
+    input_generation: Generation,
     pub text: model!(owned TextEntry),
     #[observe]
     pub page: Page,
@@ -82,6 +84,7 @@ pub struct Manager {
 impl Default for Manager {
     fn default() -> Self {
         Self {
+            input_generation: Generation::default(),
             text: TextEntry::default().into(),
             page: Page::Device,
             selected: 0,
@@ -112,6 +115,13 @@ impl Default for Manager {
 }
 #[model]
 impl Manager {
+    pub fn bind_input(&mut self, generation: Generation) {
+        if self.input_generation != generation {
+            self.pending = None;
+            self.input_generation = generation;
+        }
+    }
+
     pub fn sync(&mut self, view: Option<&View>) {
         self.sync_state(view);
         self.refresh_rows();
@@ -271,7 +281,7 @@ impl Manager {
                 Some(Operation::Forget { .. }) => "移除后，下次加入时重新确认".into(),
                 Some(Operation::SetHome { home }) => format!(
                     "开机进入{}",
-                    if home == Home::Nearby {
+                    if home == Home::Howff {
                         "Nearby 收藏首页"
                     } else {
                         "原系统游戏列表"
@@ -330,7 +340,12 @@ impl Manager {
             ],
             Page::Version => vec![
                 row("fact-version", "应用版本", &view.version, true),
-                row("fact-path", "安装位置", "/opt/arkos-nearby", true),
+                row(
+                    "fact-path",
+                    "安装位置",
+                    howff_platform::arkos::PATHS.program,
+                    true,
+                ),
                 row("fact-profile", "设备配置", &view.profile, true),
             ],
             Page::Startup => vec![
@@ -338,7 +353,7 @@ impl Manager {
                 row(
                     "home",
                     "开机首页",
-                    if view.home == Home::Nearby {
+                    if view.home == Home::Howff {
                         "Nearby"
                     } else {
                         "原系统"
@@ -658,7 +673,7 @@ impl Manager {
             "original" | "nearby" => {
                 self.confirmation = Some(Operation::SetHome {
                     home: if item.key == "nearby" {
-                        Home::Nearby
+                        Home::Howff
                     } else {
                         Home::Original
                     },
@@ -734,15 +749,16 @@ impl Manager {
             return;
         }
         let name = self.text.snapshot_value().trim().to_string();
-        if nearby_menu::management::valid_name(&name) {
+        if howff_menu::management::valid_name(&name) {
             self.send(Operation::Rename { name });
         } else {
             self.text.reject("请输入设备名称");
         }
     }
     #[effects]
-    fn take_request(&mut self) -> Option<Request> {
-        self.pending.take()
+    fn take_input(&mut self) -> Option<Sourced<Request>> {
+        self.take_request()
+            .map(|request| self.input_generation.bind(request))
     }
 }
 
@@ -789,5 +805,46 @@ impl ManagerHandle {
         self.selected();
         self.visible_rows();
         self.snapshot_window()
+    }
+}
+
+impl Manager {
+    fn take_request(&mut self) -> Option<Request> {
+        self.pending.take()
+    }
+}
+
+#[cfg(test)]
+mod input_contract {
+    use super::*;
+
+    #[test]
+    fn queued_requests_keep_their_origin_and_rebinding_discards_unsent_requests() {
+        let mut model = Manager::default();
+        let mut generation = Generation::FIRST;
+        model.bind_input(generation);
+        model.selected = 3;
+        model.pending = Some(Request {
+            epoch: 1,
+            sequence: 1,
+            operation: Operation::Close,
+        });
+        let queued = model.take_input().unwrap();
+        model.pending = Some(Request {
+            epoch: 1,
+            sequence: 1,
+            operation: Operation::Close,
+        });
+        generation.advance();
+        model.bind_input(generation);
+        assert!(model.take_input().is_none());
+        assert_eq!(queued.generation, Generation::FIRST);
+        assert_eq!(model.selected, 3);
+        model.pending = Some(Request {
+            epoch: 1,
+            sequence: 1,
+            operation: Operation::Close,
+        });
+        assert_eq!(model.take_input().unwrap().generation, generation);
     }
 }

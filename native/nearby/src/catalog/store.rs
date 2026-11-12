@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use super::{Entry, Index, metadata};
+use crate::platform::content;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(super) struct Stamp {
@@ -44,15 +45,15 @@ pub(super) struct Directory {
 
 impl Directory {
     pub fn current(&self, path: &Path) -> bool {
-        self.stamp.current() && self.list == Stamp::read(&path.join("gamelist.xml"))
+        self.stamp.current() && self.list == Stamp::read(&content::metadata_path(path))
     }
     pub fn read(path: &Path, platform: &Entry, roots: &[PathBuf]) -> Option<Self> {
         let mut result = Self {
             stamp: Stamp::read(path)?,
-            list: Stamp::read(&path.join("gamelist.xml")),
+            list: Stamp::read(&content::metadata_path(path)),
             directories: Vec::new(),
             files: Vec::new(),
-            metadata: metadata::read(path, roots),
+            metadata: content::metadata(path, roots),
         };
         for child in fs::read_dir(path)
             .ok()?

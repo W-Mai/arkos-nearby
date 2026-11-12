@@ -1,5 +1,6 @@
 use crate::{Result, require};
-use nearby_menu::management::{Device, Fact, Home, Operation, Request, UpdatePhase, View};
+use howff_menu::management::{Device, Fact, Home, Operation, Request, UpdatePhase, View};
+use howff_platform::arkos;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 
 type Reply = std::result::Result<(View, Option<String>), String>;
@@ -40,7 +41,7 @@ fn refresh(view: &mut View) -> Result<()> {
     view.profile = crate::compat::PROFILE.into();
     view.home = match crate::home::Preference::load()?.default_home {
         crate::home::DefaultHome::Original => Home::Original,
-        crate::home::DefaultHome::Nearby => Home::Nearby,
+        crate::home::DefaultHome::Howff => Home::Howff,
     };
     view.origin = match crate::home::foreground_origin()? {
         crate::home::ForegroundOrigin::BorrowedEs => "从原系统打开",
@@ -59,7 +60,7 @@ fn execute(request: &Request, mut view: View) -> Result<(View, Option<String>)> 
         Operation::Refresh | Operation::Standalone => {}
         Operation::Rename { name } => {
             require(
-                nearby_menu::management::valid_name(name),
+                howff_menu::management::valid_name(name),
                 "名称需为 1–64 字节",
             )?;
             crate::identity::rename(name.trim())?;
@@ -72,7 +73,7 @@ fn execute(request: &Request, mut view: View) -> Result<(View, Option<String>)> 
         Operation::SetHome { home } => {
             crate::home::Preference::save(match home {
                 Home::Original => crate::home::DefaultHome::Original,
-                Home::Nearby => crate::home::DefaultHome::Nearby,
+                Home::Howff => crate::home::DefaultHome::Howff,
             })?;
             view.notice = "开机首页已保存".into();
         }
@@ -81,11 +82,9 @@ fn execute(request: &Request, mut view: View) -> Result<(View, Option<String>)> 
             let installed = crate::installer::installation_status()
                 .map(|v| format!("{} 个文件，校验通过", v["files"]))
                 .unwrap_or_else(|e| e.to_string());
-            let gui = std::fs::read(
-                std::path::Path::new(crate::context::INSTALL).join("nearby-gui-build.json"),
-            )
-            .ok()
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+            let gui = std::fs::read(arkos::application::GUI_BUILD.path())
+                .ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
             let renderer = gui
                 .as_ref()
                 .map(|v| {
@@ -152,7 +151,7 @@ fn execute(request: &Request, mut view: View) -> Result<(View, Option<String>)> 
 }
 
 impl Service {
-    pub fn open(&mut self, entry: nearby_menu::management::Entry) {
+    pub fn open(&mut self, entry: howff_menu::management::Entry) {
         self.view.entry = entry;
         self.view.busy = false;
         self.view.revision = 0;
@@ -272,7 +271,7 @@ impl Service {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nearby_menu::management::Entry;
+    use howff_menu::management::Entry;
 
     #[test]
     fn management_projection_and_requests_keep_public_identity_and_typed_actions() {

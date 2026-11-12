@@ -9,22 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "arkos-nearby-gui"
-version = "0.1.0"
-dependencies = [
- "image",
- "inputx-pinyin",
- "libc",
- "mirui",
- "mirx",
- "nearby-menu",
- "png",
- "serde",
- "serde_json",
- "signal-hook",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -275,6 +259,34 @@ checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
  "foldhash",
 ]
+
+[[package]]
+name = "howff-gui"
+version = "0.1.0"
+dependencies = [
+ "howff-menu",
+ "howff-platform",
+ "image",
+ "inputx-pinyin",
+ "libc",
+ "mirui",
+ "mirx",
+ "png",
+ "serde",
+ "serde_json",
+ "signal-hook",
+]
+
+[[package]]
+name = "howff-menu"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "howff-platform"
+version = "0.1.0"
 
 [[package]]
 name = "icu_collections"
@@ -606,9 +618,9 @@ dependencies = [
 
 [[package]]
 name = "mirui"
-version = "0.54.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ccd31857e9b0de08131140bfbbb784bef61aaf9d2f223d1a4afe8fc822e0aaf"
+checksum = "c1fe6aa364fb4d7feb43e085cec92dd7480e8a35758dd9234277584c61f500b9"
 dependencies = [
  "block2",
  "critical-section",
@@ -641,9 +653,9 @@ dependencies = [
 
 [[package]]
 name = "mirui-macros"
-version = "0.54.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb88cd5b635015129b82306be67dafd50669b269624f684d286a312bdfa61530"
+checksum = "a6e7004d8a3a6be495a765c36418b120dbe011a0de889f26fbfcd9bf686fb1c4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -653,19 +665,12 @@ dependencies = [
 
 [[package]]
 name = "mirx"
-version = "0.54.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a41c12c89ba96ce028bd3507c37df97f5a28747d14165da621b1b4456c11ef0"
+checksum = "e81734fa8e9d0796dadd9cdb244825c5de8fcf7eb1b1ef16e8321edacd9ac61f"
 dependencies = [
  "ttf-parser",
  "wide",
-]
-
-[[package]]
-name = "nearby-menu"
-version = "0.1.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -1085,9 +1090,9 @@ dependencies = [
 
 [[package]]
 name = "textflow-rs"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39541497ef2198cd8aede26d2c728b745353100bacb52ab4c794af1164e0a915"
+checksum = "4429387c08d30b12d7cab34b28aef1ef8def8b4a267091291e5fae3959b18ae3"
 
 [[package]]
 name = "thiserror"

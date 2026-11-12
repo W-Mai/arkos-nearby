@@ -118,7 +118,7 @@ pub(super) fn follow(
                 ActionLayout::WifiKeyboard
             } else if wifi.page.pending() {
                 ActionLayout::WifiProgress
-            } else if wifi.page == nearby_menu::wifi::Page::List {
+            } else if wifi.page == howff_menu::wifi::Page::List {
                 ActionLayout::WifiList
             } else {
                 ActionLayout::WifiOptions

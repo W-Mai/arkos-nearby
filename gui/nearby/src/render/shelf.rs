@@ -1,9 +1,10 @@
 use crate::model::{LibraryKind, View};
+use howff_menu::input::Generation;
 use mirui::anim::{Tween, TweenConfig, ease};
 use mirui::prelude::*;
 use serde::Serialize;
 
-pub(super) const WINDOW_BUDGET: usize = nearby_menu::shelf::MAX_WINDOW_ITEMS;
+pub(super) const WINDOW_BUDGET: usize = howff_menu::shelf::MAX_WINDOW_ITEMS;
 pub(super) const INSET: i32 = 12;
 pub(super) const GAP: i32 = 12;
 pub(super) const CARD_INSET: i32 = 2;
@@ -21,13 +22,15 @@ const SHORT_MARK: Fixed = Fixed::from_int(6);
 const LONG_MARK: Fixed = Fixed::from_int(22);
 const PAGE_MOTION: TweenConfig = TweenConfig::new(260, &ease::OUT_CUBIC);
 
-pub use nearby_menu::shelf::Grid;
+pub use howff_menu::shelf::Grid;
 
 #[component]
 pub(super) struct PageMarkers;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct LayoutRequest {
+    #[serde(skip)]
+    pub generation: Generation,
     event: &'static str,
     launcher: bool,
     grid: Grid,
@@ -93,6 +96,7 @@ impl Plan {
 
 #[model]
 pub(super) struct Shelf {
+    input_generation: Generation,
     launcher: bool,
     active: bool,
     size: (i32, i32),
@@ -132,6 +136,7 @@ impl MarkerMotion {
 impl Shelf {
     pub fn new(launcher: bool) -> Self {
         Self {
+            input_generation: Generation::default(),
             launcher,
             active: false,
             size: (0, 0),
@@ -160,6 +165,7 @@ impl Shelf {
         if self.sent != Some(self.plan.grid) {
             self.sent = Some(self.plan.grid);
             self.pending = Some(LayoutRequest {
+                generation: self.input_generation,
                 event: "shelf_layout",
                 launcher: self.launcher,
                 grid: self.plan.grid,
@@ -215,6 +221,11 @@ impl Shelf {
         })
     }
     pub fn present(&mut self, view: &View) {
+        if self.input_generation != view.input_generation {
+            self.sent = None;
+            self.pending = None;
+            self.input_generation = view.input_generation;
+        }
         let active =
             view.library.kind == LibraryKind::Favorites && view.launcher.enabled == self.launcher;
         if self.active != active {
@@ -331,5 +342,29 @@ mod tests {
         assert_eq!(shelf.marker_lengths[0], LONG_MARK);
         assert_eq!(shelf.marker_lengths[1], SHORT_MARK);
         assert!(shelf.markers_settled());
+    }
+}
+
+#[cfg(test)]
+mod input_contract {
+    use super::*;
+
+    #[test]
+    fn layout_measurements_are_reissued_for_the_new_input_owner() {
+        let mut model = Shelf::new(false);
+        let mut view = View {
+            input_generation: Generation::FIRST,
+            ..Default::default()
+        };
+        view.library.kind = LibraryKind::Favorites;
+        view.library.total = 8;
+        model.set_size(Fixed::from_int(640), Fixed::from_int(320));
+        model.present(&view);
+        let queued = model.take_layout().unwrap();
+        view.input_generation.advance();
+        model.present(&view);
+        let current = model.take_layout().unwrap();
+        assert_eq!(queued.generation, Generation::FIRST);
+        assert_eq!(current.generation, view.input_generation);
     }
 }

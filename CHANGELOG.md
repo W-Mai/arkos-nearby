@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- Recover interrupted installation transactions without mixing application versions.
+- Preserve launcher ownership and permissions through updates and removal.
+- Validate recorded release inventories and device identity before installation changes.
+- Support repeated removal after restoring the system launchers.
+
+- Add Howff application packages and installer archives.
+
+- Prevent button presses from affecting the next page during screen transitions.
+
+## [0.13.0] - 2026-11-12
+
+- Update the renderer to Mirui and Mirx 0.56.0.
+- Reuse completed GPU textures for modal and static snapshot rendering.
+- Reduce repeated catalog row, platform preview and menu construction during navigation.
+- Preserve selection, artwork, focus and page content across library, launcher and room transitions.
+- Keep installation records, device identity, saves, preferences and network recovery data intact during updates.
+
 ## [0.12.0] - 2026-11-06
 
 - Refresh retained detail and session pages when programmatic scrolling changes.

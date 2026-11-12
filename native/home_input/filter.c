@@ -8,7 +8,7 @@
 #include <time.h>
 #include "chord.h"
 
-#define FILTER_PATH "/opt/arkos-nearby/assets/home-input.so"
+#define FILTER_PATH "/opt/howff/assets/home-input.so"
 #define FRONTEND_PATH "/usr/bin/emulationstation/emulationstation"
 
 static bool enabled;

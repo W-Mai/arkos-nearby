@@ -2,11 +2,11 @@
 
 发行版通过 SDL2 的 GLES2 渲染器显示菜单，静态链接 SDL2 2.32.10。EGL、GBM、DRM、PulseAudio 和 ALSA 库由设备提供。软件渲染和 GPU 渲染共享页面、显示协议与手柄输入。
 
-mirui 0.54.0 在单采样 GLES 配置下保留帧渲染目标，按损伤区域更新画面。截图通过框架的像素读取接口导出。
+mirui 0.56.0 在单采样 GLES 配置下保留帧渲染目标，按损伤区域更新画面。截图通过框架的像素读取接口导出。
 
 ## 构建环境
 
-需要 Rust 1.97、`aarch64-unknown-linux-gnu` 标准库、ARM64 GNU C 链接器及与设备兼容的 sysroot。SDL2 源码随 Release 提供；锁定的 Rust 依赖位于 `arkos-nearby-0.12.0-rust-sources.tar.gz`。
+需要 Rust 1.97、`aarch64-unknown-linux-gnu` 标准库、ARM64 GNU C 链接器及与设备兼容的 sysroot。SDL2 源码随 Release 提供；锁定的 Rust 依赖位于 `howff-0.13.0-rust-sources.tar.gz`。
 
 使用现有的 ARM64 CMake 工具链文件构建 SDL2。工具链应设置 Linux、aarch64、交叉编译器和 sysroot，并将库、头文件及包查询限制到 sysroot。sysroot 需包含 PulseAudio 和 ALSA 开发头文件与库。构建结果中的 `SDL_config.h` 应定义 `SDL_AUDIO_DRIVER_PULSEAUDIO` 和 `SDL_AUDIO_DRIVER_ALSA`，动态库名分别为 `libpulse.so.0` 和 `libasound.so.2`。
 
@@ -28,15 +28,15 @@ cargo +1.97.0 build --manifest-path gui/nearby/Cargo.toml \
   --offline --locked --release --target aarch64-unknown-linux-gnu --features gpu
 ```
 
-界面程序生成在 `/tmp/arkos-rust-build/public/gpu-static/aarch64-unknown-linux-gnu/release/arkos-nearby-gui`。发行资产中的 `nearby-gui-build.json` 记录界面源码、锁文件、框架包、SDL2 静态库及程序的摘要。
+界面程序生成在 `/tmp/arkos-rust-build/public/gpu-static/aarch64-unknown-linux-gnu/release/howff-gui`。发行资产中的 `howff-gui-build.json` 记录界面源码、锁文件、框架包、SDL2 静态库及程序的摘要。
 
 ## 动态链接构建
 
 动态链接版本通过现有 ARM64 SDL2 库构建，库所在目录需要提供 `libSDL2.so` 链接名。
 
 ```sh
-python3 scripts/build_nearby_gpu.py check --sysroot /path/to/sysroot --sdl-library /path/to/libSDL2-2.0.so.0 --linker /path/to/aarch64-linux-gnu-clang
-python3 scripts/build_nearby_gpu.py build --sysroot /path/to/sysroot --sdl-library /path/to/libSDL2-2.0.so.0 --linker /path/to/aarch64-linux-gnu-clang
+python3 scripts/build_howff_gpu.py check --sysroot /path/to/sysroot --sdl-library /path/to/libSDL2-2.0.so.0 --linker /path/to/aarch64-linux-gnu-clang
+python3 scripts/build_howff_gpu.py build --sysroot /path/to/sysroot --sdl-library /path/to/libSDL2-2.0.so.0 --linker /path/to/aarch64-linux-gnu-clang
 ```
 
 输出位于 `dist/gpu/`，包含界面程序、私有 SDL2 库、许可证和构建记录。运行时将 `LD_LIBRARY_PATH` 指向该目录的 `lib/`。
@@ -46,16 +46,16 @@ python3 scripts/build_nearby_gpu.py build --sysroot /path/to/sysroot --sdl-libra
 在掌机图形前端释放显示设备后，执行以下命令检查静态链接的发行程序。
 
 ```sh
-SDL_VIDEODRIVER=kmsdrm SDL_INPUT_LINUX_KEEP_KBD=1 /path/to/arkos-nearby-gui --gpu-probe /tmp/nearby-gpu.png
+SDL_VIDEODRIVER=kmsdrm SDL_INPUT_LINUX_KEEP_KBD=1 /path/to/howff-gui --gpu-probe /tmp/nearby-gpu.png
 ```
 
 检查程序要求 SDL 渲染器为 `opengles2`，绘制模式选择页，并在交换缓冲区前保存 PNG。标准输出包含渲染器、首帧耗时和截图字节数。检查结束后恢复前端；正式菜单运行日志包含渲染后端与帧耗时统计。
 
-传入显示状态 JSON 可检查指定页面：`arkos-nearby-gui --gpu-probe /path/to/view.json /tmp/nearby-gpu.png`。该命令使用设备的 GPU 后端绘制并返回渲染错误，可用于核对页面的实际输出。
+传入显示状态 JSON 可检查指定页面：`howff-gui --gpu-probe /path/to/view.json /tmp/nearby-gpu.png`。该命令使用设备的 GPU 后端绘制并返回渲染错误，可用于核对页面的实际输出。
 
 菜单启动器设置 `SDL_INPUT_LINUX_KEEP_KBD=1`，让手柄映射生成的按键继续进入 TTY 输入通道。SDL 保留事件轮询，页面操作仍通过既有显示协议发送给房间管理器。
 
-`gpu` 构建启用 `sound`，通过 MIRUI 的 `AudioPlugin` 和 `SdlAudioSink` 实时合成菜单音效。固定音符存于 `AudioBank`，音频在 SDL 回调中混音。SDL 优先连接系统 PulseAudio 服务，菜单进程退出时释放音频设备。单独检查音频可运行 `arkos-nearby-gui --audio-probe`，它会播放一次确认音并输出音频设备状态；实际听感仍需通过掌机扬声器确认。
+`gpu` 构建启用 `sound`，通过 MIRUI 的 `AudioPlugin` 和 `SdlAudioSink` 实时合成菜单音效。固定音符存于 `AudioBank`，音频在 SDL 回调中混音。SDL 优先连接系统 PulseAudio 服务，菜单进程退出时释放音频设备。单独检查音频可运行 `howff-gui --audio-probe`，它会播放一次确认音并输出音频设备状态；实际听感仍需通过掌机扬声器确认。
 
 音效由菜单的 `SoundState` Model 管理。输入和显示状态通过 Model 方法更新，触发与去重策略产生 `Cue`，`#[effects]` 提取器取出事件，`on_effect` 消费者通过 `AudioHandle` 提交播放命令。框架在每次 Model 事务完成后交付事件，保持输入顺序；音频插件在 `pre_render` 中处理命令。页面切换复用 Model，退出菜单时随 App 释放；音频输出状态使用即时读取。
 

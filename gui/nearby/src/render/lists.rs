@@ -161,7 +161,7 @@ pub(super) fn room_rows(state: model!(DisplayState), metrics: Metrics) -> Entity
 }
 
 #[compose]
-pub(super) fn games(state: model!(DisplayState), metrics: Metrics) -> Entity {
+pub(super) fn games(state: model!(DisplayState), metrics: Metrics, platforms: bool) -> Entity {
     ui! {
         Row (grow: 1.0, min_height: 0, column_gap: metrics.gap) [
             Scenery::Ridge,
@@ -175,24 +175,33 @@ pub(super) fn games(state: model!(DisplayState), metrics: Metrics) -> Entity {
                 min_height: 0,
                 row_gap: metrics.gap
             ) {
-                if ${ state.platforms() } {
-                    Column (grow: 1.0, min_height: 0, bg_color: PANEL, container: true) {
-                        walk ${ state.entries().entries() } with item by item.0 {
-                            platform_preview_layer (state, item.1)
+                if platforms {
+                    Column (
+                        id: "platform_previews",
+                        grow: 1.0,
+                        min_height: 0,
+                        bg_color: PANEL,
+                        container: true
+                    ) {
+                        walk ${ state.platform_previews() } with item by item {
+                            platform_preview_layer (state, item.0, item.1)
                         }
                     }
                 } else {
                     preview (state, metrics)
                 }
-                preview_label (state, metrics)
+                preview_label (state, metrics, platforms)
             }
         }
     }
 }
 
 #[compose]
-fn platform_preview_layer(state: model!(DisplayState), row: model!(Row)) -> Entity {
-    let visible = row.clone();
+fn platform_preview_layer(
+    state: model!(DisplayState),
+    index: usize,
+    platform: super::consoles::Platform,
+) -> Entity {
     ui! {
         View (
             position: Position::Absolute,
@@ -200,18 +209,19 @@ fn platform_preview_layer(state: model!(DisplayState), row: model!(Row)) -> Enti
             top: 0,
             width: Dimension::percent(100),
             height: Dimension::percent(100),
-            visible: ${ visible.index() == state.library_selection() }
+            visible: ${ index == state.platform_preview_selection() }
         ) {
-            walk ${ std::iter::once(row.platform()) } with platform by platform {
-                console (platform)
-            }
+            console (platform)
         }
     }
 }
 
 #[compose]
-fn preview_label(state: model!(DisplayState), metrics: Metrics) -> Entity {
+fn preview_label(state: model!(DisplayState), metrics: Metrics, platforms: bool) -> Entity {
     let title = move || {
+        if platforms {
+            return state.platform_preview_title();
+        }
         let selected = state.library_selection();
         state
             .entries()

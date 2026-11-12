@@ -1,19 +1,8 @@
-use super::Hardware;
 use crate::Result;
-use nearby_menu::{Level, MenuAction, MenuItem, SystemLevel};
+use crate::platform::system::{Driver, Hardware, Reading};
+use howff_menu::{Level, MenuAction, MenuItem, SystemLevel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
-
-#[derive(Clone, Copy)]
-pub(super) struct Reading {
-    pub value: u8,
-    pub muted: bool,
-}
-
-pub(super) trait Driver: Send + 'static {
-    fn read(&mut self, control: SystemLevel) -> std::result::Result<Reading, String>;
-    fn write(&mut self, control: SystemLevel, target: u8) -> std::result::Result<Reading, String>;
-}
 
 #[derive(Default)]
 struct State {

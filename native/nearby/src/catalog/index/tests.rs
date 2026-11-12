@@ -131,15 +131,15 @@ fn refinement_keeps_all_candidates_beyond_the_display_limit() {
 }
 
 #[test]
-fn old_disk_snapshot_migrates_without_changing_results() {
+fn outdated_disk_snapshot_is_rebuilt_without_changing_results() {
     let (root, job) = fixture();
     let current = job.clone().run();
-    let mut legacy = serde_json::to_value(&*current).unwrap();
-    legacy["schema"] = 1.into();
-    legacy["metadata"] = serde_json::to_value(&current.metadata).unwrap();
-    legacy.as_object_mut().unwrap().remove("directories");
-    crate::system::write(&job.cache, &legacy).unwrap();
-    assert_eq!(job.cached().unwrap().search("zdr", None).len(), 1);
+    for schema in [1, 2] {
+        let mut outdated = serde_json::to_value(&*current).unwrap();
+        outdated["schema"] = schema.into();
+        crate::system::write(&job.cache, &outdated).unwrap();
+        assert!(job.cached().is_none());
+    }
     let updated = job.run();
     assert_eq!(updated.schema, 3);
     assert_eq!(updated.search("zdr", None).len(), 1);
@@ -164,5 +164,67 @@ fn inventory_preserves_matching_scope_and_confines_cached_children() {
         "Room matching retains games without a default core"
     );
     assert!(index.search("bomber", None).is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn personal_key_index_preserves_history_order_limits_and_snapshot_lifetimes() {
+    fn reference(index: &Index, times: &BTreeMap<String, u64>) -> Vec<Entry> {
+        let mut entries: Vec<_> = index
+            .records
+            .iter()
+            .filter(|row| {
+                !row.hidden && !row.entry.directory && times.contains_key(&row.entry.key())
+            })
+            .map(|row| row.entry.clone())
+            .collect();
+        entries.sort_by_key(|entry| {
+            (
+                std::cmp::Reverse(times.get(&entry.key()).copied().unwrap_or(0)),
+                entry.name.clone(),
+            )
+        });
+        entries.truncate(100);
+        entries
+    }
+
+    let (root, job) = fixture();
+    let mut index = (*job.clone().run()).clone();
+    let prototype = index.records[0].clone();
+    index.records = (0..260)
+        .map(|id| {
+            let mut row = prototype.clone();
+            row.entry.path = root.join(format!("game-{}.nes", id % 241));
+            row.entry.name = format!("游戏 {}", id % 5);
+            row.hidden = id % 17 == 0;
+            row.entry.directory = id % 19 == 0;
+            row
+        })
+        .collect();
+    index.derive();
+    let mut times: BTreeMap<_, _> = index
+        .records
+        .iter()
+        .enumerate()
+        .map(|(id, row)| (row.entry.key(), (id % 7) as u64))
+        .collect();
+    times.insert("missing".into(), u64::MAX);
+    for history in [&BTreeMap::new(), &times] {
+        let expected = reference(&index, history);
+        assert!(index.recent(history) == expected);
+        assert_eq!(index.recent_count(history), expected.len());
+    }
+    let serialized = serde_json::to_value(&index).unwrap();
+    assert!(serialized.get("by_key").is_none());
+    fs::write(&job.cache, serde_json::to_vec(&index).unwrap()).unwrap();
+    let mut loaded = Index::read(&job.cache, &job.roots, &job.platforms).unwrap();
+    assert!(loaded.recent(&times) == reference(&index, &times));
+    loaded.records.retain(|row| row.entry.name != "游戏 1");
+    loaded.derive();
+    assert!(loaded.recent(&times) == reference(&loaded, &times));
+    assert_eq!(
+        loaded.recent_count(&times),
+        reference(&loaded, &times).len()
+    );
     fs::remove_dir_all(root).unwrap();
 }

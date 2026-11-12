@@ -1,13 +1,15 @@
+use super::deferred::Pane;
 use super::{
     deck::{ActionAnchor, ActionLayout},
     style::*,
     widgets::{control_key, control_label, shadow, text_block},
 };
 use crate::launcher::configuration::Editor;
+use howff_menu::configuration::Section;
 use mirui::input::event::scroll::{ScrollConfig, ScrollOffset};
 use mirui::prelude::*;
+use mirui::ui::widgets::page_view::{CreatePage, PageView};
 use mirui::ui::widgets::{Image, Text, TextAlign::Start};
-use nearby_menu::configuration::Section;
 
 #[component]
 pub(super) struct ConfigScroll {
@@ -27,6 +29,29 @@ pub(super) fn config_scroll() {}
 
 #[compose]
 pub(super) fn panel(state: model!(Editor), metrics: Metrics) -> Entity {
+    ui! {
+        PageView (
+            grow: 1.0,
+            min_width: 0,
+            min_height: 0,
+            page: Pane::Configuration
+        ) on CreatePage(create_panel::callback(state, metrics))
+    }
+}
+
+#[event]
+fn create_panel(
+    _event: event!(CreatePage<Pane>),
+    state: model!(Editor),
+    metrics: Metrics,
+) -> Entity {
+    ui! {
+        panel_contents (state, metrics)
+    }
+}
+
+#[compose]
+pub(super) fn panel_contents(state: model!(Editor), metrics: Metrics) -> Entity {
     let identity = state.clone();
     let scope = state.clone();
     let status = state.clone();

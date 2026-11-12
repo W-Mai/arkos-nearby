@@ -1,21 +1,28 @@
-# ArkOS Nearby 0.12.0
+# Howff 0.13.0
+
+- 使用 Mirui 0.56.0，保留 GPU 渲染、离屏纹理和界面动效。
+- 优化收藏、游戏库和联机面板的列表复用与页面切换。
+- 保留独立启动器、单机存档、联机存档隔离和退出恢复网络。
 
 - 支持独立启动器与默认首页设置。
 - 支持设备重命名、中文拼音输入和好友管理。
-- 增加版本、诊断与本地更新包安装入口。
+- 提供版本信息、设备诊断与本地安装包更新，可安装所选版本并继续进入应用。
+- 核心来源标明「工具优化」或「设备原有」，加入房间使用房主确定的核心。
+- 更新和重复安装保留收藏、最近游玩、偏好、身份与好友，游戏列表缺失或损坏的索引自动重建。
+- 修复游戏列表加载完成后，选中项跳到其他游戏的问题。
 - 修复菜单图标跳位、列表底部裁切和详情滚动未刷新的问题。
 - 完整显示存档详情与会话路径，返回时保留选中位置。
 
-![双机联机演示](https://raw.githubusercontent.com/W-Mai/arkos-nearby/v0.12.0/docs/assets/nearby-dual-demo.svg)
+![双机联机演示](https://raw.githubusercontent.com/W-Mai/arkos-nearby/v0.13.0/docs/assets/nearby-dual-demo.svg)
 
-## 安装
+## 安装与更新
 
-下载 **arkos-nearby-0.12.0-arm64.tar.gz**，解压后将 `arkos-nearby` 文件夹放入游戏卡的 `ports` 目录，在掌机 **Ports → Install Nearby Multiplayer** 中安装。两台掌机安装同一版本，安装完成后重启掌机。
+下载本页的 **howff-0.13.0-arm64.tar.gz**。首次安装时，解压并将 `howff` 文件夹复制到游戏卡，在掌机文件管理器中运行 **Install Howff.sh**。
 
-[安装与更新](https://github.com/W-Mai/arkos-nearby/blob/v0.12.0/docs/installation.md) · [游戏兼容性](https://github.com/W-Mai/arkos-nearby/blob/v0.12.0/docs/compatibility.md)
+已安装 Howff 时，将安装包归档放到游戏卡，结束游戏与房间，在 **START → 应用管理 → 安装更新** 中选择归档并确认。安装后在应用管理中查看版本，两台掌机使用同一版本联机。
+
+[安装与更新](https://github.com/W-Mai/arkos-nearby/blob/v0.13.0/docs/installation.md) · [使用说明](https://github.com/W-Mai/arkos-nearby/blob/v0.13.0/docs/usage.md) · [游戏兼容性](https://github.com/W-Mai/arkos-nearby/blob/v0.13.0/docs/compatibility.md)
 
 ## 源码与校验
 
-`SHA256SUMS` 提供各下载文件的 SHA-256。`build-info.json` 记录应用、界面和构建资产的版本与摘要。Rust 依赖源码、SDL2、无线组件、Nestopia 和 GCC 源码归档随 Release 提供。
-
-[固定内核源码](https://github.com/W-Mai/arkos-nearby/releases/download/v0.10.0/arkos-kernel-c6b78a0.tar.gz) · SHA-256 `a163b8c7d8064c554285fda24cf14a8a5e38947bd8778d69525f5589cafb1dee`
+`SHA256SUMS` 提供下载文件的 SHA-256，`build-info.json` 记录应用、界面和构建资产的版本与摘要。源码归档、Rust 依赖源码及组件源码随 Release 提供，许可证与来源见源码中的 `docs/third-party.md`。

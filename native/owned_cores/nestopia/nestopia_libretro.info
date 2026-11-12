@@ -1,0 +1,6 @@
+display_name = "Nintendo - NES / Famicom (Nestopia)"
+corename = "Nestopia"
+systemname = "Nintendo Entertainment System"
+systemid = "nes"
+supported_extensions = "nes|fds|unf|unif"
+supports_no_game = "false"

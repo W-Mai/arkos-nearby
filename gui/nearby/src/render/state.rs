@@ -34,6 +34,13 @@ struct LibraryPresentation {
     artwork_neighbors: Vec<String>,
 }
 
+#[derive(Default)]
+struct PlatformPresentation {
+    items: Vec<(usize, super::consoles::Platform)>,
+    selected: usize,
+    title: String,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum LibraryPlaceholder {
     Searching,
@@ -89,6 +96,8 @@ impl Changes {
     const CONFIRM: Self = Self(1 << 10);
     const DEVICES: Self = Self(1 << 11);
     const QUERY: Self = Self(1 << 12);
+    const PLATFORM_PREVIEWS: Self = Self(1 << 13);
+    const PLATFORM_TITLE: Self = Self(1 << 14);
     fn contains(self, mask: Self) -> bool {
         self.0 & mask.0 == mask.0
     }
@@ -116,6 +125,8 @@ impl Changes {
         confirm = Changes::CONFIRM,
         devices = Changes::DEVICES,
         query = Changes::QUERY,
+        platform_previews = Changes::PLATFORM_PREVIEWS,
+        platform_preview_title = Changes::PLATFORM_TITLE,
     )
 )]
 pub(super) struct DisplayState {
@@ -127,6 +138,7 @@ pub(super) struct DisplayState {
     pub(super) deck_height: Fixed,
     view: View,
     library: LibraryPresentation,
+    platform_preview: PlatformPresentation,
     artwork_revision: u64,
     pub(crate) launcher: model!(owned crate::launcher::Launcher),
     pub(crate) settings: model!(owned crate::settings::Settings),
@@ -268,6 +280,32 @@ impl DisplayState {
             } else {
                 super::list_layout::WINDOW_BUDGET
             };
+            // The departing platform page keeps its own presentation while
+            // the live row collection already belongs to the incoming route.
+            if bind_rows
+                && view.page == Page::Games
+                && view.library.kind == crate::model::LibraryKind::Platforms
+            {
+                changes.update(
+                    &mut self.platform_preview.items,
+                    view.entries
+                        .iter()
+                        .take(limit)
+                        .enumerate()
+                        .map(|(index, row)| (index, super::consoles::Platform::from_id(&row.icon)))
+                        .collect(),
+                    Changes::PLATFORM_PREVIEWS,
+                );
+                self.platform_preview.selected = view.selected;
+                changes.update(
+                    &mut self.platform_preview.title,
+                    view.entries
+                        .get(view.selected)
+                        .map(|row| row.name.clone())
+                        .unwrap_or_default(),
+                    Changes::PLATFORM_TITLE,
+                );
+            }
             if bind_rows
                 && (binding_activated
                     || self
@@ -288,8 +326,10 @@ impl DisplayState {
                     .collect();
                 if self.role == DisplayRole::Catalog
                     && view.page == Page::Games
-                    && !view.platforms
-                    && view.library.kind == crate::model::LibraryKind::Directory
+                    && matches!(
+                        view.library.kind,
+                        crate::model::LibraryKind::Platforms | crate::model::LibraryKind::Directory
+                    )
                 {
                     rows::reconcile_slots(&mut self.entries, entries, self.row_revision);
                 } else {
@@ -384,6 +424,11 @@ impl DisplayState {
     }
     fn devices_value(&self) -> Vec<crate::model::NetworkPeer> {
         self.devices.clone()
+    }
+
+    #[cfg(any(target_os = "linux", test))]
+    pub(super) fn response_target(&self) -> super::response::Target {
+        super::response::Target::from_view(&self.view)
     }
 
     #[cfg(test)]
@@ -481,6 +526,19 @@ impl DisplayState {
         self.library.platforms
     }
 
+    fn platform_previews_value(&self) -> Vec<(usize, super::consoles::Platform)> {
+        self.platform_preview.items.clone()
+    }
+
+    #[observe]
+    pub(super) fn platform_preview_selection(&self) -> usize {
+        self.platform_preview.selected
+    }
+
+    fn platform_preview_title_value(&self) -> String {
+        self.platform_preview.title.clone()
+    }
+
     #[observe]
     pub(super) fn library_selection(&self) -> usize {
         if self.library.detail.keyboard {
@@ -510,15 +568,15 @@ impl DisplayState {
     pub(super) fn library_placeholder(&self) -> LibraryPlaceholder {
         let search = self.library.detail.kind == crate::model::LibraryKind::Search;
         match &self.library.detail.load {
-            nearby_menu::LibraryLoad::Loading if search => LibraryPlaceholder::Searching,
-            nearby_menu::LibraryLoad::Loading => LibraryPlaceholder::Loading,
-            nearby_menu::LibraryLoad::Failed { .. } => LibraryPlaceholder::Failed,
-            nearby_menu::LibraryLoad::Ready if self.view.busy => LibraryPlaceholder::Preparing,
-            nearby_menu::LibraryLoad::Ready if search && self.query.is_empty() => {
+            howff_menu::LibraryLoad::Loading if search => LibraryPlaceholder::Searching,
+            howff_menu::LibraryLoad::Loading => LibraryPlaceholder::Loading,
+            howff_menu::LibraryLoad::Failed { .. } => LibraryPlaceholder::Failed,
+            howff_menu::LibraryLoad::Ready if self.view.busy => LibraryPlaceholder::Preparing,
+            howff_menu::LibraryLoad::Ready if search && self.query.is_empty() => {
                 LibraryPlaceholder::Input
             }
-            nearby_menu::LibraryLoad::Ready if search => LibraryPlaceholder::NoMatches,
-            nearby_menu::LibraryLoad::Ready => LibraryPlaceholder::Empty,
+            howff_menu::LibraryLoad::Ready if search => LibraryPlaceholder::NoMatches,
+            howff_menu::LibraryLoad::Ready => LibraryPlaceholder::Empty,
         }
     }
 
@@ -671,6 +729,16 @@ pub(super) struct PageKey {
 }
 
 impl DisplayStateHandle {
+    pub(super) fn platform_previews(&self) -> Vec<(usize, super::consoles::Platform)> {
+        self.platform_previews_revision();
+        self.platform_previews_value()
+    }
+
+    pub(super) fn platform_preview_title(&self) -> String {
+        self.platform_preview_title_revision();
+        self.platform_preview_title_value()
+    }
+
     pub(super) fn query(&self) -> String {
         self.query_revision();
         self.query_value()
@@ -790,6 +858,7 @@ fn register<B: Surface, F: RendererFactory<B>>(
         deck_height: Fixed::ZERO,
         view: View::default(),
         library: LibraryPresentation::default(),
+        platform_preview: PlatformPresentation::default(),
         artwork_revision: 0,
         query: String::new(),
         launcher: crate::launcher::Launcher::default().into(),

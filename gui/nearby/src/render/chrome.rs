@@ -27,7 +27,7 @@ pub(super) fn header(view: PageKey, state: model!(DisplayState), metrics: Metric
     ui! {
         Row (
             height: ${
-                if state.launcher().view().enabled || view.page == Page::Games {
+                if state.launcher().enabled() || view.page == Page::Games {
                     metrics.launcher_header_height()
                 } else {
                     metrics.header_height()
@@ -161,10 +161,7 @@ fn footer_controls(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                 control_key ("A", metrics, true)
                 control_label (${ confirm.confirm() }, metrics)
             }
-            if ${
-                !state.launcher().view().enabled
-                    || (state.launcher().view().tab != 0 && !state.busy())
-            } {
+            if ${ !state.launcher().enabled() || (state.launcher().tab() != 0 && !state.busy()) } {
                 control_key ("B", metrics, false)
                 control_label (${ back.back() }, metrics)
             }
@@ -189,12 +186,12 @@ fn footer_controls(view: PageKey, state: model!(DisplayState), metrics: Metrics)
             ) [
                 FONT_PAINT,
             ]
-            if ${ state.launcher().view().enabled && !state.busy() } {
+            if ${ state.launcher().enabled() && !state.busy() } {
                 control_key ("SELECT", metrics, false)
                 control_label ("联机", metrics)
             }
             if ${
-                state.launcher().view().enabled && !state.busy()
+                state.launcher().enabled() && !state.busy()
                     && state.library_kind() != crate::model::LibraryKind::Search
             } {
                 control_key ("START", metrics, false)

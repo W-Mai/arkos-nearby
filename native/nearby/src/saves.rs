@@ -1,16 +1,17 @@
+use howff_platform::arkos;
 mod files;
 pub mod launch;
 
 use crate::configuration::ResolvedSavePaths;
 use crate::{Result, require};
-use nearby_menu::saves::{Document, Kind, Operation, Record, SourceMatch};
+use howff_menu::saves::{Document, Kind, Operation, Record, SourceMatch};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const ROOT: &str = "/opt/arkos-nearby/saves/backups";
+pub const ROOT: &str = arkos::application::SAVE_BACKUPS.as_str();
 const MAX_RECORDS: usize = 4096;
 
 fn time_label(seconds: u64) -> String {

@@ -1,10 +1,11 @@
+use howff_platform::arkos;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
 use crate::{Result, require};
 
-pub const ROOT: &str = "/opt/arkos-nearby/cores";
+pub const ROOT: &str = arkos::application::CORES.as_str();
 pub const STOCK_NESTOPIA_SHA: &str =
     "dcf01334577a81d5a1f4331b2d4aac9fba2a3308a5442ec0818d7599e624c086";
 
@@ -29,6 +30,7 @@ pub struct Entry {
     pub frontend: &'static str,
     pub filename: &'static str,
     pub info_filename: &'static str,
+    pub frontend_info: &'static str,
     pub sha256: &'static str,
     pub bits: u8,
     pub name: &'static str,
@@ -40,6 +42,7 @@ pub const NESTOPIA: Entry = Entry {
     frontend: "retroarch",
     filename: "nestopia_nearby_libretro.so",
     info_filename: "nestopia_libretro.info",
+    frontend_info: include_str!("../../owned_cores/nestopia/nestopia_libretro.info"),
     sha256: "2c276c3338e7df8105213f7c2008a8e2a0cd307a89f40f19fbde05fc2c84f430",
     bits: 64,
     name: "Nestopia",
@@ -47,6 +50,23 @@ pub const NESTOPIA: Entry = Entry {
 };
 
 impl Entry {
+    pub fn frontend_configuration(&self, root: &Path) -> Result<String> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = root.join("core-info");
+        crate::system::mkdir(&directory)?;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755))?;
+        let path = directory.join(Path::new(self.filename).with_extension("info"));
+        if std::fs::read(&path).ok().as_deref() != Some(self.frontend_info.as_bytes()) {
+            crate::system::private_write(&path, self.frontend_info.as_bytes())?;
+        }
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+        Ok(format!(
+            "libretro_directory = \"{ROOT}\"\nlibretro_info_path = \"{}\"\n",
+            directory.display()
+        ))
+    }
+
     pub fn path(&self) -> PathBuf {
         Path::new(ROOT).join(self.filename)
     }
@@ -136,10 +156,16 @@ mod tests {
 
     #[test]
     fn registry_identity_matches_the_packaged_source_record() {
+        use sha2::{Digest, Sha256};
         let source: Value =
             serde_json::from_str(include_str!("../../owned_cores/nestopia/source.json")).unwrap();
         assert_eq!(source["id"], NESTOPIA.id);
         assert_eq!(source["artifact_sha256"], NESTOPIA.sha256);
+        assert_eq!(source["info_filename"], NESTOPIA.info_filename);
+        assert_eq!(
+            source["info_sha256"],
+            format!("{:x}", Sha256::digest(NESTOPIA.frontend_info.as_bytes()))
+        );
         NESTOPIA.validate_metadata(&source["metadata"]).unwrap();
     }
 

@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use crate::protocol::{CoreIdentity, GameIdentity, Profile, VerifiedRoom};
 use crate::system::{command, mkdir, read, write};
 use crate::{Result, require};
 
-pub const INSTALL: &str = "/opt/arkos-nearby";
+pub const INSTALL: &str = arkos::PATHS.program;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -48,7 +49,7 @@ pub fn config(frontend: &str) -> Result<PathBuf> {
         matches!(frontend, "retroarch" | "retroarch32"),
         "Unknown installed frontend",
     )?;
-    Ok(Path::new("/home/ark/.config").join(frontend))
+    Ok(Path::new(arkos::home::CONFIGURATION.as_str()).join(frontend))
 }
 
 pub fn flags(path: &Path) -> Result<std::collections::HashMap<String, String>> {
@@ -277,7 +278,7 @@ fn frontend_digest(
         frontend_key(executable)? == *key,
         "Frontend changed while reading",
     )?;
-    let root = Path::new("/run/arkos-nearby-x/frontend-versions");
+    let root = arkos::transient::FRONTEND_VERSIONS.path();
     let path = root.join(format!("{frontend}-native.json"));
     if let Ok(info) = path.metadata()
         && info.uid() == 0
@@ -302,7 +303,7 @@ fn frontend_digest(
 pub fn frontend_version(frontend: &str, executable: &Path) -> Result<String> {
     use std::os::unix::fs::MetadataExt;
     let key = frontend_key(executable)?;
-    let root = Path::new("/run/arkos-nearby-x/frontend-versions");
+    let root = arkos::transient::FRONTEND_VERSIONS.path();
     let path = root.join(format!("{frontend}-native.json"));
     if let Ok(info) = path.metadata() {
         if info.uid() == 0 && info.mode() & 0o022 == 0 {
@@ -360,7 +361,7 @@ pub(crate) fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Re
     let mut frontend = frontend.to_owned();
     let mut args = args.to_vec();
     let mut core = inspect(Path::new(&library_argument(&args)?), &frontend)?;
-    let roots: Vec<_> = ["/roms", "/roms2"]
+    let roots: Vec<_> = arkos::ROM_ROOTS
         .iter()
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
@@ -412,7 +413,7 @@ pub(crate) fn parse_selected(frontend: &str, args: &[String], adapt: bool) -> Re
     }
     let content = fingerprint(&game_path, &core.extensions, &roots, core.block_extract)?;
     let configuration = config(&frontend)?;
-    let frontend_root = PathBuf::from("/opt/retroarch/bin").canonicalize()?;
+    let frontend_root = PathBuf::from(arkos::firmware::FRONTENDS.as_str()).canonicalize()?;
     let frontend_path = confined(
         &frontend_root.join(&frontend),
         std::slice::from_ref(&frontend_root),

@@ -11,7 +11,7 @@ import subprocess
 import tarfile
 import tomllib
 
-import build_nearby_gui as gui
+import build_howff_gui as gui
 import build_core_probe
 import build_home_input
 import build_paths
@@ -57,9 +57,11 @@ def bundle():
     build_core_probe.artifacts(ASSETS)
     build_home_input.artifacts(ASSETS / "assets")
     manifest = json.loads((ROOT / "release/manifest.json").read_text())
+    if manifest["product"] != "howff" or manifest["schema"] != 1:
+        raise ValueError("Unexpected Howff bundle identity")
     manifest["version"] = tomllib.loads(MANIFEST.read_text())["package"]["version"]
     renderer_files = gui.artifacts(ASSETS)
-    report = json.loads(renderer_files["nearby-gui-build.json"])
+    report = json.loads(renderer_files["howff-gui-build.json"])
     renderer_files.update(
         {
             "font/" + name: (ROOT / "gui/nearby/assets" / name).read_bytes()
@@ -93,7 +95,7 @@ def bundle():
         contents.extend(data)
     header = json.dumps(manifest, separators=(",", ":")).encode()
     packed = gzip.compress(
-        b"ARKNP001" + len(header).to_bytes(4, "little") + header + contents, mtime=0
+        b"HOWFF001" + len(header).to_bytes(4, "little") + header + contents, mtime=0
     )
     output = build_paths.BUILD_ROOT / "release/bundle.gz"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -105,7 +107,7 @@ def native(check):
     cargo, environment = gui.toolchain("1.92")
     environment.update(
         CARGO_TARGET_DIR=str(build_paths.target("release")),
-        ARKOS_NEARBY_BUNDLE=str(bundle()),
+        HOWFF_BUNDLE=str(bundle()),
     )
     common = [
         "--manifest-path",
@@ -117,6 +119,11 @@ def native(check):
     ]
     if check:
         menu = ROOT / "native/nearby-menu/Cargo.toml"
+        platform = ROOT / "native/nearby-platform/Cargo.toml"
+        gui.run(
+            [str(cargo), "fmt", "--manifest-path", str(platform), "--check"],
+            environment,
+        )
         gui.run(
             [str(cargo), "fmt", "--manifest-path", str(menu), "--check"],
             environment,
@@ -139,7 +146,9 @@ def native(check):
                 "--locked",
                 "--offline",
                 "-p",
-                "nearby-menu",
+                "howff-menu",
+                "-p",
+                "howff-platform",
             ],
             environment,
         )
@@ -162,20 +171,20 @@ def native(check):
             [str(cargo), "build", *common, "--target", gui.TRIPLE, "--release"],
             gui.linux_environment(cargo, environment),
         )
-        binary = build_paths.target("release") / gui.TRIPLE / "release/arkos-nearby"
+        binary = build_paths.target("release") / gui.TRIPLE / "release/howff"
         output = ROOT / "dist"
         output.mkdir(exist_ok=True)
         data = binary.read_bytes()
-        (output / "arkos-nearby").write_bytes(data)
-        (output / "arkos-nearby").chmod(0o755)
-        (output / "SHA256SUMS").write_text(sha(data) + "  arkos-nearby\n")
+        (output / "howff").write_bytes(data)
+        (output / "howff").chmod(0o755)
+        (output / "SHA256SUMS").write_text(sha(data) + "  howff\n")
         print(
             json.dumps({"output": str(output), "sha256": sha(data), "bytes": len(data)})
         )
 
 
 def interface(check):
-    record = ASSETS / "nearby-gui-build.json"
+    record = ASSETS / "howff-gui-build.json"
     if not check and record.is_file():
         if json.loads(record.read_text()).get("backend") == "sdl-gpu":
             gui.artifacts(ASSETS)
@@ -183,7 +192,7 @@ def interface(check):
     subprocess.run(
         [
             "python3",
-            str(ROOT / "scripts/build_nearby_gui.py"),
+            str(ROOT / "scripts/build_howff_gui.py"),
             "check" if check else "build",
         ],
         check=True,

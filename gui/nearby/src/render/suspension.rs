@@ -333,9 +333,13 @@ impl Controller {
             captured.release(app);
             return;
         }
-        let snapshot = app.snapshot_widget(captured.source);
+        let snapshot = app
+            .take_widget_output(captured.source)
+            .ok()
+            .flatten()
+            .map(|owned| owned.into_texture());
         captured.release(app);
-        let Ok(Some(texture)) = snapshot else {
+        let Some(texture) = snapshot else {
             return;
         };
         if texture.width() == 0 || texture.height() == 0 {

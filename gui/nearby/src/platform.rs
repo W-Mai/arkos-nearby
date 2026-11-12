@@ -9,11 +9,10 @@ use std::os::fd::AsRawFd;
 #[cfg(not(feature = "gpu"))]
 use std::os::unix::fs::FileExt;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub fn record_init(stage: &str, detail: serde_json::Value) -> io::Result<()> {
-    let directory = Path::new("/opt/arkos-nearby/logs");
+    let directory = howff_platform::arkos::application::LOGS.path();
     std::fs::create_dir_all(directory)?;
     std::fs::set_permissions(directory, Permissions::from_mode(0o700))?;
     let temporary = directory.join("native-init.next");

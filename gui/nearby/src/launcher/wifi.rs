@@ -1,9 +1,9 @@
 use crate::model::Action;
+use howff_menu::wifi::{Page, Request, Secret, View, valid_psk, valid_ssid};
 use mirui::{
     anim::{Tween, TweenConfig, ease},
     prelude::Fixed,
 };
-use nearby_menu::wifi::{Page, Request, Secret, View, valid_psk, valid_ssid};
 
 const TRAVEL_MS: u64 = 1500;
 const STRETCH_MS: u16 = 350;

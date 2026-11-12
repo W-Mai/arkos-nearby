@@ -59,6 +59,8 @@ pub struct RoomRow {
 #[serde(deny_unknown_fields)]
 pub struct View {
     #[serde(default)]
+    pub input_generation: howff_menu::input::Generation,
+    #[serde(default)]
     pub return_to_launcher: bool,
     #[serde(default)]
     pub launcher: LauncherView,
@@ -215,7 +217,7 @@ pub enum LibraryKind {
 #[serde(default, deny_unknown_fields)]
 pub struct LibraryView {
     pub kind: LibraryKind,
-    pub load: nearby_menu::LibraryLoad,
+    pub load: howff_menu::LibraryLoad,
     pub query: String,
     pub keyboard: bool,
     pub key_selected: usize,
@@ -239,13 +241,13 @@ pub struct LauncherView {
     pub items: Vec<LauncherItem>,
     pub selected: usize,
     pub retained: bool,
-    pub details: Option<nearby_menu::details::View>,
-    pub wifi: Option<nearby_menu::wifi::View>,
-    pub management: Option<nearby_menu::management::View>,
-    pub configuration: Option<nearby_menu::configuration::View>,
-    pub saves: Option<nearby_menu::saves::View>,
+    pub details: Option<howff_menu::details::View>,
+    pub wifi: Option<howff_menu::wifi::View>,
+    pub management: Option<howff_menu::management::View>,
+    pub configuration: Option<howff_menu::configuration::View>,
+    pub saves: Option<howff_menu::saves::View>,
 }
-pub use nearby_menu::{MenuAction, MenuItem as LauncherItem};
+pub use howff_menu::{MenuAction, MenuItem as LauncherItem};
 
 impl LauncherView {
     #[cfg(any(target_os = "linux", test))]

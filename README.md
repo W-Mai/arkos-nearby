@@ -1,14 +1,14 @@
 <div align="center">
 
-<img src="docs/assets/wordmark.svg" alt="ArkOS Nearby" width="420" />
+<img src="docs/assets/wordmark.svg" alt="Howff" width="420" />
 
-**R36S 双机附近联机**
+**R36S 游戏启动器与附近联机**
 
-[![Release](https://img.shields.io/badge/release-v0.12.0-a33d2e?style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.12.0) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/W-Mai/arkos-nearby?color=a33d2e&style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
 
 选好游戏，创建房间，和身边的朋友一起玩。
 
-[下载安装](https://github.com/W-Mai/arkos-nearby/releases/tag/v0.12.0) · [使用说明](docs/installation.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
+[下载安装](https://github.com/W-Mai/arkos-nearby/releases) · [使用说明](docs/usage.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
 
 <img src="docs/assets/nearby-dual-demo.svg" alt="双机联机界面演示：创建房间、搜索加入、确认就绪与主题切换" width="840" />
 
@@ -16,11 +16,11 @@
 
 ## 附近联机
 
-ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄操作，从选择房间到开始游戏，都可以在掌机上完成。
+Howff 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄操作，从选择房间到开始游戏，都可以在掌机上完成。
 
 - **当前游戏直接联机** — 在游戏列表选好游戏，启动时按住 X，搜索附近房间或创建当前游戏的房间。
-- **从游戏库挑选** — 在 Options → Nearby Multiplayer → 选择游戏 中选择平台和游戏。
-- **个人启动器** — 从 Options → Nearby Launcher 打开收藏，短按 X 启动单机，长按 X 打开当前游戏的联机面板。
+- **从游戏库挑选** — 在 Options → Howff Nearby → 选择游戏 中选择平台和游戏。
+- **个人启动器** — 从 Options → Howff Launcher 打开收藏，短按 X 启动单机，长按 X 打开当前游戏的联机面板。
 - **收藏与搜索** — 在启动器游戏库按 Y 收藏游戏，收藏页按 Y 切换名称／最近使用排序。在平台列表按 Y 搜索游戏名、文件名或中文名拼音。
 - **设置与存档** — 查看游戏的核心和 BIOS 信息，编辑游戏设置，载入即时存档、备份与恢复游戏进度。
 - **系统控制** — 调节音量和亮度，连接 Wi-Fi，查看存储空间，关机或重启。
@@ -35,15 +35,15 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 适用配置：**ArkOS4Clone 08262026 · Linux 4.4.189 · RTL8188EU 无线芯片 · 640×480 屏幕**。详细要求见 [设备兼容性](docs/compatibility.md#设备配置)。在两台掌机上安装同一版本：
 
-1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases/download/v0.12.0/arkos-nearby-0.12.0-arm64.tar.gz)。
-2. 解压，将 `arkos-nearby` 文件夹放入游戏卡的 `ports` 目录。
-3. 在掌机 **Ports** 中打开 **Install Nearby Multiplayer**，安装完成后重启掌机。
+1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases)（`howff-VERSION-arm64.tar.gz`）。
+2. 解压，将 `howff` 文件夹放入游戏卡的 `ports` 目录。
+3. 在掌机文件管理器中打开这个文件夹，运行 **Install Howff.sh**，按提示完成安装。
 
-[安装说明](docs/installation.md) 提供 SSH 安装、更新和卸载命令。
+[安装说明](docs/installation.md) 提供图形更新、SSH 安装与卸载步骤；[数据与存档](docs/data.md) 列出个人记录与备份位置。
 
 ## 一起玩
 
-从 **Options → Nearby Multiplayer** 或系统主页 **FN + X** 打开工具，查看附近房间。向下移动或按 **R** 展开「仅组网／选择游戏」，向上移动或按 **L** 展开房间列表。收起的区域会保留为微缩预览。也可以从游戏列表启动时按住 **X**，直接进入当前游戏的「创建房间／加入房间」。
+从 **Options → Howff Nearby** 或系统主页 **FN + X** 打开工具，查看附近房间。向下移动或按 **R** 展开「仅组网／选择游戏」，向上移动或按 **L** 展开房间列表。收起的区域会保留为微缩预览。也可以从游戏列表启动时按住 **X**，直接进入当前游戏的「创建房间／加入房间」。
 
 一台选好游戏并创建房间，另一台选中该房间后按 **A** 加入。首次连接时，房主按 **A** 确认。当前游戏匹配时自动继续；需要换游戏时，会列出本机的对应版本。选择后完成核对，房主在「对方已准备好」时选择 **开始游戏**。
 
@@ -57,7 +57,7 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 ## 启动器
 
-从 **Options → Nearby Launcher** 打开个人收藏，首页只显示收藏卡带。选中收藏末尾的游戏库图标，按 **A** 展开游戏库，收藏架保留在上方。**B** 逐级返回收藏，**SELECT** 打开附近联机。游戏库展示有游戏的平台和文件夹，提供主机图案、截图与最近游玩记录；在平台列表按 **Y** 搜索游戏。
+从 **Options → Howff Launcher** 打开个人收藏，首页只显示收藏卡带。选中收藏末尾的游戏库图标，按 **A** 展开游戏库，收藏架保留在上方。**B** 逐级返回收藏，**SELECT** 打开附近联机。游戏库展示有游戏的平台和文件夹，提供主机图案、截图与最近游玩记录；在平台列表按 **Y** 搜索游戏。
 
 收藏卡带按可用空间排成多行，封面铺满卡带画面。方向键跨行、跨页选择，底部页码随翻页伸缩；收藏页按 **B** 回到第一页。选中末尾的游戏库卡片后，按 **A** 或下键展开游戏库，返回时保留原选中位置。
 
@@ -69,15 +69,15 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 选中游戏按 **A → 游戏详情** 查看运行核心、BIOS、存档与配置位置；进入 **游戏设置** 编辑游戏、核心或前端设置，保存前查看生效值和目标文件。**存档管理** 分别列出即时存档、游戏进度和备份，支持选槽载入、创建备份与确认恢复。单机存档沿用原路径，联机会话使用独立存档。
 
-系统游戏列表、启动器和联机房间共用核心选择规则，当前核心标明「工具优化」或「设备原有」。加入房间时使用房主确定的核心，完成游戏内容核对后开局。
+当前核心标明「工具优化」或「设备原有」。加入房间时使用房主确定的核心，完成游戏内容核对后开局。
 
-**START** 打开设置面板，可切换主题、音效，管理直连网络、设备与好友，查看应用版本、诊断和安装更新包。启动设置可将 Nearby 设为默认首页，独立启动器接管首页后提供游戏浏览、启动与系统工具；选择「返回原系统」回到系统游戏列表。保留直连网络时，启动单机可以选择继续保持连接或先恢复 Wi-Fi。
+**START** 打开设置面板，可切换主题、音效，管理直连网络、设备与好友，查看应用版本、诊断和安装更新包。启动设置可将 Howff 设为默认首页，独立启动器接管首页后提供游戏浏览、启动与系统工具；选择「返回原系统」回到系统游戏列表。保留直连网络时，启动单机可以选择继续保持连接或先恢复 Wi-Fi。
 
 ## 仅组网
 
-进入 **Options → Nearby Multiplayer → 仅组网**，一台创建房间，另一台选中房间加入。连接完成后，两台按 **A「保持连接，返回系统」**，再启动支持局域网联机的游戏，在游戏内创建或查找房间。
+进入 **Options → Howff Nearby → 仅组网**，一台创建房间，另一台选中房间加入。连接完成后，两台按 **A「保持连接，返回系统」**，再启动支持局域网联机的游戏，在游戏内创建或查找房间。
 
-再次打开 Nearby Multiplayer 可以查看连接和设备地址，按 **B「断开并恢复 Wi-Fi」** 结束组网。
+再次打开 Howff Nearby 可以查看连接和设备地址，按 **B「断开并恢复 Wi-Fi」** 结束组网。
 
 <div align="center">
   <img src="docs/screenshots/network-mode.png" alt="仅组网与选择游戏入口" width="640" />
@@ -120,6 +120,6 @@ ArkOS Nearby 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄
 
 ## 文档
 
-[安装与更新](docs/installation.md) · [平台与游戏](docs/compatibility.md) · [问题排查](docs/troubleshooting.md) · [从源码构建](docs/building.md)
+[安装与更新](docs/installation.md) · [使用说明](docs/usage.md) · [数据与存档](docs/data.md) · [平台与游戏](docs/compatibility.md) · [问题排查](docs/troubleshooting.md) · [从源码构建](docs/building.md)
 
 应用源码采用 [MIT](LICENSE)，组件许可证和来源见 [第三方组件](docs/third-party.md)。

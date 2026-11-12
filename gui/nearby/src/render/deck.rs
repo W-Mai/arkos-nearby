@@ -7,7 +7,7 @@ const MINIATURE: Fixed = Fixed::from_ratio(36, 100);
 const SLIDE: TweenConfig = TweenConfig::new(540, &ease::IN_OUT_CUBIC);
 const PANEL: TweenConfig = TweenConfig::new(320, &ease::OUT_CUBIC);
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Layer {
     #[default]
     Shelf,

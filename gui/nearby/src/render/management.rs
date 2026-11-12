@@ -1,3 +1,4 @@
+use super::deferred::Pane;
 use super::{
     deck::{ActionAnchor, ActionLayout},
     keyboard::keycap,
@@ -8,10 +9,34 @@ use crate::launcher::management::{Manager, Page};
 use crate::launcher::text_entry::{Mode, TextEntry};
 use mirui::prelude::*;
 use mirui::ui::widgets::TextAlign::{Center, Start};
+use mirui::ui::widgets::page_view::{CreatePage, PageView};
 use mirui::ui::widgets::{Image, Text, TextEditing};
 
 #[compose]
 pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
+    ui! {
+        PageView (
+            grow: 1.0,
+            min_width: 0,
+            min_height: 0,
+            page: Pane::Management
+        ) on CreatePage(create_panel::callback(state, metrics))
+    }
+}
+
+#[event]
+fn create_panel(
+    _event: event!(CreatePage<Pane>),
+    state: model!(Manager),
+    metrics: Metrics,
+) -> Entity {
+    ui! {
+        panel_contents (state, metrics)
+    }
+}
+
+#[compose]
+pub(super) fn panel_contents(state: model!(Manager), metrics: Metrics) -> Entity {
     ui! {
         Column (grow: 1.0, min_height: 0, min_width: 0) {
             if ${ state.progressing() } {
@@ -242,6 +267,34 @@ fn row(state: model!(Manager), index: usize, metrics: Metrics) -> Entity {
 
 #[compose]
 fn name_editor(manager: model!(Manager), entry: model!(TextEntry), metrics: Metrics) -> Entity {
+    ui! {
+        PageView (
+            grow: 1.0,
+            min_width: 0,
+            min_height: 0,
+            page: Pane::NameEditor
+        ) on CreatePage(create_name_editor::callback(manager, entry, metrics))
+    }
+}
+
+#[event]
+fn create_name_editor(
+    _event: event!(CreatePage<Pane>),
+    manager: model!(Manager),
+    entry: model!(TextEntry),
+    metrics: Metrics,
+) -> Entity {
+    ui! {
+        name_editor_contents (manager, entry, metrics)
+    }
+}
+
+#[compose]
+fn name_editor_contents(
+    manager: model!(Manager),
+    entry: model!(TextEntry),
+    metrics: Metrics,
+) -> Entity {
     let value = entry.clone();
     let mode = entry.clone();
     let composing = entry.clone();

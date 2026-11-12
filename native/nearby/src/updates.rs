@@ -1,5 +1,6 @@
 use crate::{Result, require};
-use nearby_menu::management::{Package, Update};
+use howff_menu::management::{Package, Update};
+use howff_platform::arkos;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -9,13 +10,14 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const ROOT: &str = "/opt/arkos-nearby/.updates";
-const UPDATE_PROTOCOL: u8 = 2;
+const ROOT: &str = arkos::application::UPDATES.as_str();
+const UPDATE_PROTOCOL: u8 = 1;
 const LIMIT: u64 = 128 * 1024 * 1024;
-const EXECUTABLE: &str = "arkos-nearby/arkos-nearby";
+const EXECUTABLE: &str = "howff/howff";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
+    product: String,
     schema: u8,
     update_protocol: u8,
     version: String,
@@ -37,7 +39,7 @@ fn inside(path: &Path, roots: &[PathBuf]) -> Result<PathBuf> {
     Ok(real)
 }
 fn roots() -> Vec<PathBuf> {
-    ["/roms", "/roms2"]
+    arkos::ROM_ROOTS
         .iter()
         .filter_map(|p| Path::new(p).canonicalize().ok())
         .collect()
@@ -49,7 +51,7 @@ pub fn browse(directory: &str) -> Result<(String, Vec<Package>)> {
             .iter()
             .map(|p| Package {
                 key: p.to_string_lossy().into(),
-                name: if p == Path::new("/roms") {
+                name: if p == Path::new(arkos::ROM_ROOTS[0]) {
                     "游戏卡"
                 } else {
                     "第二张游戏卡"
@@ -118,10 +120,10 @@ fn unpack(path: &Path) -> Result<Contents> {
             matches!(
                 name,
                 EXECUTABLE
-                    | "arkos-nearby/manifest.json"
-                    | "arkos-nearby/SHA256SUMS"
-                    | "arkos-nearby/README.md"
-                    | "arkos-nearby/Install Nearby Multiplayer.sh"
+                    | "howff/manifest.json"
+                    | "howff/SHA256SUMS"
+                    | "howff/README.md"
+                    | "howff/Install Howff.sh"
             ),
             "安装包内容不匹配",
         )?;
@@ -132,10 +134,8 @@ fn unpack(path: &Path) -> Result<Contents> {
         item.read_to_end(&mut value)?;
         match name {
             EXECUTABLE => executable = Some(value),
-            "arkos-nearby/manifest.json" => {
-                manifest = Some(serde_json::from_slice::<Manifest>(&value)?)
-            }
-            "arkos-nearby/SHA256SUMS" => sums = Some(String::from_utf8(value)?),
+            "howff/manifest.json" => manifest = Some(serde_json::from_slice::<Manifest>(&value)?),
+            "howff/SHA256SUMS" => sums = Some(String::from_utf8(value)?),
             _ => {}
         }
     }
@@ -144,14 +144,14 @@ fn unpack(path: &Path) -> Result<Contents> {
     let sums = sums.ok_or("安装包缺少文件摘要")?;
     let digest = format!("{:x}", Sha256::digest(&executable));
     require(
-        manifest.schema == 1 && manifest.update_protocol == UPDATE_PROTOCOL,
+        manifest.product == "howff"
+            && manifest.schema == 1
+            && manifest.update_protocol == UPDATE_PROTOCOL,
         "安装包更新协议不匹配",
     )?;
     require(
         manifest.executable_sha256 == digest
-            && sums
-                .lines()
-                .any(|line| line == format!("{digest}  arkos-nearby")),
+            && sums.lines().any(|line| line == format!("{digest}  howff")),
         "安装包文件摘要不匹配",
     )?;
     require(
@@ -184,7 +184,7 @@ pub fn inspect(path: &str) -> Result<Update> {
     )?;
     let compatible = compatible(&contents.manifest);
     Ok(Update {
-        phase: nearby_menu::management::UpdatePhase::Ready,
+        phase: howff_menu::management::UpdatePhase::Ready,
         path: path.to_string_lossy().into(),
         version: contents.manifest.version,
         digest: before,
@@ -268,7 +268,7 @@ pub fn install_permission(token: &str) -> Result<u32> {
             .any(|line| line.ends_with(&format!("/system.slice/{}", owner.foreground.unit()))),
         "Update parent does not own the foreground unit",
     )?;
-    let expected = stage(token)?.join("arkos-nearby");
+    let expected = stage(token)?.join("howff");
     require(
         std::env::current_exe()?.canonicalize()? == expected
             && crate::content::digest(&expected)? == owner.executable_sha256,
@@ -295,7 +295,7 @@ pub fn apply(update: &Update) -> Result<String> {
     let token = crate::system::random_id()?;
     let root = stage(&token)?;
     crate::system::mkdir(&root)?;
-    let executable = root.join("arkos-nearby");
+    let executable = root.join("howff");
     let mut owner = Owner {
         schema: UPDATE_PROTOCOL,
         pid: std::process::id(),
@@ -349,8 +349,8 @@ pub fn apply(update: &Update) -> Result<String> {
         Ok(())
     };
     crate::system::write(&root.join("owner.json"), &owner)?;
-    let log_path = Path::new(crate::context::INSTALL)
-        .join("logs")
+    let log_path = arkos::application::LOGS
+        .path()
         .join(format!("update-{token}.log"));
     if root.join("install.log").is_file() {
         fs::copy(root.join("install.log"), log_path)?;
@@ -421,12 +421,13 @@ pub fn recover_orphaned() -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture(root: &Path, name: &str, version: &str) -> PathBuf {
+    fn fixture(root: &Path, name: &str, version: &str, product: Option<&str>) -> PathBuf {
         let mut binary = vec![0; 64];
         binary[..5].copy_from_slice(b"\x7fELF\x02");
         binary[18..20].copy_from_slice(&183u16.to_le_bytes());
         let digest = format!("{:x}", Sha256::digest(&binary));
         let manifest = Manifest {
+            product: "howff".into(),
             schema: 1,
             update_protocol: UPDATE_PROTOCOL,
             version: version.into(),
@@ -435,6 +436,12 @@ mod tests {
             target: "aarch64-unknown-linux-musl".into(),
             executable_sha256: digest.clone(),
         };
+        let mut manifest = serde_json::to_value(manifest).unwrap();
+        if let Some(product) = product {
+            manifest["product"] = product.into();
+        } else {
+            manifest.as_object_mut().unwrap().remove("product");
+        }
         let path = root.join(name);
         let encoder = flate2::write::GzEncoder::new(
             File::create(&path).unwrap(),
@@ -444,12 +451,12 @@ mod tests {
         for (name, bytes) in [
             (EXECUTABLE, binary),
             (
-                "arkos-nearby/manifest.json",
+                "howff/manifest.json",
                 serde_json::to_vec(&manifest).unwrap(),
             ),
             (
-                "arkos-nearby/SHA256SUMS",
-                format!("{digest}  arkos-nearby\n").into_bytes(),
+                "howff/SHA256SUMS",
+                format!("{digest}  howff\n").into_bytes(),
             ),
         ] {
             let mut header = tar::Header::new_gnu();
@@ -484,7 +491,7 @@ mod tests {
         let root = std::env::temp_dir().join(crate::system::random_id().unwrap());
         fs::create_dir(&root).unwrap();
         let root = root.canonicalize().unwrap();
-        let path = fixture(&root, "update.tar.gz", "0.11.0");
+        let path = fixture(&root, "update.tar.gz", "0.11.0", Some("howff"));
         let contents = unpack(&path).unwrap();
         assert!(compatible(&contents.manifest));
         assert_eq!(contents.manifest.version, "0.11.0");
@@ -492,6 +499,10 @@ mod tests {
         let escape = root.join("escape");
         std::os::unix::fs::symlink("/", &escape).unwrap();
         assert!(inside(&escape, std::slice::from_ref(&root)).is_err());
+        for product in [None, Some("external")] {
+            let rejected = fixture(&root, "invalid.tar.gz", "0.11.0", product);
+            assert!(unpack(&rejected).is_err());
+        }
         let mut bytes = fs::read(&path).unwrap();
         bytes.truncate(bytes.len() / 2);
         fs::write(&path, bytes).unwrap();

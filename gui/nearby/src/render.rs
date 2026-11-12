@@ -18,6 +18,7 @@ mod configuration;
 mod consoles;
 mod copy;
 mod deck;
+mod deferred;
 mod font;
 mod keyboard;
 mod launcher;
@@ -29,6 +30,8 @@ mod modal;
 pub(crate) mod motion;
 mod pages;
 mod pixel;
+#[cfg(any(target_os = "linux", test))]
+pub(crate) mod response;
 mod rows;
 mod saves;
 mod scroll;
@@ -58,9 +61,12 @@ enum Section {
 }
 
 pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result<(), String> {
+    #[cfg(any(target_os = "linux", test))]
+    response::install(app);
     app.with_theme(crate::theme::Palette::default().theme());
     app.with_offscreen_pool_budget(8 * 1024 * 1024);
     app.with_widget(page_view::view::<PageKey>());
+    app.with_widget(page_view::view::<deferred::Pane>());
     app.with_widget(selection::target::view());
     app.with_widget(selection::frame::view());
     app.with_widget(launcher::details_scroll::view());
@@ -133,6 +139,8 @@ impl Scene {
 
 pub fn update(scene: &mut Scene, view: &View) -> Result<(), String> {
     scene.deck.present(view);
+    #[cfg(any(target_os = "linux", test))]
+    response::stage("deck_presented");
     if view.launcher.enabled {
         for (snapshot, state, tab) in [
             (&view.launcher_shelf, &scene.shelf, 0),
@@ -140,6 +148,12 @@ pub fn update(scene: &mut Scene, view: &View) -> Result<(), String> {
         ] {
             if let Some(snapshot) = snapshot {
                 let mut snapshot = (**snapshot).clone();
+                snapshot.input_generation =
+                    if view.launcher.tab == tab && view.launcher.overlay.is_empty() {
+                        view.input_generation
+                    } else {
+                        Default::default()
+                    };
                 snapshot.launcher.enabled = true;
                 snapshot.launcher.tab = tab;
                 snapshot.launcher.navigation =
@@ -151,6 +165,8 @@ pub fn update(scene: &mut Scene, view: &View) -> Result<(), String> {
         }
     } else if view.return_to_launcher {
         scene.room.present(view);
+        #[cfg(any(target_os = "linux", test))]
+        response::stage("room_presented");
     }
     scene.state.present(view);
 

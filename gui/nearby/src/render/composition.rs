@@ -17,9 +17,14 @@ fn create_page(
     metrics: Metrics,
 ) -> Entity {
     let route = *event.route();
-    ui! {
+    #[cfg(any(target_os = "linux", test))]
+    super::response::stage("room_mount_begin");
+    let entity = ui! {
         mounted_page (route, state, metrics)
-    }
+    };
+    #[cfg(any(target_os = "linux", test))]
+    super::response::stage("room_mount_end");
+    entity
 }
 
 #[compose]

@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
@@ -51,7 +52,18 @@ pub fn credential(code: &str) -> Result<(String, String)> {
     ))
 }
 fn path() -> std::path::PathBuf {
-    Path::new(crate::context::INSTALL).join("pair.json")
+    arkos::application::PAIRING.path().to_path_buf()
+}
+pub(crate) fn validate(saved: &Value) -> Result<()> {
+    require(saved["schema"] == 2, "Unsupported pairing configuration")?;
+    let code = saved["pairing_code"]
+        .as_str()
+        .ok_or("Missing pairing code")?;
+    let (key, group) = credential(code)?;
+    require(
+        saved["psk"] == key && saved["group_id"] == group,
+        "Pairing configuration differs from its code",
+    )
 }
 pub fn ensure_at(path: &Path) -> Result<()> {
     if path.exists() {
@@ -61,13 +73,7 @@ pub fn ensure_at(path: &Path) -> Result<()> {
             "Pairing configuration is not privately owned",
         )?;
         let saved: Value = read(path)?;
-        require(
-            saved["psk"].as_str().is_some_and(|key| {
-                (8..=63).contains(&key.len()) && key.bytes().all(|c| c.is_ascii_alphanumeric())
-            }),
-            "Existing wireless credential is invalid",
-        )?;
-        return Ok(());
+        return validate(&saved);
     }
     let code = generate()?;
     let (psk, group) = credential(&code)?;
@@ -79,10 +85,12 @@ pub fn ensure_at(path: &Path) -> Result<()> {
 pub fn show() -> Result<Value> {
     crate::session::identity(false)?;
     let saved = crate::session::credentials()?;
-    let code = saved["pairing_code"].as_str().map(display).transpose()?;
-    Ok(
-        json!({"pairing_code":code,"group_id":saved["group_id"],"legacy_credentials":code.is_none()}),
-    )
+    let code = display(
+        saved["pairing_code"]
+            .as_str()
+            .ok_or("Missing pairing code")?,
+    )?;
+    Ok(json!({"pairing_code":code,"group_id":saved["group_id"]}))
 }
 pub fn set(code: &str) -> Result<Value> {
     crate::session::identity(false)?;

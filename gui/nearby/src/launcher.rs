@@ -1,4 +1,5 @@
 use crate::model::{Action, LauncherView, View};
+use howff_menu::input::{Generation, Sourced};
 use mirui::anim::{Tween, TweenConfig, ease};
 use mirui::prelude::*;
 use mirui::ui::{text_input::TextInputSession, widgets::TextDocument};
@@ -20,16 +21,23 @@ pub enum Intent {
         key: String,
         multiplayer: bool,
     },
-    Wifi(nearby_menu::wifi::Request),
+    Wifi(howff_menu::wifi::Request),
     #[cfg(target_os = "linux")]
-    Management(nearby_menu::management::Request),
+    Management(howff_menu::management::Request),
     #[cfg(target_os = "linux")]
-    Configuration(nearby_menu::configuration::Request),
+    Configuration(howff_menu::configuration::Request),
     #[cfg(target_os = "linux")]
-    Saves(nearby_menu::saves::Request),
+    Saves(howff_menu::saves::Request),
 }
 
 pub struct InvalidInput;
+
+#[derive(Default)]
+struct MenuContent {
+    title: String,
+    kind: String,
+    items: Vec<crate::model::LauncherItem>,
+}
 
 #[derive(Default)]
 enum Gesture {
@@ -45,12 +53,24 @@ enum Gesture {
 
 #[model]
 pub struct Launcher {
+    input_generation: Generation,
     view: LauncherView,
+    menu: MenuContent,
     pub(crate) configuration: model!(owned configuration::Editor),
     pub(crate) saves: model!(owned saves::Manager),
     pub(crate) management: model!(owned management::Manager),
     #[observe]
-    revision: u64,
+    overlay_revision: u64,
+    #[observe]
+    title_revision: u64,
+    #[observe]
+    notice_revision: u64,
+    #[observe]
+    detail_revision: u64,
+    #[observe]
+    wifi_view_revision: u64,
+    #[observe]
+    items_revision: u64,
     #[observe]
     pub progress: u16,
     #[observe]
@@ -59,7 +79,7 @@ pub struct Launcher {
     pub level_positions: [Fixed; 2],
     #[observe]
     pub detail_offset: Fixed,
-    detail_reading: Option<(nearby_menu::details::Section, usize)>,
+    detail_reading: Option<(howff_menu::details::Section, usize)>,
     detail_scroll_input: u32,
     detail_height: Fixed,
     detail_rows: Vec<Fixed>,
@@ -96,11 +116,18 @@ pub struct Launcher {
 impl Default for Launcher {
     fn default() -> Self {
         Self {
+            input_generation: Generation::default(),
             view: Default::default(),
+            menu: Default::default(),
             configuration: configuration::Editor::default().into(),
             saves: saves::Manager::default().into(),
             management: management::Manager::default().into(),
-            revision: Default::default(),
+            overlay_revision: Default::default(),
+            title_revision: Default::default(),
+            notice_revision: Default::default(),
+            detail_revision: Default::default(),
+            wifi_view_revision: Default::default(),
+            items_revision: Default::default(),
             progress: Default::default(),
             selection_age: Default::default(),
             level_positions: Default::default(),
@@ -137,6 +164,50 @@ impl Default for Launcher {
 #[model]
 impl Launcher {
     #[observe]
+    pub fn enabled(&self) -> bool {
+        self.view.enabled
+    }
+    #[observe]
+    pub fn tab(&self) -> usize {
+        self.view.tab
+    }
+    #[observe]
+    pub fn overlay_visible(&self) -> bool {
+        self.view.enabled && !self.view.overlay.is_empty()
+    }
+    fn snapshot_overlay_title(&self) -> String {
+        if self.view.overlay.is_empty() {
+            self.menu.title.clone()
+        } else {
+            self.view.overlay.clone()
+        }
+    }
+    fn snapshot_overlay_kind(&self) -> String {
+        self.menu.kind.clone()
+    }
+    #[observe]
+    pub fn selected(&self) -> usize {
+        self.view.selected
+    }
+    #[observe]
+    pub fn item_count(&self) -> usize {
+        self.menu.items.len()
+    }
+    fn snapshot_confirm_label(&self) -> String {
+        match self.view.details.as_ref() {
+            Some(details) if details.expanded => "收起",
+            Some(details) if details.section == howff_menu::details::Section::Storage => "查看详情",
+            Some(details) if details.section != howff_menu::details::Section::Overview => {
+                "查看来源"
+            }
+            _ => "确认",
+        }
+        .into()
+    }
+    fn snapshot_notice(&self) -> String {
+        self.view.notice.clone()
+    }
+    #[observe]
     pub fn menu_selection(&self) -> Option<usize> {
         if self.management.active() {
             return Some(self.management.focus());
@@ -162,7 +233,7 @@ impl Launcher {
         self.view.wifi.is_some()
     }
     #[observe]
-    pub fn wifi_page(&self) -> nearby_menu::wifi::Page {
+    pub fn wifi_page(&self) -> howff_menu::wifi::Page {
         self.view.wifi.as_ref().map(|v| v.page).unwrap_or_default()
     }
 
@@ -256,14 +327,17 @@ impl Launcher {
 
     fn snapshot_detail_heading(&self) -> String {
         match self.view.details.as_ref().map(|details| &details.load) {
-            Some(nearby_menu::details::Load::Ready { document }) => document.title.clone(),
-            Some(nearby_menu::details::Load::Failed { message }) => {
+            Some(howff_menu::details::Load::Ready { document }) => document.title.clone(),
+            Some(howff_menu::details::Load::Failed { message }) => {
                 format!("读取未完成：{message}")
             }
             _ => {
-                if self.view.details.as_ref().is_some_and(|details| {
-                    details.section == nearby_menu::details::Section::Storage
-                }) {
+                if self
+                    .view
+                    .details
+                    .as_ref()
+                    .is_some_and(|details| details.section == howff_menu::details::Section::Storage)
+                {
                     "正在读取存储空间…".into()
                 } else {
                     "正在读取游戏信息…".into()
@@ -274,12 +348,12 @@ impl Launcher {
 
     fn snapshot_detail_platform(&self) -> String {
         match self.view.details.as_ref().map(|details| &details.load) {
-            Some(nearby_menu::details::Load::Ready { document }) => document.platform.clone(),
+            Some(howff_menu::details::Load::Ready { document }) => document.platform.clone(),
             _ => String::new(),
         }
     }
 
-    fn snapshot_detail_fact(&self, index: usize, field: usize) -> nearby_menu::details::Fact {
+    fn snapshot_detail_fact(&self, index: usize, field: usize) -> howff_menu::details::Fact {
         self.detail_row_data(index)
             .and_then(|row| row.facts.get(field))
             .cloned()
@@ -294,15 +368,21 @@ impl Launcher {
         self.view.clone()
     }
     fn snapshot_item(&self, index: usize) -> Option<crate::model::LauncherItem> {
-        self.view.items.get(index).cloned()
+        self.menu.items.get(index).cloned()
     }
-    fn snapshot_notice(&self) -> String {
-        self.view.notice.clone()
-    }
-    fn snapshot_level(&self, index: usize) -> Option<nearby_menu::Level> {
-        self.view.items.get(index).and_then(|item| item.level)
+    fn snapshot_level(&self, index: usize) -> Option<howff_menu::Level> {
+        self.menu.items.get(index).and_then(|item| item.level)
     }
     pub fn present(&mut self, view: &View) {
+        if self.input_generation != view.input_generation {
+            self.cancel();
+            self.pending = None;
+            self.input_edits.clear();
+            self.input_generation = view.input_generation;
+        }
+        self.management.bind_input(view.input_generation);
+        self.configuration.bind_input(view.input_generation);
+        self.saves.bind_input(view.input_generation);
         self.management.sync(view.launcher.management.as_ref());
         self.configuration
             .sync(view.launcher.configuration.as_ref());
@@ -368,8 +448,40 @@ impl Launcher {
             self.cancel();
         }
         if self.view != view.launcher {
+            let previous_title = self.snapshot_overlay_title();
+            let next = &view.launcher;
+            // Hidden menus and child editors do not replace the retained menu payload.
+            // Input dispatch still reads the current authoritative View below.
+            if next.enabled
+                && !next.overlay.is_empty()
+                && next.configuration.is_none()
+                && next.saves.is_none()
+                && next.management.is_none()
+                && next.wifi.is_none()
+            {
+                if self.menu.items != next.items {
+                    self.menu.items.clone_from(&next.items);
+                    self.items_revision += 1;
+                }
+                self.menu.title.clone_from(&next.overlay);
+                if self.menu.kind != next.overlay_kind {
+                    self.menu.kind.clone_from(&next.overlay_kind);
+                    self.overlay_revision += 1;
+                }
+            }
+            if self.view.notice != view.launcher.notice {
+                self.notice_revision += 1;
+            }
+            if self.view.details != view.launcher.details {
+                self.detail_revision += 1;
+            }
+            if self.view.wifi != view.launcher.wifi {
+                self.wifi_view_revision += 1;
+            }
             self.view = view.launcher.clone();
-            self.revision += 1;
+            if self.snapshot_overlay_title() != previous_title {
+                self.title_revision += 1;
+            }
             self.update_detail_offset();
         }
     }
@@ -601,9 +713,11 @@ impl Launcher {
     }
 
     #[effects]
-    fn take_intent(&mut self) -> Option<Intent> {
-        self.pending.take()
+    fn take_input(&mut self) -> Option<Sourced<Intent>> {
+        self.take_intent()
+            .map(|intent| self.input_generation.bind(intent))
     }
+
     #[cfg(any(target_os = "linux", test))]
     pub fn saves_input(&mut self, action: Action) {
         self.saves.input(action);
@@ -657,7 +771,7 @@ impl Launcher {
             .view
             .wifi
             .as_ref()
-            .is_some_and(|v| v.page == nearby_menu::wifi::Page::Hidden);
+            .is_some_and(|v| v.page == howff_menu::wifi::Page::Hidden);
         if index == 35 {
             let _ = self.wifi_document.revision();
             self.wifi_document
@@ -668,10 +782,10 @@ impl Launcher {
             self.wifi_editor.label(index, hidden)
         }
     }
-    fn snapshot_wifi_row(&self, index: usize) -> Option<nearby_menu::wifi::Network> {
+    fn snapshot_wifi_row(&self, index: usize) -> Option<howff_menu::wifi::Network> {
         self.view.wifi.as_ref()?.networks.get(index).cloned()
     }
-    fn snapshot_wifi_info(&self) -> Option<nearby_menu::wifi::Info> {
+    fn snapshot_wifi_info(&self) -> Option<howff_menu::wifi::Info> {
         self.view.wifi.as_ref()?.info.clone()
     }
     fn snapshot_wifi_echo(&self) -> String {
@@ -692,66 +806,78 @@ impl Launcher {
 }
 
 impl LauncherHandle {
+    pub fn overlay_title(&self) -> String {
+        self.title_revision();
+        self.snapshot_overlay_title()
+    }
+    pub fn overlay_kind(&self) -> String {
+        self.overlay_revision();
+        self.snapshot_overlay_kind()
+    }
+    pub fn confirm_label(&self) -> String {
+        self.detail_revision();
+        self.snapshot_confirm_label()
+    }
+    pub fn notice(&self) -> String {
+        self.notice_revision();
+        self.snapshot_notice()
+    }
     pub fn wifi_echo(&self) -> String {
         self.wifi_revision();
         self.snapshot_wifi_echo()
     }
     pub fn wifi_window(&self) -> std::ops::Range<usize> {
-        self.revision();
+        self.wifi_view_revision();
         self.wifi_visible_rows();
         self.snapshot_wifi_window()
     }
     pub fn wifi_text(&self, index: usize) -> String {
-        self.revision();
+        self.wifi_view_revision();
         self.wifi_revision();
         self.snapshot_wifi_text(index)
     }
     pub fn wifi_editor(&self, index: usize) -> String {
-        self.revision();
+        self.wifi_view_revision();
         self.wifi_revision();
         self.snapshot_wifi_editor(index)
     }
-    pub fn wifi_row(&self, index: usize) -> Option<nearby_menu::wifi::Network> {
-        self.revision();
+    pub fn wifi_row(&self, index: usize) -> Option<howff_menu::wifi::Network> {
+        self.wifi_view_revision();
         self.snapshot_wifi_row(index)
     }
-    pub fn wifi_info(&self) -> Option<nearby_menu::wifi::Info> {
-        self.revision();
+    pub fn wifi_info(&self) -> Option<howff_menu::wifi::Info> {
+        self.wifi_view_revision();
         self.snapshot_wifi_info()
     }
-    pub fn level(&self, index: usize) -> Option<nearby_menu::Level> {
-        self.revision();
+    pub fn level(&self, index: usize) -> Option<howff_menu::Level> {
+        self.items_revision();
         self.snapshot_level(index)
-    }
-    pub fn notice(&self) -> String {
-        self.revision();
-        self.snapshot_notice()
     }
 
     pub fn item(&self, index: usize) -> Option<crate::model::LauncherItem> {
-        self.revision();
+        self.items_revision();
         self.snapshot_item(index)
     }
+    // Full snapshots are only for imperative consumers; bindings use observed selectors.
     pub fn view(&self) -> LauncherView {
-        self.revision();
         self.snapshot()
     }
 
     pub fn detail_heading(&self) -> String {
-        self.revision();
+        self.detail_revision();
         self.snapshot_detail_heading()
     }
 
     pub fn detail_platform(&self) -> String {
-        self.revision();
+        self.detail_revision();
         self.snapshot_detail_platform()
     }
     pub fn detail_fact_count(&self, index: usize) -> usize {
-        self.revision();
+        self.detail_revision();
         self.snapshot_detail_fact_count(index)
     }
-    pub fn detail_fact(&self, index: usize, field: usize) -> nearby_menu::details::Fact {
-        self.revision();
+    pub fn detail_fact(&self, index: usize, field: usize) -> howff_menu::details::Fact {
+        self.detail_revision();
         self.snapshot_detail_fact(index, field)
     }
     pub fn detail_fact_height(&self, index: usize, field: usize) -> Fixed {
@@ -759,25 +885,26 @@ impl LauncherHandle {
         self.snapshot_detail_fact_height(index, field)
     }
     pub fn detail_facts_size(&self, index: usize, gap: i32) -> Fixed {
-        self.revision();
+        self.detail_revision();
         self.detail_geometry();
         self.snapshot_detail_facts_size(index, gap)
     }
 
     pub fn detail_size(&self, index: usize, gap: i32) -> Fixed {
-        self.revision();
+        self.detail_revision();
         self.detail_geometry();
+        self.selected();
         self.snapshot_detail_size(index, gap)
     }
 }
 
 impl Launcher {
-    fn detail_row_data(&self, index: usize) -> Option<&nearby_menu::details::Row> {
+    fn detail_row_data(&self, index: usize) -> Option<&howff_menu::details::Row> {
         self.view
             .details
             .as_ref()
             .and_then(|details| match &details.load {
-                nearby_menu::details::Load::Ready { document } => {
+                howff_menu::details::Load::Ready { document } => {
                     document.rows(details.section).get(index)
                 }
                 _ => None,
@@ -795,14 +922,168 @@ mod controls;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_menu_content_survives_child_editors_without_retaining_input_authority() {
+        let mut model = Launcher::default();
+        let mut current = View::default();
+        current.launcher.enabled = true;
+        current.launcher.overlay = "Game".into();
+        current.launcher.overlay_kind = "game".into();
+        current.launcher.items = vec![crate::model::LauncherItem::available(
+            crate::model::MenuAction::Play,
+            "Play",
+        )];
+        model.present(&current);
+        let menu = current.clone();
+        let revisions = (model.items_revision, model.overlay_revision);
+        current.launcher.overlay.clear();
+        current.launcher.overlay_kind.clear();
+        current.launcher.items.clear();
+        current.input_generation.advance();
+        model.present(&current);
+        assert_eq!(model.snapshot(), current.launcher);
+        assert!(!model.overlay_visible());
+        assert!(model.menu_selection().is_none());
+        assert!(model.view.selected_action().is_none());
+        assert_eq!(model.item_count(), 1);
+        assert_eq!(model.snapshot_item(0), menu.launcher.items.first().cloned());
+        assert_eq!((model.items_revision, model.overlay_revision), revisions);
+        current.launcher.overlay = "Configuration".into();
+        current.launcher.configuration = Some(Default::default());
+        model.present(&current);
+        assert_eq!(model.snapshot(), current.launcher);
+        assert_eq!(model.snapshot_overlay_title(), "Configuration");
+        assert_eq!((model.items_revision, model.overlay_revision), revisions);
+        current = menu.clone();
+        model.present(&current);
+        assert_eq!((model.items_revision, model.overlay_revision), revisions);
+        current.launcher.overlay = "Empty menu".into();
+        current.launcher.overlay_kind = "tools".into();
+        current.launcher.items.clear();
+        model.present(&current);
+        assert_eq!(
+            model.item_count(),
+            0,
+            "An active empty menu replaces old content"
+        );
+        assert_eq!(model.items_revision, revisions.0 + 1);
+    }
+
+    #[test]
+    fn focus_and_gestures_do_not_publish_menu_content_or_structure_changes() {
+        use mirui::core::reactive::{Effect, flush_signal_dirty};
+        use std::{cell::Cell, rc::Rc};
+
+        let mut app = App::headless(64, 64);
+        let model = app.add_model(Launcher::default()).finish();
+        let mut view = View::default();
+        view.launcher.enabled = true;
+        view.launcher.overlay = "Settings".into();
+        view.launcher.overlay_kind = "system".into();
+        view.launcher.items = vec![
+            crate::model::LauncherItem::available(crate::model::MenuAction::CycleTheme, "Theme"),
+            crate::model::LauncherItem::available(crate::model::MenuAction::ToggleSound, "Sound"),
+        ];
+        model.present(&view);
+        flush_signal_dirty(&mut app.world);
+        let counts = Rc::new(Cell::new([0; 4]));
+        let _effects: Vec<_> = (0..4)
+            .map(|index| {
+                let model = model.clone();
+                let counts = counts.clone();
+                Effect::new(move || {
+                    match index {
+                        0 => {
+                            let _ = model.item(0);
+                        }
+                        1 => {
+                            let _ = (
+                                model.overlay_visible(),
+                                model.overlay_kind(),
+                                model.item_count(),
+                            );
+                        }
+                        2 => {
+                            let _ = model.selected();
+                        }
+                        _ => {
+                            let _ = model.notice();
+                        }
+                    }
+                    let mut next = counts.get();
+                    next[index] += 1;
+                    counts.set(next);
+                })
+            })
+            .collect();
+
+        view.launcher.selected = 1;
+        view.launcher.key = "different-game".into();
+        model.present(&view);
+        model.tick(100);
+        flush_signal_dirty(&mut app.world);
+        assert_eq!(counts.get(), [1, 1, 2, 1]);
+        view.launcher.notice = "Updated".into();
+        model.present(&view);
+        flush_signal_dirty(&mut app.world);
+        assert_eq!(counts.get(), [1, 1, 2, 2]);
+        view.launcher.items[0].name = "Changed theme".into();
+        model.present(&view);
+        flush_signal_dirty(&mut app.world);
+        assert_eq!(counts.get(), [2, 1, 2, 2]);
+        view.launcher.items.pop();
+        model.present(&view);
+        flush_signal_dirty(&mut app.world);
+        assert_eq!(counts.get(), [3, 2, 2, 2]);
+        view.launcher.overlay.clear();
+        model.present(&view);
+        flush_signal_dirty(&mut app.world);
+        assert_eq!(counts.get(), [3, 3, 2, 2]);
+    }
+
+    #[test]
+    fn page_binding_cancels_old_gestures_and_preserves_already_emitted_origins() {
+        let mut model = Launcher::default();
+        let mut view = View {
+            input_generation: Generation::FIRST,
+            ..Default::default()
+        };
+        view.launcher.enabled = true;
+        view.launcher.key = "a".repeat(64);
+        model.present(&view);
+        model.press(100);
+        model.release(200);
+        let queued = model.take_input().unwrap();
+        model.press(300);
+        model.pending = Some(Intent::Action(Action::Confirm));
+        view.input_generation.advance();
+        model.present(&view);
+        model.release(400);
+        assert!(model.take_input().is_none());
+        assert_eq!(queued.generation, Generation::FIRST);
+        assert!(matches!(
+            queued.payload,
+            Intent::Game {
+                multiplayer: false,
+                ..
+            }
+        ));
+        model.press(500);
+        model.release(600);
+        assert_eq!(
+            model.take_input().unwrap().generation,
+            view.input_generation
+        );
+    }
     #[test]
     fn wifi_keyboard_emits_one_private_model_effect_and_x_never_launches_a_game() {
         let mut model = Launcher::default();
         let mut view = View::default();
         view.launcher.enabled = true;
-        view.launcher.wifi = Some(nearby_menu::wifi::View {
+        view.launcher.wifi = Some(howff_menu::wifi::View {
             epoch: 4,
-            page: nearby_menu::wifi::Page::Password,
+            page: howff_menu::wifi::Page::Password,
             ..Default::default()
         });
         model.present(&view);
@@ -835,8 +1116,8 @@ mod tests {
         let mut model = Launcher::default();
         model.view.overlay_kind = "details".into();
         model.view.items = vec![crate::model::LauncherItem::default(); 5];
-        model.view.details = Some(nearby_menu::details::View {
-            section: nearby_menu::details::Section::Saves,
+        model.view.details = Some(howff_menu::details::View {
+            section: howff_menu::details::Section::Saves,
             expanded: true,
             ..Default::default()
         });
@@ -865,11 +1146,11 @@ mod tests {
         view.launcher.enabled = true;
         view.launcher.overlay = "系统控制".into();
         view.launcher.overlay_kind = "controls".into();
-        view.launcher.items = nearby_menu::SystemLevel::ALL
+        view.launcher.items = howff_menu::SystemLevel::ALL
             .into_iter()
             .map(|control| {
-                nearby_menu::MenuItem::available(control.action(), control.label())
-                    .with_level(nearby_menu::Level::new(control, None, false, false))
+                howff_menu::MenuItem::available(control.action(), control.label())
+                    .with_level(howff_menu::Level::new(control, None, false, false))
             })
             .collect();
         model.present(&view);
@@ -949,7 +1230,7 @@ mod tests {
 #[cfg(test)]
 mod management_contracts {
     use super::*;
-    use nearby_menu::management::{Device, Entry, View as ManagementView};
+    use howff_menu::management::{Device, Entry, View as ManagementView};
 
     #[test]
     fn management_routes_keep_their_parent_focus_and_use_the_launcher_input_path() {
@@ -983,5 +1264,11 @@ mod management_contracts {
             assert_eq!(launcher.management.snapshot_title(), title);
             assert_eq!(launcher.management.selected(), 1);
         }
+    }
+}
+
+impl Launcher {
+    fn take_intent(&mut self) -> Option<Intent> {
+        self.pending.take()
     }
 }

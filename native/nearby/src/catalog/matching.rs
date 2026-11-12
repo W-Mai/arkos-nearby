@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
@@ -130,10 +129,7 @@ fn find(state: &State, room: &VerifiedRoom, profile: &Profile) -> Result<Vec<Can
         core.sha256 == profile.core_sha256 && core.bits == profile.elf_bits,
         "本机核心版本与房间不同",
     )?;
-    let roots: Vec<_> = ["/roms", "/roms2"]
-        .iter()
-        .filter_map(|root| PathBuf::from(root).canonicalize().ok())
-        .collect();
+    let roots = crate::platform::content::roots();
     check(state)?;
     // Inventory includes platform folders without an installed default core.
     // The verified room core alone determines content compatibility below.

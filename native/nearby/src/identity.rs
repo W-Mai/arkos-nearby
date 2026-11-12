@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -81,11 +82,11 @@ impl Identity {
 }
 
 pub fn prepare(mac: &str) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
-    let root = Path::new(crate::context::INSTALL);
+    let root = Path::new(arkos::PATHS.personal);
     prepare_at(root, mac)
 }
 pub fn prepare_at(root: &Path, mac: &str) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
-    let path = root.join("identity.json");
+    let path = root.join(arkos::application::IDENTITY.local());
     if path.exists() {
         let local: Local = read(&path)?;
         require(
@@ -115,11 +116,11 @@ pub fn prepare_at(root: &Path, mac: &str) -> Result<Option<(Vec<u8>, Vec<u8>)>> 
     )))
 }
 pub fn load() -> Result<Identity> {
-    let root = Path::new(crate::context::INSTALL);
+    let root = Path::new(arkos::PATHS.personal);
     load_at(root)
 }
 fn load_at(root: &Path) -> Result<Identity> {
-    let path = root.join("identity.pk8");
+    let path = root.join(arkos::application::PRIVATE_KEY.local());
     let info = path.metadata()?;
     require(
         info.uid() == unsafe { libc::geteuid() } && info.mode() & 0o077 == 0 && info.len() <= 1024,
@@ -127,7 +128,7 @@ fn load_at(root: &Path) -> Result<Identity> {
     )?;
     let key =
         Ed25519KeyPair::from_pkcs8(&fs::read(path)?).map_err(|_| "Invalid local signing key")?;
-    let local: Local = read(&root.join("identity.json"))?;
+    let local: Local = read(&root.join(arkos::application::IDENTITY.local()))?;
     local.public.validate()?;
     require(
         local.public.public_key == encode(key.public_key().as_ref()),
@@ -169,7 +170,7 @@ pub struct Friend {
     pub wireless_key: Option<String>,
 }
 fn friends_path() -> PathBuf {
-    Path::new(crate::context::INSTALL).join("friends.json")
+    Path::new(arkos::PATHS.personal).join(arkos::application::FRIENDS.local())
 }
 pub fn friends() -> Result<BTreeMap<String, Friend>> {
     if !friends_path().exists() {
@@ -282,11 +283,11 @@ pub fn summary() -> Result<serde_json::Value> {
 pub fn rename(name: &str) -> Result<()> {
     crate::session::identity(false)?;
     crate::session::while_idle(|| {
-        let root = Path::new(crate::context::INSTALL);
-        let mut local: Local = read(&root.join("identity.json"))?;
+        let root = Path::new(arkos::PATHS.personal);
+        let mut local: Local = read(&root.join(arkos::application::IDENTITY.local()))?;
         local.public.name = name.into();
         local.public.validate()?;
-        write(&root.join("identity.json"), &local)
+        write(&root.join(arkos::application::IDENTITY.local()), &local)
     })
 }
 pub fn reset() -> Result<()> {
@@ -296,7 +297,7 @@ pub fn reset() -> Result<()> {
     )?;
     let device = crate::compat::detect().device()?;
     crate::session::while_idle(|| {
-        let root = Path::new(crate::context::INSTALL);
+        let root = Path::new(arkos::PATHS.personal);
         for name in ["identity.pk8", "identity.json"] {
             let path = root.join(name);
             if path.exists() {
@@ -305,9 +306,9 @@ pub fn reset() -> Result<()> {
         }
         let (key, metadata) =
             prepare(&device.mac)?.ok_or("Identity reset did not produce a new key")?;
-        private_write(&root.join("identity.pk8"), &key)?;
-        private_write(&root.join("identity.json"), &metadata)?;
+        private_write(&root.join(arkos::application::PRIVATE_KEY.local()), &key)?;
+        private_write(&root.join(arkos::application::IDENTITY.local()), &metadata)?;
         write(&friends_path(), &BTreeMap::<String, Friend>::new())?;
-        write(&root.join("device.json"), &device)
+        write(&root.join(arkos::application::DEVICE.local()), &device)
     })
 }

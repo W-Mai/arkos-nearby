@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -24,11 +25,11 @@ impl Picker {
             .open("/dev/tty1")?;
         tty.write_all(b"\x1bc")?;
         let mapper = OwnedChild(
-            Command::new("/opt/inttools/gptokeyb")
+            Command::new(arkos::firmware::INPUT_MAPPER.as_str())
                 .args(["-c", keys.to_str().unwrap()])
                 .env(
                     "SDL_GAMECONTROLLERCONFIG_FILE",
-                    "/opt/inttools/gamecontrollerdb.txt",
+                    arkos::firmware::CONTROLLERS.as_str(),
                 )
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

@@ -2,6 +2,7 @@ use super::{
     Entry, metadata,
     store::{self, Directory, Stamp},
 };
+use crate::platform::content::{self, CatalogKind};
 use pinyin::ToPinyin;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -14,26 +15,24 @@ pub(super) const MAX_RECORDS: usize = 100_000;
 const MAX_QUERIES: usize = 32;
 const MAX_QUERY_IDS: usize = MAX_RECORDS * 4;
 const VISIBLE_RESULTS: usize = 4096;
+const VISIBLE_RECENT: usize = 100;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Record {
     entry: Entry,
     search: String,
-    #[serde(default)]
     hidden: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Index {
     schema: u32,
-    #[serde(default)]
     complete: bool,
     roots: Vec<PathBuf>,
     platforms: Vec<Entry>,
     stamps: Vec<Stamp>,
-    #[serde(default)]
     directories: BTreeMap<PathBuf, Directory>,
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub(super) metadata: BTreeMap<PathBuf, metadata::Metadata>,
     pub(super) counts: BTreeMap<PathBuf, usize>,
     records: Vec<Record>,
@@ -41,26 +40,42 @@ pub struct Index {
     children: BTreeMap<PathBuf, Vec<Entry>>,
     #[serde(skip)]
     by_path: BTreeMap<PathBuf, usize>,
+    #[serde(skip)]
+    by_key: BTreeMap<String, Vec<usize>>,
 }
 
 impl Index {
+    pub(super) fn recent_count(&self, times: &BTreeMap<String, u64>) -> usize {
+        times
+            .keys()
+            .filter_map(|key| self.by_key.get(key))
+            .map(Vec::len)
+            .sum::<usize>()
+            .min(VISIBLE_RECENT)
+    }
+
     pub(super) fn recent(&self, times: &BTreeMap<String, u64>) -> Vec<Entry> {
-        let mut entries: Vec<_> = self
-            .records
+        let mut entries: Vec<_> = times
             .iter()
-            .filter(|record| {
-                !record.hidden && !record.entry.directory && times.contains_key(&record.entry.key())
-            })
-            .map(|record| record.entry.clone())
+            .filter_map(|(key, used)| self.by_key.get(key).map(|ids| (ids, *used)))
+            .flat_map(|(ids, used)| ids.iter().map(move |id| (*id, used)))
             .collect();
-        entries.sort_by_key(|entry| {
-            (
-                std::cmp::Reverse(times.get(&entry.key()).copied().unwrap_or(0)),
-                entry.name.clone(),
-            )
+        entries.sort_by(|(left, left_used), (right, right_used)| {
+            right_used
+                .cmp(left_used)
+                .then_with(|| {
+                    self.records[*left]
+                        .entry
+                        .name
+                        .cmp(&self.records[*right].entry.name)
+                })
+                .then_with(|| left.cmp(right))
         });
-        entries.truncate(100);
         entries
+            .into_iter()
+            .take(VISIBLE_RECENT)
+            .map(|(id, _)| self.records[id].entry.clone())
+            .collect()
     }
     pub(super) fn cached(path: &Path, roots: &[PathBuf], platforms: &[Entry]) -> Option<Arc<Self>> {
         store::load(path, roots, platforms)
@@ -73,7 +88,7 @@ impl Index {
             return None;
         }
         let mut value: Self = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-        if !matches!(value.schema, 1..=3)
+        if value.schema != 3
             || !value.matches(roots, platforms)
             || value.records.len() > MAX_RECORDS
             || value.directories.len() > MAX_RECORDS
@@ -85,19 +100,23 @@ impl Index {
         Some(value)
     }
     fn derive(&mut self) {
+        self.by_key.clear();
+        for (id, record) in self.records.iter().enumerate() {
+            if !record.hidden && !record.entry.directory {
+                self.by_key.entry(record.entry.key()).or_default().push(id);
+            }
+        }
         self.by_path = self
             .records
             .iter()
             .enumerate()
             .map(|(id, row)| (row.entry.path.clone(), id))
             .collect();
-        if self.schema >= 2 {
-            self.metadata = self
-                .directories
-                .values()
-                .flat_map(|dir| dir.metadata.clone())
-                .collect();
-        }
+        self.metadata = self
+            .directories
+            .values()
+            .flat_map(|dir| dir.metadata.clone())
+            .collect();
         self.children.clear();
         for (path, dir) in &self.directories {
             let Some(platform) = self
@@ -153,6 +172,12 @@ impl Index {
     }
     pub(super) fn entry(&self, path: &Path) -> Option<&Entry> {
         self.by_path.get(path).map(|id| &self.records[*id].entry)
+    }
+    pub(super) fn child_position(&self, directory: &Path, selected: &Path) -> Option<usize> {
+        self.children
+            .get(directory)?
+            .iter()
+            .position(|entry| entry.path == selected)
     }
     #[cfg(test)]
     pub(super) fn children(&self, path: &Path) -> Option<Vec<Entry>> {
@@ -240,8 +265,7 @@ fn aliases(entry: &Entry) -> String {
 impl IndexJob {
     pub fn launcher() -> crate::Result<Self> {
         let (roots, multiplayer) = super::local_platforms()?;
-        let platforms = crate::launcher::recipes::load()?
-            .into_iter()
+        let platforms = crate::platform::content::systems()?
             .filter_map(|system| {
                 let path = system.path.canonicalize().ok()?;
                 if !roots.iter().any(|root| path.starts_with(root)) || !path.is_dir() {
@@ -266,7 +290,7 @@ impl IndexJob {
         Ok(Self {
             roots,
             platforms,
-            cache: Path::new(crate::context::INSTALL).join("launcher-index.json"),
+            cache: content::index_path(CatalogKind::Launcher),
             seed: None,
         })
     }
@@ -276,7 +300,7 @@ impl IndexJob {
         Ok(Self {
             roots,
             platforms,
-            cache: Path::new(crate::context::INSTALL).join("catalog-index.json"),
+            cache: content::index_path(CatalogKind::Multiplayer),
             seed: None,
         })
     }
@@ -315,6 +339,7 @@ impl IndexJob {
             records: Vec::new(),
             children: BTreeMap::new(),
             by_path: BTreeMap::new(),
+            by_key: BTreeMap::new(),
         };
         let mut watched = BTreeSet::new();
         for platform in &self.platforms {

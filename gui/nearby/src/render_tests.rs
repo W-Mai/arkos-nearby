@@ -1,9 +1,265 @@
 use super::*;
 
 #[test]
+fn departing_platform_previews_keep_content_and_entities_until_the_slide_finishes() {
+    use crate::model::{GameRow, LibraryKind};
+    use mirui::ui::{Hidden, IdMap, Parent};
+
+    for launcher in [false, true] {
+        let mut app = app([640, 480]);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = launcher;
+        current.launcher.tab = usize::from(launcher);
+        current.platforms = true;
+        current.library.kind = LibraryKind::Platforms;
+        current.selected = 1;
+        current.entries = ["nes", "snes", "gba"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, icon)| GameRow {
+                key: format!("platform-{index}"),
+                name: icon.into(),
+                icon: icon.into(),
+                available: true,
+                directory: true,
+                ..Default::default()
+            })
+            .collect();
+        let mut scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 400);
+        let state = if launcher {
+            &scene.catalog
+        } else {
+            &scene.state
+        };
+        let presentation = state.platform_previews();
+        let preview = app
+            .world
+            .resource::<IdMap>()
+            .unwrap()
+            .get("platform_previews")
+            .unwrap();
+        let members = app
+            .world
+            .query::<Style>()
+            .iter()
+            .filter_map(|(entity, _)| {
+                selection::contains(preview, entity, |node| {
+                    app.world.get::<Parent>(node).map(|p| p.0)
+                })
+                .then_some(entity)
+            })
+            .collect::<Vec<_>>();
+        let visible = app
+            .world
+            .get::<mirui::ui::Children>(preview)
+            .unwrap()
+            .0
+            .iter()
+            .copied()
+            .filter(|entity| !app.world.has::<Hidden>(*entity))
+            .collect::<Vec<_>>();
+        assert!(!members.is_empty());
+        assert_eq!(state.platform_preview_title(), "snes");
+
+        current.library.kind = LibraryKind::Directory;
+        current.platforms = false;
+        current.selected = 0;
+        current.input_generation.advance();
+        current.entries = (0..8)
+            .map(|index| GameRow {
+                key: format!("game-{index}"),
+                name: format!("Game {index}"),
+                icon: "snes".into(),
+                available: true,
+                ..Default::default()
+            })
+            .collect();
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 416);
+        let state = if launcher {
+            &scene.catalog
+        } else {
+            &scene.state
+        };
+        assert_eq!(state.page_key().library, LibraryKind::Directory);
+        assert_eq!(scene.state.snapshot(), current);
+        assert!(state.platform_previews() == presentation);
+        assert_eq!(state.platform_preview_selection(), 1);
+        assert_eq!(state.platform_preview_title(), "snes");
+        assert!(members.iter().all(|entity| app.world.is_alive(*entity)));
+        assert_eq!(
+            app.world
+                .get::<mirui::ui::Children>(preview)
+                .unwrap()
+                .0
+                .iter()
+                .copied()
+                .filter(|entity| !app.world.has::<Hidden>(*entity))
+                .collect::<Vec<_>>(),
+            visible
+        );
+        assert_eq!(
+            state.entries().entries().next().unwrap().1.label(true),
+            "Game 0"
+        );
+        paint_at(&mut app, &scene, 1000);
+        assert!(!app.world.is_alive(preview));
+    }
+}
+
+#[test]
+fn directory_pages_do_not_construct_hidden_platform_preview_collections() {
+    use crate::model::{GameRow, LibraryKind};
+    use mirui::ui::IdMap;
+
+    for launcher in [false, true] {
+        let mut app = app([640, 480]);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = launcher;
+        current.launcher.tab = usize::from(launcher);
+        current.library.kind = LibraryKind::Directory;
+        current.entries = (0..8)
+            .map(|index| GameRow {
+                key: format!("game-{index}"),
+                name: format!("Game {index}"),
+                icon: "snes".into(),
+                available: true,
+                ..Default::default()
+            })
+            .collect();
+        let mut scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 400);
+        assert!(
+            app.world
+                .resource::<IdMap>()
+                .unwrap()
+                .get("platform_previews")
+                .is_none()
+        );
+
+        current.library.kind = LibraryKind::Platforms;
+        current.platforms = true;
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        paint_at(&mut app, &scene, 1200);
+        assert!(
+            app.world
+                .resource::<IdMap>()
+                .unwrap()
+                .get("platform_previews")
+                .is_some()
+        );
+
+        current.library.kind = LibraryKind::Directory;
+        current.platforms = false;
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 1600);
+        paint_at(&mut app, &scene, 2000);
+        assert!(
+            app.world
+                .resource::<IdMap>()
+                .unwrap()
+                .get("platform_previews")
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn deferred_panels_mount_only_when_visible_and_reuse_their_editors() {
+    use howff_menu::wifi::{Page as WifiPage, View as WifiView};
+    use mirui::ui::Children;
+    use mirui::ui::widgets::TextEditing;
+    use mirui::ui::widgets::page_view::PageView;
+
+    fn mounted(app: &TestApp, pane: deferred::Pane) -> Option<Entity> {
+        app.world
+            .query::<PageView<deferred::Pane>>()
+            .iter()
+            .find_map(|(entity, view)| {
+                (view.page == Some(pane))
+                    .then(|| app.world.get::<Children>(entity)?.0.first().copied())
+                    .flatten()
+            })
+    }
+
+    for launcher in [false, true] {
+        let mut app = app([640, 480]);
+        let mut current = view(if launcher { Page::Games } else { Page::Lobby });
+        current.launcher.enabled = launcher;
+        if launcher {
+            current.library.kind = crate::model::LibraryKind::Favorites;
+        }
+        let mut scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 200);
+        assert!(mounted(&app, deferred::Pane::Overlay).is_none());
+        assert_eq!(app.world.query::<TextEditing>().iter().count(), 0);
+        if !launcher {
+            continue;
+        }
+        current.launcher.overlay = "系统设置".into();
+        current.launcher.overlay_kind = "system".into();
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 400);
+        let overlay = mounted(&app, deferred::Pane::Overlay).unwrap();
+        assert!(mounted(&app, deferred::Pane::Wifi).is_none());
+        assert!(mounted(&app, deferred::Pane::Management).is_none());
+        assert!(mounted(&app, deferred::Pane::Saves).is_none());
+        assert!(mounted(&app, deferred::Pane::Configuration).is_none());
+        assert_eq!(app.world.query::<TextEditing>().iter().count(), 0);
+
+        current.launcher.overlay = "Wi-Fi".into();
+        current.launcher.overlay_kind = "wifi".into();
+        current.launcher.wifi = Some(WifiView {
+            epoch: 4,
+            page: WifiPage::List,
+            ..Default::default()
+        });
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 600);
+        let wifi = mounted(&app, deferred::Pane::Wifi).unwrap();
+        assert!(mounted(&app, deferred::Pane::WifiKeyboard).is_none());
+        assert_eq!(app.world.query::<TextEditing>().iter().count(), 0);
+
+        current.launcher.wifi.as_mut().unwrap().page = WifiPage::Password;
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let keyboard = mounted(&app, deferred::Pane::WifiKeyboard).unwrap();
+        let editor = app.world.query::<TextEditing>().iter().next().unwrap().0;
+        assert_eq!(app.world.query::<TextEditing>().iter().count(), 1);
+        assert!(scene.state.launcher().input_session().is_some());
+
+        current.launcher.overlay.clear();
+        current.launcher.wifi = None;
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 1000);
+        assert!(scene.state.launcher().input_session().is_none());
+        assert_eq!(mounted(&app, deferred::Pane::Overlay), Some(overlay));
+        assert_eq!(mounted(&app, deferred::Pane::Wifi), Some(wifi));
+        assert_eq!(mounted(&app, deferred::Pane::WifiKeyboard), Some(keyboard));
+
+        current.launcher.overlay = "Wi-Fi 密码".into();
+        current.launcher.wifi = Some(WifiView {
+            epoch: 5,
+            page: WifiPage::Password,
+            ..Default::default()
+        });
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 1200);
+        assert_eq!(mounted(&app, deferred::Pane::Overlay), Some(overlay));
+        assert_eq!(mounted(&app, deferred::Pane::Wifi), Some(wifi));
+        assert_eq!(mounted(&app, deferred::Pane::WifiKeyboard), Some(keyboard));
+        assert!(app.world.has::<TextEditing>(editor));
+        assert_eq!(app.world.query::<TextEditing>().iter().count(), 1);
+        assert!(scene.state.launcher().input_session().is_some());
+    }
+}
+
+#[test]
 fn configuration_editor_keeps_active_focus_and_wrapped_paths_inside_its_panel() {
     use crate::model::Action;
-    use nearby_menu::configuration::Section as ConfigSection;
+    use howff_menu::configuration::Section as ConfigSection;
     let settle = std::env::var("NEARBY_CONFIG_SETTLE_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -22,9 +278,12 @@ fn configuration_editor_keeps_active_focus_and_wrapped_paths_inside_its_panel() 
         let requests = Rc::new(std::cell::RefCell::new(Vec::new()));
         let output = requests.clone();
         editor
-            .on_effect(move |request: &nearby_menu::configuration::Request| {
-                output.borrow_mut().push(request.clone())
-            })
+            .on_effect(
+                move |request: &howff_menu::input::Sourced<howff_menu::configuration::Request>| {
+                    let request = &request.payload;
+                    output.borrow_mut().push(request.clone())
+                },
+            )
             .unwrap();
         for (step, actions) in [
             vec![],
@@ -90,7 +349,7 @@ fn configuration_editor_keeps_active_focus_and_wrapped_paths_inside_its_panel() 
             requests
                 .borrow()
                 .iter()
-                .any(|r| matches!(r, nearby_menu::configuration::Request::Close { epoch: 7 }))
+                .any(|r| matches!(r, howff_menu::configuration::Request::Close { epoch: 7 }))
         );
     }
 }
@@ -98,8 +357,8 @@ fn configuration_editor_keeps_active_focus_and_wrapped_paths_inside_its_panel() 
 #[test]
 fn wifi_input_method_orders_edits_and_submit_and_clears_retired_sessions() {
     use crate::model::Action;
+    use howff_menu::wifi::{Page as WifiPage, View as WifiView};
     use mirui::ui::widgets::TextEditing;
-    use nearby_menu::wifi::{Page as WifiPage, View as WifiView};
     let mut app = app([640, 480]);
     let mut current = view(Page::Games);
     current.launcher.enabled = true;
@@ -120,9 +379,12 @@ fn wifi_input_method_orders_edits_and_submit_and_clears_retired_sessions() {
     let sent = Rc::new(std::cell::RefCell::new(Vec::new()));
     let received = sent.clone();
     launcher
-        .on_effect(move |intent: &crate::launcher::Intent| {
-            received.borrow_mut().push(intent.clone())
-        })
+        .on_effect(
+            move |intent: &howff_menu::input::Sourced<crate::launcher::Intent>| {
+                let intent = &intent.payload;
+                received.borrow_mut().push(intent.clone())
+            },
+        )
         .unwrap();
     // A whole burst and Submit in one frame must read the committed document.
     for _ in 0..8 {
@@ -162,7 +424,7 @@ fn wifi_input_method_orders_edits_and_submit_and_clears_retired_sessions() {
 #[test]
 fn wifi_windows_and_keyboard_keep_focus_in_the_active_panel_scope() {
     use crate::model::Action;
-    use nearby_menu::wifi::{Network, Page as WifiPage, View as WifiView};
+    use howff_menu::wifi::{Network, Page as WifiPage, View as WifiView};
     for size in [[480, 320], [640, 480]] {
         let mut app = app(size);
         let mut current = view(Page::Games);
@@ -341,7 +603,7 @@ fn wifi_windows_and_keyboard_keep_focus_in_the_active_panel_scope() {
 
 #[test]
 fn details_keep_rows_separate_and_selected_content_visible_on_short_screens() {
-    use nearby_menu::details::{Document, Load, Section, View as DetailsView};
+    use howff_menu::details::{Document, Load, Section, View as DetailsView};
     for size in [[480, 320], [640, 480]] {
         let mut app = app(size);
         let mut current = view(Page::Games);
@@ -350,8 +612,8 @@ fn details_keep_rows_separate_and_selected_content_visible_on_short_screens() {
         current.launcher.overlay_kind = "details".into();
         current.launcher.items = (0..3)
             .map(|index| {
-                nearby_menu::MenuItem::available(
-                    nearby_menu::MenuAction::ExpandDetail,
+                howff_menu::MenuItem::available(
+                    howff_menu::MenuAction::ExpandDetail,
                     format!("详情条目 {index}"),
                 )
                 .with_value("来源与当前文件状态")
@@ -387,8 +649,8 @@ fn details_keep_rows_separate_and_selected_content_visible_on_short_screens() {
             assert!(pair[1].1.y >= pair[0].1.y + pair[0].1.h);
         }
         current.launcher.items.extend((3..12).map(|index| {
-            nearby_menu::MenuItem::available(
-                nearby_menu::MenuAction::ExpandDetail,
+            howff_menu::MenuItem::available(
+                howff_menu::MenuAction::ExpandDetail,
                 format!("详情条目 {index}"),
             )
             .with_value("来源与当前文件状态")
@@ -422,13 +684,13 @@ fn details_keep_rows_separate_and_selected_content_visible_on_short_screens() {
             unreachable!()
         };
         document.core = (0..12)
-            .map(|_| nearby_menu::details::Row {
+            .map(|_| howff_menu::details::Row {
                 facts: vec![
-                    nearby_menu::details::Fact::new(
+                    howff_menu::details::Fact::new(
                         "目录",
                         "/home/ark/.config/retroarch/".repeat(12),
                     ),
-                    nearby_menu::details::Fact::new(
+                    howff_menu::details::Fact::new(
                         "配置文件",
                         "/home/ark/.config/retroarch/retroarch.cfg",
                     ),
@@ -524,7 +786,7 @@ fn list_windows_follow_available_space_and_keep_native_title_size() {
             let request = requests.borrow().last().cloned().unwrap();
             assert_eq!(request["launcher"], launcher);
             let count = request["rows"].as_u64().unwrap() as usize;
-            assert!((1..=nearby_menu::LIST_WINDOW_ITEMS).contains(&count));
+            assert!((1..=howff_menu::LIST_WINDOW_ITEMS).contains(&count));
             if size == [480, 320] {
                 assert!(count < 4);
             }
@@ -698,18 +960,18 @@ fn library_loading_empty_and_failed_states_update_without_changing_routes() {
     current.library.kind = crate::model::LibraryKind::Search;
     current.library.query = "no-match".into();
     current.entries.clear();
-    current.library.load = nearby_menu::LibraryLoad::Loading;
+    current.library.load = howff_menu::LibraryLoad::Loading;
     let mut scene = draw(&mut app, &current).unwrap();
     paint_at(&mut app, &scene, 400);
     let count = app.world.query::<mirui::ui::widgets::Text>().iter().count();
     assert!(!current.busy);
     assert_eq!(scene.state.library_placeholder().title(), "正在搜索");
     assert!(copy::loading(&current));
-    current.library.load = nearby_menu::LibraryLoad::Ready;
+    current.library.load = howff_menu::LibraryLoad::Ready;
     update(&mut scene, &current).unwrap();
     paint_at(&mut app, &scene, 600);
     assert_eq!(scene.state.library_placeholder().title(), "没有匹配的游戏");
-    current.library.load = nearby_menu::LibraryLoad::Failed {
+    current.library.load = howff_menu::LibraryLoad::Failed {
         message: "无法读取目录".into(),
     };
     update(&mut scene, &current).unwrap();
@@ -897,6 +1159,104 @@ fn retained_pages_own_rows_while_the_primary_model_keeps_shared_context() {
 }
 
 #[test]
+fn catalog_platform_and_directory_routes_reuse_display_slots_without_reusing_input_identity() {
+    use crate::model::{GameRow, LibraryKind};
+    let mut app = app([640, 480]);
+    let mut catalog = view(Page::Games);
+    catalog.launcher.enabled = true;
+    catalog.launcher.tab = 1;
+    catalog.library.kind = LibraryKind::Platforms;
+    catalog.platforms = true;
+    catalog.entries = ["nes", "snes", "gba", "psx"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, icon)| GameRow {
+            key: format!("platform-{index}"),
+            name: icon.into(),
+            icon: icon.into(),
+            directory: true,
+            available: true,
+            ..Default::default()
+        })
+        .collect();
+    let platforms = catalog.entries.clone();
+    let mut scene = draw(&mut app, &catalog).unwrap();
+    paint_at(&mut app, &scene, 400);
+    let ids = scene
+        .catalog
+        .entries()
+        .entries()
+        .map(|(id, _)| id)
+        .collect::<Vec<_>>();
+    let covers = scene
+        .catalog
+        .entries()
+        .entries()
+        .map(|(_, row)| row.cover_bounds())
+        .collect::<Vec<_>>();
+    for (step, kind) in [
+        LibraryKind::Directory,
+        LibraryKind::Platforms,
+        LibraryKind::Directory,
+        LibraryKind::Platforms,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        catalog.library.kind = kind;
+        catalog.platforms = kind == LibraryKind::Platforms;
+        catalog.selected = step % platforms.len();
+        catalog.input_generation.advance();
+        catalog.entries = if catalog.platforms {
+            platforms.clone()
+        } else {
+            (0..platforms.len())
+                .map(|index| GameRow {
+                    key: format!("game-{step}-{index}"),
+                    name: format!("Game {step}-{index}"),
+                    icon: "snes".into(),
+                    available: true,
+                    favorite: index % 2 == 0,
+                    ..Default::default()
+                })
+                .collect()
+        };
+        update(&mut scene, &catalog).unwrap();
+        assert_eq!(
+            scene
+                .catalog
+                .entries()
+                .entries()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            ids
+        );
+        assert_eq!(scene.state.snapshot(), catalog);
+        for (((_, row), cover), expected) in scene
+            .catalog
+            .entries()
+            .entries()
+            .zip(&covers)
+            .zip(&catalog.entries)
+        {
+            assert!(cover.callback_ready());
+            let probe = LayoutSize {
+                width: Fixed::from_int(31 + step as i32),
+                height: Fixed::from_int(23),
+            };
+            cover.resize(probe);
+            assert_eq!(row.cover_bounds().size(), probe);
+            assert_eq!(row.label(true), expected.name);
+            assert_eq!(row.directory(), expected.directory);
+            assert_eq!(row.favorite(), expected.favorite);
+        }
+        paint_at(&mut app, &scene, 1200 + step as u64 * 800);
+        assert!(focus_rect(&app).is_some());
+        assert_full_frame_matches(&mut app, "Catalog route slot reuse");
+    }
+}
+
+#[test]
 fn catalog_slots_keep_bindings_while_game_content_and_window_change() {
     let mut app = app([640, 480]);
     let mut home = view(Page::Games);
@@ -1027,9 +1387,12 @@ fn launcher_feedback_retains_shelf_geometry_and_selected_action() {
         let intents = Rc::new(std::cell::RefCell::new(Vec::new()));
         let received = intents.clone();
         gesture
-            .on_effect(move |intent: &crate::launcher::Intent| {
-                received.borrow_mut().push(intent.clone());
-            })
+            .on_effect(
+                move |intent: &howff_menu::input::Sourced<crate::launcher::Intent>| {
+                    let intent = &intent.payload;
+                    received.borrow_mut().push(intent.clone());
+                },
+            )
             .unwrap();
 
         for (start, cancel) in [(320, true), (1120, false)] {
@@ -1359,13 +1722,12 @@ fn action_panels_keep_labels_inside_their_cards() {
                         && (label.starts_with("音量") || label.starts_with("亮度"))
                     {
                         let control = if label.starts_with("音量") {
-                            nearby_menu::SystemLevel::Volume
+                            howff_menu::SystemLevel::Volume
                         } else {
-                            nearby_menu::SystemLevel::Brightness
+                            howff_menu::SystemLevel::Brightness
                         };
                         item.action = control.action();
-                        item.level =
-                            Some(nearby_menu::Level::new(control, Some(100), false, false));
+                        item.level = Some(howff_menu::Level::new(control, Some(100), false, false));
                     } else if kind == "controls" && *label == "系统工具" {
                         item.action = crate::model::MenuAction::ShowTools;
                     } else if kind == "tools" {
@@ -3289,18 +3651,15 @@ fn action_actor_placement_and_return_do_not_inherit_the_background_page() {
             let original = app.world.get::<FollowBounds>(frame).unwrap().target;
             current.launcher.overlay = "系统控制".into();
             current.launcher.overlay_kind = "controls".into();
-            current.launcher.items = nearby_menu::SystemLevel::ALL
+            current.launcher.items = howff_menu::SystemLevel::ALL
                 .into_iter()
                 .map(|control| {
-                    nearby_menu::MenuItem::available(control.action(), control.label())
-                        .with_level(nearby_menu::Level::new(control, Some(50), false, false))
+                    howff_menu::MenuItem::available(control.action(), control.label())
+                        .with_level(howff_menu::Level::new(control, Some(50), false, false))
                 })
                 .chain([
-                    nearby_menu::MenuItem::available(
-                        nearby_menu::MenuAction::ShowTools,
-                        "系统工具",
-                    ),
-                    nearby_menu::MenuItem::available(nearby_menu::MenuAction::Back, "更多设置"),
+                    howff_menu::MenuItem::available(howff_menu::MenuAction::ShowTools, "系统工具"),
+                    howff_menu::MenuItem::available(howff_menu::MenuAction::Back, "更多设置"),
                 ])
                 .collect();
             for (step, selected) in [0, 1, 2, 3].into_iter().enumerate() {
@@ -3572,8 +3931,6 @@ fn retained_actor_follows_only_the_active_layer_page_and_pane() {
 
 #[test]
 fn modal_snapshot_stays_below_foreground_panel_and_actor() {
-    use mirui::core::resource::ResourceManager;
-    use mirui::render::texture::Texture;
     use mirui::ui::widgets::image::ImageSource;
     use mirui::ui::{Children, Parent};
     let mut app = app([640, 480]);
@@ -3595,8 +3952,7 @@ fn modal_snapshot_stays_below_foreground_panel_and_actor() {
         );
         assert_eq!(app.world.get::<Children>(shell).unwrap().0, original_order);
         for (node, image) in app.world.query::<mirui::ui::widgets::Image>().iter() {
-            if matches!(&image.src, ImageSource::Texture(token) if token.starts_with("nearby-modal-"))
-            {
+            if matches!(&image.src, ImageSource::Handle(_)) {
                 assert_eq!(app.world.get::<Parent>(node).unwrap().0, original_layer);
             }
         }
@@ -3644,10 +4000,7 @@ fn modal_snapshot_stays_below_foreground_panel_and_actor() {
         .world
         .query::<mirui::ui::widgets::Image>()
         .iter()
-        .find_map(|(node, image)| {
-            matches!(&image.src, ImageSource::Texture(token) if token.starts_with("nearby-modal-"))
-                .then_some(node)
-        })
+        .find_map(|(node, image)| matches!(&image.src, ImageSource::Handle(_)).then_some(node))
         .unwrap();
     assert_eq!(app.world.get::<Parent>(image).unwrap().0, layer);
     let token = app
@@ -3659,9 +4012,13 @@ fn modal_snapshot_stays_below_foreground_panel_and_actor() {
         .unwrap();
     let source = app
         .world
-        .resource::<ResourceManager<Texture<'static>>>()
+        .resource::<modal::Runtime>()
         .unwrap()
-        .resolve(&modal::texture_token(token));
+        .model
+        .source();
+    let ImageSource::Handle(source) = source else {
+        panic!("modal snapshots must be direct texture sources");
+    };
     let frozen = source.read_pixels().unwrap();
     let presented = app
         .backend
@@ -3735,8 +4092,7 @@ fn modal_snapshot_stays_below_foreground_panel_and_actor() {
 
 #[test]
 fn launcher_overlays_share_one_background_snapshot_until_the_last_overlay_closes() {
-    use mirui::core::resource::ResourceManager;
-    use mirui::render::texture::Texture;
+    use mirui::ui::widgets::image::ImageSource;
     use mirui::ui::{Children, Parent};
 
     let mut app = app([640, 480]);
@@ -3782,11 +4138,10 @@ fn launcher_overlays_share_one_background_snapshot_until_the_last_overlay_closes
     }
     assert_eq!(scene.shelf.animation_counts().0, counts.0);
 
-    let source = app
-        .world
-        .resource::<ResourceManager<Texture<'static>>>()
-        .unwrap()
-        .resolve(&modal::texture_token(token));
+    let source = modal.source();
+    let ImageSource::Handle(source) = source else {
+        panic!("modal snapshots must be direct texture sources");
+    };
     let pixels = app
         .backend
         .framebuffer()
@@ -4316,7 +4671,7 @@ fn menu_ownership_stays_bounded_after_leaving_save_manager() {
         current.launcher.overlay_kind = "game".into();
         current.launcher.items = (0..7)
             .map(|index| {
-                LauncherItem::available(nearby_menu::MenuAction::Back, format!("Action {index}"))
+                LauncherItem::available(howff_menu::MenuAction::Back, format!("Action {index}"))
             })
             .collect();
         let mut scene = draw(&mut app, &current).unwrap();
@@ -4341,10 +4696,7 @@ fn menu_ownership_stays_bounded_after_leaving_save_manager() {
             current.launcher.selected = 0;
             current.launcher.items = (0..items)
                 .map(|index| {
-                    LauncherItem::available(
-                        nearby_menu::MenuAction::Back,
-                        format!("{kind} {index}"),
-                    )
+                    LauncherItem::available(howff_menu::MenuAction::Back, format!("{kind} {index}"))
                 })
                 .collect();
             update(&mut scene, &current).unwrap();
@@ -4418,7 +4770,7 @@ fn save_manager_keeps_the_current_actor_and_actions_within_each_viewport() {
                     launcher.saves_input(action);
                 }
                 paint_at(&mut app, &scene, 1200 + step as u64 * 1000);
-                if saves.tab() != nearby_menu::saves::Tab::Session {
+                if saves.tab() != howff_menu::saves::Tab::Session {
                     let layout = if saves.modal() {
                         deck::ActionLayout::SavesModal
                     } else {
@@ -4518,7 +4870,7 @@ fn save_operation_progress_has_one_exact_actor_target_and_close_is_deferred() {
 #[test]
 fn management_name_uses_framework_composition_and_retires_its_input_session() {
     use crate::model::Action;
-    use nearby_menu::management::{Device, Operation, View as ManagementView};
+    use howff_menu::management::{Device, Operation, View as ManagementView};
     for size in [[480, 320], [640, 480]] {
         let mut app = app(size);
         let mut current = view(Page::Games);
@@ -4542,9 +4894,12 @@ fn management_name_uses_framework_composition_and_retires_its_input_session() {
         let sent = Rc::new(std::cell::RefCell::new(Vec::new()));
         let output = sent.clone();
         manager
-            .on_effect(move |request: &nearby_menu::management::Request| {
-                output.borrow_mut().push(request.clone())
-            })
+            .on_effect(
+                move |request: &howff_menu::input::Sourced<howff_menu::management::Request>| {
+                    let request = &request.payload;
+                    output.borrow_mut().push(request.clone())
+                },
+            )
             .unwrap();
         launcher.management_input(Action::Confirm);
         paint_at(&mut app, &scene, 1000);
@@ -4623,7 +4978,7 @@ fn management_name_uses_framework_composition_and_retires_its_input_session() {
 fn management_navigation_and_update_progress_keep_framework_anchors() {
     use crate::launcher::management::Page as ManagementPage;
     use crate::model::Action;
-    use nearby_menu::management::{
+    use howff_menu::management::{
         Device, Entry, Fact, Operation, Package, Update, UpdatePhase, View as ManagementView,
     };
     for size in [[480, 320], [640, 480]] {
@@ -4645,7 +5000,7 @@ fn management_navigation_and_update_progress_keep_framework_anchors() {
             },
             facts: vec![Fact {
                 label: "安装位置".into(),
-                value: "/opt/arkos-nearby".into(),
+                value: "/opt/howff".into(),
             }],
             ..Default::default()
         });
@@ -4655,9 +5010,12 @@ fn management_navigation_and_update_progress_keep_framework_anchors() {
         let sent = Rc::new(std::cell::RefCell::new(Vec::new()));
         let sink = sent.clone();
         manager
-            .on_effect(move |r: &nearby_menu::management::Request| {
-                sink.borrow_mut().push(r.clone())
-            })
+            .on_effect(
+                move |r: &howff_menu::input::Sourced<howff_menu::management::Request>| {
+                    let r = &r.payload;
+                    sink.borrow_mut().push(r.clone())
+                },
+            )
             .unwrap();
         let mut clock = 800;
         let mut capture = |app: &mut TestApp, scene: &Scene, name: &str| {
@@ -4798,7 +5156,7 @@ fn management_navigation_and_update_progress_keep_framework_anchors() {
 #[test]
 fn management_rows_keep_icon_slots_and_visual_order_during_navigation() {
     use crate::model::Action;
-    use nearby_menu::management::{Entry, View as ManagementView};
+    use howff_menu::management::{Entry, View as ManagementView};
     for size in [[480, 320], [640, 480]] {
         let mut app = app(size);
         let mut current = view(Page::Games);
@@ -4898,7 +5256,7 @@ fn management_rows_keep_icon_slots_and_visual_order_during_navigation() {
 #[test]
 fn management_reading_preserves_natural_text_and_clamps_to_measured_content() {
     use crate::model::Action;
-    use nearby_menu::management::{Entry, View as ManagementView};
+    use howff_menu::management::{Entry, View as ManagementView};
     for size in [[480, 320], [640, 480]] {
         let mut app = app(size);
         let mut current = view(Page::Games);
@@ -4984,7 +5342,7 @@ fn management_reading_preserves_natural_text_and_clamps_to_measured_content() {
 #[test]
 fn configuration_rows_keep_wrapped_text_inside_stable_ordered_slots() {
     use crate::model::Action;
-    use nearby_menu::configuration::{Load, Section};
+    use howff_menu::configuration::{Load, Section};
     for size in [[480, 320], [640, 480]] {
         let mut app = app(size);
         let mut current = view(Page::Games);
@@ -5094,7 +5452,7 @@ fn save_list_slots_include_inter_row_spacing_and_shadow_in_the_viewport_budget()
 #[test]
 fn save_reading_keeps_complete_paragraphs_and_uses_framework_scroll_bounds() {
     use crate::model::Action;
-    use nearby_menu::details::Fact;
+    use howff_menu::details::Fact;
     for size in [[480, 320], [640, 480]] {
         let mut app = app(size);
         let mut current = view(Page::Games);
@@ -5205,7 +5563,7 @@ fn reading_geometry_probe(
 #[test]
 fn retained_reading_scroll_updates_pixels_without_a_geometry_subscriber() {
     use crate::model::Action;
-    use nearby_menu::details::Fact;
+    use howff_menu::details::Fact;
     let mut app = app([640, 480]);
     let mut current = view(Page::Games);
     current.launcher_shelf = Some(Box::new(current.clone()));
@@ -5213,7 +5571,7 @@ fn retained_reading_scroll_updates_pixels_without_a_geometry_subscriber() {
     current.launcher.overlay = "存档".into();
     current.launcher.overlay_kind = "saves".into();
     let mut saved = crate::launcher::saves::tests::fixture();
-    let text = "/run/arkos-nearby-tests/a2-layout-8c7747bf6459/".to_owned()
+    let text = "/run/howff-tests/a2-layout-8c7747bf6459/".to_owned()
         + &(0..100)
             .map(|i| format!("save-directory-{i:03}"))
             .collect::<Vec<_>>()
@@ -5223,10 +5581,10 @@ fn retained_reading_scroll_updates_pixels_without_a_geometry_subscriber() {
     current.launcher.saves = Some(saved);
     let target = current.clone();
     current.launcher.saves = None;
-    current.launcher.management = Some(nearby_menu::management::View {
+    current.launcher.management = Some(howff_menu::management::View {
         epoch: 9001,
         revision: 1,
-        entry: nearby_menu::management::Entry::Application,
+        entry: howff_menu::management::Entry::Application,
         profile: "布局项目\n".repeat(50),
         ..Default::default()
     });

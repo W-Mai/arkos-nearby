@@ -2,7 +2,7 @@ use super::files::{self, Graph, Values};
 use super::resolve::{Environment, argument, get, yes};
 use super::{StartupSlot, StateSlots};
 use crate::Result;
-use nearby_menu::details::Fact;
+use howff_menu::details::Fact;
 use std::path::{Path, PathBuf};
 
 struct Directories<'a> {

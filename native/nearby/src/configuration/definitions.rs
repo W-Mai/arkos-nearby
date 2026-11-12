@@ -1,9 +1,12 @@
 use crate::context::{Context, INSTALL};
 use crate::{Result, require};
+use howff_platform::arkos;
 use std::path::Path;
 
 pub fn read(context: &Context, system: &Path) -> Result<Vec<(String, String)>> {
-    let directory = Path::new("/run/arkos-nearby-configuration").join(crate::system::random_id()?);
+    let directory = arkos::transient::CONFIGURATION
+        .path()
+        .join(crate::system::random_id()?);
     crate::system::mkdir(&directory)?;
     let result = (|| -> Result<Vec<(String, String)>> {
         let helper = format!("{INSTALL}/core-inspect{}", context.core_elf_bits);

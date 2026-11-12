@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod configuration;
 pub mod details;
+pub mod input;
 pub mod management;
 pub mod saves;
 pub mod shelf;
@@ -50,6 +51,7 @@ pub enum MenuAction {
     ShowExit,
     ShowPower,
     Exit,
+    KeepNetworkExit,
     Poweroff,
     Reboot,
     RestorePlay,

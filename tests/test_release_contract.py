@@ -9,7 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-import build_nearby_gui as gui  # noqa: E402
+import build_howff_gui as gui  # noqa: E402
 
 
 class ReleaseContract(unittest.TestCase):
@@ -21,6 +21,7 @@ class ReleaseContract(unittest.TestCase):
                     name.startswith(
                         (
                             "native/nearby-menu/",
+                            "native/nearby-platform/",
                             "native/nearby/",
                             "native/core_inspect/",
                             "native/core_probe/",
@@ -61,7 +62,7 @@ class ReleaseContract(unittest.TestCase):
         ]
         manifest = json.loads((ROOT / "release/manifest.json").read_text())
         renderer = next(
-            entry for entry in manifest["files"] if entry["name"] == "arkos-nearby-gui"
+            entry for entry in manifest["files"] if entry["name"] == "howff-gui"
         )
         self.assertEqual(source["sha256"], renderer["sha256"])
         packages = json.loads((ROOT / "release/rust-dependencies.json").read_text())
@@ -74,7 +75,7 @@ class ReleaseContract(unittest.TestCase):
 
     def test_current_gui_artifacts_and_licenses_match_the_locked_dependencies(self):
         files = gui.artifacts(ROOT / "build/assets")
-        report = json.loads(files["nearby-gui-build.json"])
+        report = json.loads(files["howff-gui-build.json"])
         for name, value in gui.build_inputs().items():
             self.assertEqual(report[name], value)
         dependencies = json.loads((ROOT / "release/rust-dependencies.json").read_text())

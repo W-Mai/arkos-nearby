@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 mod configuration;
 mod controls;
 mod details;
@@ -11,8 +12,8 @@ use crate::catalog::{Browser, Entry};
 use crate::flow::FlowExit;
 use crate::menu::MenuSession;
 use crate::{Result, require};
-use nearby_menu::details::{Load, Section};
-use nearby_menu::{MenuAction, MenuItem};
+use howff_menu::details::{Load, Section};
+use howff_menu::{MenuAction, MenuItem};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::thread;
@@ -27,24 +28,28 @@ pub enum Intent {
     Discovery,
     Network,
     Exit,
+    KeepNetworkExit,
     Power(PowerAction),
     Tool(tools::Tool),
     Updated(String),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PowerAction {
-    Poweroff,
-    Reboot,
+pub use crate::platform::system::PowerAction;
+
+fn keep_network_exit_allowed(purpose: crate::purpose::SessionPurpose, established: bool) -> bool {
+    purpose == crate::purpose::SessionPurpose::NetworkOnly && established
 }
 
-impl PowerAction {
-    fn command(self) -> &'static str {
-        match self {
-            Self::Poweroff => "poweroff",
-            Self::Reboot => "reboot",
-        }
+fn exit_items(connected_network: bool) -> Vec<MenuItem> {
+    let mut items = vec![MenuItem::available(MenuAction::Back, "返回")];
+    if connected_network {
+        items.push(MenuItem::available(
+            MenuAction::KeepNetworkExit,
+            "保留直连，返回原系统",
+        ));
     }
+    items.push(MenuItem::available(MenuAction::Exit, "退出并恢复 Wi-Fi"));
+    items
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -106,9 +111,7 @@ impl Controller {
             changed_tab: false,
             status: String::new(),
         };
-        if let Ok(saved) =
-            crate::system::read::<Value>(&Path::new(crate::context::INSTALL).join("launcher.json"))
-        {
+        if let Ok(saved) = crate::system::read::<Value>(arkos::application::LAUNCHER.path()) {
             if let Some(key) = saved["last_favorite"].as_str() {
                 result.browsers[0].select_key(key);
             }
@@ -204,10 +207,9 @@ impl Controller {
             Some(Overlay::Wifi | Overlay::Configuration | Overlay::Saves | Overlay::Management) => {
                 vec![]
             }
-            Some(Overlay::Exit) => vec![
-                MenuItem::available(Back, "返回"),
-                MenuItem::available(Exit, "退出并恢复 Wi-Fi"),
-            ],
+            Some(Overlay::Exit) => exit_items(crate::session::state().ok().is_some_and(|state| {
+                keep_network_exit_allowed(state.purpose, state.established())
+            })),
             Some(Overlay::Power) => vec![
                 MenuItem::available(Back, "返回"),
                 MenuItem::available(Poweroff, "确认关机"),
@@ -283,7 +285,7 @@ impl Controller {
         }
         if let Some(Overlay::Details(section)) = self.overlay {
             view["launcher"]["overlay_kind"] = "details".into();
-            view["launcher"]["details"] = serde_json::to_value(nearby_menu::details::View {
+            view["launcher"]["details"] = serde_json::to_value(howff_menu::details::View {
                 section,
                 load: self.details.load.clone(),
                 expanded: self.detail_expanded,
@@ -343,7 +345,7 @@ impl Controller {
     fn remember(&self, entry: &Entry) -> Result<()> {
         if self.tab == 0 {
             crate::system::write(
-                &Path::new(crate::context::INSTALL).join("launcher.json"),
+                arkos::application::LAUNCHER.path(),
                 &json!({"schema":1,"last_favorite":entry.key()}),
             )?;
         }
@@ -359,7 +361,7 @@ impl Controller {
         }
         if self.overlay == Some(Overlay::Wifi) {
             let return_room = action == "confirm"
-                && self.wifi.view.page == nearby_menu::wifi::Page::Busy
+                && self.wifi.view.page == howff_menu::wifi::Page::Busy
                 && Self::retained();
             if self.wifi.input(action) {
                 self.overlay = Some(Overlay::Tools);
@@ -414,7 +416,7 @@ impl Controller {
                         "left" | "right" => {
                             if let Some(control) = options
                                 .get(self.selection)
-                                .and_then(|item| nearby_menu::SystemLevel::from_action(item.action))
+                                .and_then(|item| howff_menu::SystemLevel::from_action(item.action))
                             {
                                 if let Err(error) = self.controls.adjust(control, action == "right")
                                 {
@@ -540,9 +542,9 @@ impl Controller {
                 MenuAction::ShowDevice | MenuAction::ShowApplication => {
                     self.management
                         .open(if selected == MenuAction::ShowApplication {
-                            nearby_menu::management::Entry::Application
+                            howff_menu::management::Entry::Application
                         } else {
-                            nearby_menu::management::Entry::Device
+                            howff_menu::management::Entry::Device
                         });
                     self.show(Overlay::Management);
                     Ok(None)
@@ -566,6 +568,7 @@ impl Controller {
                     Ok(None)
                 }
                 MenuAction::Exit => Ok(Some(Intent::Exit)),
+                MenuAction::KeepNetworkExit => Ok(Some(Intent::KeepNetworkExit)),
                 MenuAction::Poweroff => Ok(Some(Intent::Power(PowerAction::Poweroff))),
                 MenuAction::Reboot => Ok(Some(Intent::Power(PowerAction::Reboot))),
                 MenuAction::Play | MenuAction::RestorePlay => {
@@ -684,7 +687,7 @@ impl Controller {
             self.overlay = None;
         }
     }
-    pub fn configuration_request(&mut self, request: nearby_menu::configuration::Request) {
+    pub fn configuration_request(&mut self, request: howff_menu::configuration::Request) {
         if self.overlay != Some(Overlay::Configuration)
             || request.epoch() != self.configuration.view.epoch
         {
@@ -692,12 +695,12 @@ impl Controller {
         }
         if matches!(
             request,
-            nearby_menu::configuration::Request::OpenSaves { .. }
+            howff_menu::configuration::Request::OpenSaves { .. }
         ) {
             if !self.configuration.view.saving {
                 self.open_saves(true);
             }
-        } else if matches!(request, nearby_menu::configuration::Request::Close { .. }) {
+        } else if matches!(request, howff_menu::configuration::Request::Close { .. }) {
             if !self.configuration.view.saving {
                 self.overlay = Some(Overlay::Game);
                 self.selection = self
@@ -732,7 +735,7 @@ impl Controller {
                 .unwrap_or(0);
         }
     }
-    pub fn saves_request(&mut self, request: nearby_menu::saves::Request) {
+    pub fn saves_request(&mut self, request: howff_menu::saves::Request) {
         if self.overlay == Some(Overlay::Saves) {
             self.saves.request(request);
         }
@@ -748,7 +751,7 @@ impl Controller {
     }
     pub fn management_request(
         &mut self,
-        request: nearby_menu::management::Request,
+        request: howff_menu::management::Request,
     ) -> Option<Intent> {
         if self.overlay != Some(Overlay::Management) {
             return None;
@@ -759,7 +762,7 @@ impl Controller {
                 .view
                 .update
                 .as_ref()
-                .is_some_and(|u| u.phase == nearby_menu::management::UpdatePhase::Installing)
+                .is_some_and(|u| u.phase == howff_menu::management::UpdatePhase::Installing)
         {
             return None;
         }
@@ -768,13 +771,13 @@ impl Controller {
         }
         if matches!(
             request.operation,
-            nearby_menu::management::Operation::Standalone
+            howff_menu::management::Operation::Standalone
         ) {
             self.overlay = None;
             self.tab(0);
             return None;
         }
-        if matches!(request.operation, nearby_menu::management::Operation::Close) {
+        if matches!(request.operation, howff_menu::management::Operation::Close) {
             if let Some(token) = self.management.token.take() {
                 return Some(Intent::Updated(token));
             }
@@ -784,7 +787,7 @@ impl Controller {
                 .iter()
                 .position(|item| {
                     item.action
-                        == if self.management.view.entry == nearby_menu::management::Entry::Device {
+                        == if self.management.view.entry == howff_menu::management::Entry::Device {
                             MenuAction::ShowDevice
                         } else {
                             MenuAction::ShowApplication
@@ -796,7 +799,7 @@ impl Controller {
         }
         None
     }
-    pub fn wifi_request(&mut self, request: nearby_menu::wifi::Request) {
+    pub fn wifi_request(&mut self, request: howff_menu::wifi::Request) {
         if self.overlay == Some(Overlay::Wifi) {
             self.wifi.credentials(request);
         }
@@ -832,7 +835,7 @@ fn run_page(application: bool) -> Result<i32> {
         controller.overlay = Some(Overlay::Management);
         controller
             .management
-            .open(nearby_menu::management::Entry::Application);
+            .open(howff_menu::management::Entry::Application);
     }
     let mut display = None;
     loop {
@@ -936,6 +939,16 @@ fn run_page(application: bool) -> Result<i32> {
                     drop(display.take());
                     crate::updates::restart(&token)?;
                 }
+                Intent::KeepNetworkExit => {
+                    let state = crate::session::state()?;
+                    require(
+                        keep_network_exit_allowed(state.purpose, state.established()),
+                        "直连网络尚未连接",
+                    )?;
+                    crate::network::require_live(&state)?;
+                    drop(display.take());
+                    return Ok(true);
+                }
                 Intent::Exit | Intent::Power(_) => {
                     display
                         .as_mut()
@@ -944,7 +957,7 @@ fn run_page(application: bool) -> Result<i32> {
                     controller.restore_network()?;
                     drop(display.take());
                     if let Intent::Power(action) = intent {
-                        crate::system::command("systemctl", &[action.command()], 10, true)?;
+                        crate::platform::system::power(action)?;
                     }
                     return Ok(true);
                 }
@@ -995,23 +1008,9 @@ fn wait_game() -> Result<()> {
 }
 
 fn single_player(launch: recipes::Launch, ticket: Option<&str>) -> Result<()> {
-    use std::process::{Command, Stdio};
     crate::menu::log(json!({"single_player":launch.path,"launch_command":launch.command}))?;
-    let account = crate::session::cmd(&["getent", "passwd", "ark"])?;
-    let uid = account
-        .split(':')
-        .nth(2)
-        .ok_or("Missing game account")?
-        .parse::<u32>()?;
-    let unit = format!("arkos-nearby-solo-{}", crate::system::random_id()?);
-    struct GameUnit(String);
-    impl Drop for GameUnit {
-        fn drop(&mut self) {
-            let _ = crate::session::cmd(&["systemctl", "stop", &self.0]);
-        }
-    }
-    let _unit = GameUnit(unit.clone());
-    let log_path = Path::new(crate::context::INSTALL).join("logs/launcher-game.log");
+    let solo = crate::platform::system::Solo::acquire()?;
+    let log_path = arkos::application::LOGS.path().join("launcher-game.log");
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -1022,36 +1021,7 @@ fn single_player(launch: recipes::Launch, ticket: Option<&str>) -> Result<()> {
         .transpose()?
         .flatten();
     let mut child = crate::menu::OwnedChild(
-        Command::new("systemd-run")
-            .args([
-                "--collect",
-                "--wait",
-                &format!("--unit={unit}"),
-                "--property=User=ark",
-                "--property=WorkingDirectory=/home/ark",
-                "--property=StandardInput=tty",
-                "--property=TTYPath=/dev/tty1",
-                &format!("--property=StandardOutput=append:{}", log_path.display()),
-                "--property=StandardError=inherit",
-                "--property=KillMode=control-group",
-                "--property=TimeoutStopSec=10",
-                "--property=BindsTo=arkos-nearby-launcher.service",
-                "--property=After=arkos-nearby-launcher.service",
-                "--property=ExecStopPost=/opt/arkos-nearby/arkos-nearby launcher-game-end",
-                "--setenv=HOME=/home/ark",
-                &format!("--setenv=XDG_RUNTIME_DIR=/run/user/{uid}"),
-                "--setenv=TERM=linux",
-                &format!(
-                    "--setenv=ARKOS_NEARBY_SAVE_TICKET={}",
-                    ticket.unwrap_or_default()
-                ),
-                "/bin/bash",
-                "-c",
-                &launch.command,
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(log.try_clone()?))
-            .stderr(Stdio::from(log))
+        solo.command(&launch.command, ticket, &log_path, log)?
             .spawn()?,
     );
     let mut reader = std::io::BufReader::new(std::fs::File::open(log_path)?);
@@ -1085,7 +1055,7 @@ fn single_player(launch: recipes::Launch, ticket: Option<&str>) -> Result<()> {
                 "核心未接受即时存档，请重新读取",
             )?;
         }
-        if !recorded && running_frontend(&unit, &launch.path) {
+        if !recorded && solo.running(&launch.path) {
             crate::catalog::library::record_path(&launch.path);
             recorded = true;
         }
@@ -1098,30 +1068,36 @@ fn single_player(launch: recipes::Launch, ticket: Option<&str>) -> Result<()> {
     )
 }
 
-fn running_frontend(unit: &str, game: &Path) -> bool {
-    std::fs::read_dir("/proc").is_ok_and(|entries| {
-        entries.flatten().any(|entry| {
-            let path = entry.path();
-            std::fs::read_to_string(path.join("cgroup")).is_ok_and(|text| {
-                text.lines()
-                    .any(|line| line.ends_with(&format!("/{unit}.service")))
-            }) && std::fs::read_link(path.join("exe")).is_ok_and(|exe| {
-                !matches!(
-                    exe.file_name().and_then(|name| name.to_str()),
-                    Some("bash" | "sh" | "dash" | "sudo" | "env" | "nice" | "ffplay")
-                ) && (std::fs::read(path.join("cmdline")).is_ok_and(|args| {
-                    args.split(|byte| *byte == 0)
-                        .any(|arg| arg == game.as_os_str().as_encoded_bytes())
-                }) || game.extension().is_some_and(|ext| ext == "sh")
-                    && game.parent().is_some_and(|parent| exe.starts_with(parent)))
-            })
-        })
-    })
-}
-
 #[cfg(test)]
 mod menu_tests {
     use super::*;
+
+    #[test]
+    fn exit_choices_separate_preserving_an_established_network_from_restoring_wifi() {
+        use crate::purpose::SessionPurpose;
+        for (purpose, established) in [
+            (SessionPurpose::Game, false),
+            (SessionPurpose::Game, true),
+            (SessionPurpose::NetworkOnly, false),
+            (SessionPurpose::NetworkOnly, true),
+        ] {
+            let connected = keep_network_exit_allowed(purpose, established);
+            assert_eq!(
+                connected,
+                purpose == SessionPurpose::NetworkOnly && established
+            );
+            let items = exit_items(connected);
+            let actions: Vec<_> = items.iter().map(|item| item.action).collect();
+            assert_eq!(actions.first(), Some(&MenuAction::Back));
+            assert_eq!(actions.last(), Some(&MenuAction::Exit));
+            assert_eq!(actions.contains(&MenuAction::KeepNetworkExit), connected);
+            assert!(items.iter().all(MenuItem::enabled));
+            for item in items {
+                let value = serde_json::to_value(&item).unwrap();
+                assert_eq!(serde_json::from_value::<MenuItem>(value).unwrap(), item);
+            }
+        }
+    }
 
     #[test]
     fn detail_navigation_retains_game_identity_and_returns_to_each_parent_action() {

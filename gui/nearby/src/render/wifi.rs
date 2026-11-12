@@ -1,3 +1,4 @@
+use super::deferred::Pane;
 use super::{
     deck::{ActionAnchor, ActionLayout},
     keyboard::keycap,
@@ -5,10 +6,11 @@ use super::{
     widgets::{control_key, control_label, shadow, text_block},
 };
 use crate::launcher::Launcher;
+use howff_menu::wifi::Page;
 use mirui::prelude::*;
 use mirui::ui::widgets::TextAlign::{Center, Start};
+use mirui::ui::widgets::page_view::{CreatePage, PageView};
 use mirui::ui::widgets::{Image, Text, TextEditing};
-use nearby_menu::wifi::Page;
 
 #[component]
 pub(super) struct LoadingTrack;
@@ -37,6 +39,29 @@ fn label(state: &crate::launcher::LauncherHandle, index: usize) -> String {
 }
 #[compose]
 pub(super) fn panel(state: model!(Launcher), metrics: Metrics) -> Entity {
+    ui! {
+        PageView (
+            grow: 1.0,
+            min_width: 0,
+            min_height: 0,
+            page: Pane::Wifi
+        ) on CreatePage(create_panel::callback(state, metrics))
+    }
+}
+
+#[event]
+fn create_panel(
+    _event: event!(CreatePage<Pane>),
+    state: model!(Launcher),
+    metrics: Metrics,
+) -> Entity {
+    ui! {
+        panel_contents (state, metrics)
+    }
+}
+
+#[compose]
+pub(super) fn panel_contents(state: model!(Launcher), metrics: Metrics) -> Entity {
     let notice = state.clone();
     ui! {
         Column (grow: 1.0, min_height: 0, min_width: 0, row_gap: metrics.gap) {
@@ -220,7 +245,7 @@ fn row(state: model!(Launcher), index: usize, list: bool, metrics: Metrics) -> E
                                                 "已连接"
                                             } else if r.saved {
                                                 "已保存"
-                                            } else if r.security == nearby_menu::wifi::Security::Open {
+                                            } else if r.security == howff_menu::wifi::Security::Open {
                                                 "开放"
                                             } else {
                                                 ""
@@ -331,12 +356,35 @@ fn network_glyph(state: &crate::launcher::LauncherHandle, index: usize) -> Netwo
     match state.wifi_row(index) {
         None => NetworkGlyph::Add,
         Some(row) if row.connected => NetworkGlyph::Connected,
-        Some(row) if row.security == nearby_menu::wifi::Security::Open => NetworkGlyph::Open,
+        Some(row) if row.security == howff_menu::wifi::Security::Open => NetworkGlyph::Open,
         _ => NetworkGlyph::Locked,
     }
 }
 #[compose]
 fn keyboard(state: model!(Launcher), metrics: Metrics) -> Entity {
+    ui! {
+        PageView (
+            grow: 1.0,
+            min_width: 0,
+            min_height: 0,
+            page: Pane::WifiKeyboard
+        ) on CreatePage(create_keyboard::callback(state, metrics))
+    }
+}
+
+#[event]
+fn create_keyboard(
+    _event: event!(CreatePage<Pane>),
+    state: model!(Launcher),
+    metrics: Metrics,
+) -> Entity {
+    ui! {
+        keyboard_contents (state, metrics)
+    }
+}
+
+#[compose]
+fn keyboard_contents(state: model!(Launcher), metrics: Metrics) -> Entity {
     let text = state.clone();
     let editor = state.wifi_document();
     ui! {
@@ -602,7 +650,7 @@ pub(super) fn heading(state: model!(Launcher), metrics: Metrics) -> Entity {
                 color: ACCENT
             )
             Text (
-                text: ${ state.view().overlay },
+                text: ${ state.overlay_title() },
                 font: font(TITLE_SIZE),
                 font_size: TITLE_SIZE,
                 text_color: FOREGROUND,

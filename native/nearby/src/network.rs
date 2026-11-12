@@ -18,7 +18,7 @@ use crate::{Result, require};
 
 const LEASE: f64 = 15.0;
 const HEARTBEAT: f64 = 2.0;
-const DOMAIN: &[u8] = b"arkos-nearby/network/v1\0";
+const DOMAIN: &[u8] = b"howff/network/v1\0";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -517,11 +517,7 @@ fn connected(state: &State) -> Result<()> {
             "network_connected",
             "组网已完成，按 A 保持连接并返回系统。",
         )?;
-        best(&[
-            "systemctl",
-            "stop",
-            &format!("{}-recovery.timer", state.unit()),
-        ]);
+        crate::platform::radio::disarm(state);
     }
     Ok(())
 }
@@ -707,6 +703,46 @@ mod tests {
     use super::*;
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use sha2::{Digest, Sha256};
+
+    #[test]
+    fn protocol_compatibility_network_scope_and_heartbeat_have_fixed_wire_bytes() {
+        let id = "a".repeat(32);
+        let claim = "b".repeat(32);
+        let challenge = "c".repeat(64);
+        let game = crate::identity::transcript(
+            &id,
+            &claim,
+            &challenge,
+            "02:00:00:00:00:01",
+            "02:00:00:00:00:02",
+        )
+        .unwrap();
+        assert_eq!(
+            scope(
+                &id,
+                &claim,
+                &challenge,
+                "02:00:00:00:00:01",
+                "02:00:00:00:00:02",
+            )
+            .unwrap(),
+            [b"howff/network/v1\0".as_slice(), &game].concat()
+        );
+        let heartbeat = Pulse {
+            session_id: id,
+            claim,
+            sequence: 7,
+            leave: false,
+        };
+        assert_eq!(
+            heartbeat.message().unwrap(),
+            concat!(
+                "howff/network/v1\0heartbeat\0",
+                r#"{"session_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","claim":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","sequence":7,"leave":false}"#,
+            )
+            .as_bytes()
+        );
+    }
 
     #[test]
     fn membership_requires_signed_live_station_and_fresh_sequence() {

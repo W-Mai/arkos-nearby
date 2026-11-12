@@ -1,5 +1,5 @@
 [package]
-name = "arkos-nearby-gui"
+name = "howff-gui"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
@@ -10,10 +10,11 @@ gpu = ["mirui/sdl-gpu", "sound"]
 sound = ["mirui/sdl-audio"]
 
 [dependencies]
-nearby-menu = { path = "../../native/nearby-menu" }
+howff-platform = { path = "../../native/nearby-platform" }
+howff-menu = { path = "../../native/nearby-menu" }
 inputx-pinyin = { version = "=1.4.0", default-features = false }
-mirui = { version = "=0.54.0", default-features = false, features = ["std", "quad-aa", "audio"] }
-mirx = "=0.54.0"
+mirui = { version = "=0.56.0", default-features = false, features = ["std", "quad-aa", "audio"] }
+mirx = "=0.56.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 png = "0.17"

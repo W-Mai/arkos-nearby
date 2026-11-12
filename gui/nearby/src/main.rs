@@ -1,4 +1,7 @@
 mod feedback;
+#[cfg(any(target_os = "linux", test))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod input;
 // Host capture renders launcher state without a physical input source.
 #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
 mod launcher;
@@ -11,6 +14,8 @@ mod settings;
 mod sound;
 mod theme;
 
+#[cfg(target_os = "linux")]
+use howff_menu::input::Sourced;
 use mirui::prelude::*;
 use mirui::render::texture::ColorFormat;
 use mirui::surface::FramebufferAccess;
@@ -106,7 +111,7 @@ fn snapshot(
     let mut app = App::new(surface);
     app.with_default_widgets().with_default_systems();
     render::install(&mut app)?;
-    if let Some(palette) = std::env::var("ARKOS_NEARBY_THEME")
+    if let Some(palette) = std::env::var("HOWFF_THEME")
         .ok()
         .and_then(|value| theme::Palette::parse(&value))
     {
@@ -302,33 +307,37 @@ fn live() -> Result<(), String> {
     let intents = Rc::new(RefCell::new(Vec::new()));
     let pending = Rc::clone(&intents);
     launcher
-        .on_effect(move |intent: &launcher::Intent| pending.borrow_mut().push(intent.clone()))
+        .on_effect(move |intent: &Sourced<launcher::Intent>| {
+            pending.borrow_mut().push(intent.clone())
+        })
         .map_err(|error| format!("Launcher effects: {error:?}"))?;
     let pending = Rc::clone(&intents);
     launcher
         .configuration()
-        .on_effect(move |request: &nearby_menu::configuration::Request| {
-            pending
-                .borrow_mut()
-                .push(launcher::Intent::Configuration(request.clone()))
-        })
+        .on_effect(
+            move |request: &Sourced<howff_menu::configuration::Request>| {
+                pending
+                    .borrow_mut()
+                    .push(request.clone().map(launcher::Intent::Configuration))
+            },
+        )
         .map_err(|error| format!("Configuration effects: {error:?}"))?;
     let pending = Rc::clone(&intents);
     launcher
         .saves()
-        .on_effect(move |request: &nearby_menu::saves::Request| {
+        .on_effect(move |request: &Sourced<howff_menu::saves::Request>| {
             pending
                 .borrow_mut()
-                .push(launcher::Intent::Saves(request.clone()))
+                .push(request.clone().map(launcher::Intent::Saves))
         })
         .map_err(|e| format!("Save effects: {e:?}"))?;
     let pending = Rc::clone(&intents);
     launcher
         .management()
-        .on_effect(move |request: &nearby_menu::management::Request| {
+        .on_effect(move |request: &Sourced<howff_menu::management::Request>| {
             pending
                 .borrow_mut()
-                .push(launcher::Intent::Management(request.clone()));
+                .push(request.clone().map(launcher::Intent::Management));
         })
         .map_err(|error| format!("Management effects: {error:?}"))?;
     let shelf_layouts = Rc::new(RefCell::new(Vec::new()));
@@ -361,6 +370,7 @@ fn live() -> Result<(), String> {
     let mut scene = None;
     let mut next_frame = Instant::now();
     let mut first_frame_sent = false;
+    let mut presented_generation = None;
     let mut metrics = FrameMetrics::default();
     while !quit.load(Ordering::Relaxed) {
         let mut rendered = false;
@@ -375,12 +385,15 @@ fn live() -> Result<(), String> {
         if let Some(latest) = latest
             && view.as_ref() != Some(&latest)
         {
+            render::response::received(&latest);
             sound.present(&latest, render::now(&app));
             let frame_start = Instant::now();
             let full = scene.is_none();
             if let Some(current_scene) = scene.as_mut() {
                 render::update(current_scene, &latest)?;
+                render::response::stage("view_applied");
                 render::tick(&mut app)?;
+                render::response::stage("view_tick_completed");
             } else {
                 let next_scene = render::draw(&mut app, &latest)?;
                 scene = Some(next_scene);
@@ -402,6 +415,11 @@ fn live() -> Result<(), String> {
                 output.flush().map_err(|error| error.to_string())?;
                 first_frame_sent = true;
             }
+            let generation = view.as_ref().unwrap().input_generation;
+            if presented_generation != Some(generation) {
+                input::send(generation.bind(serde_json::json!({"event":"presented"})))?;
+                presented_generation = Some(generation);
+            }
         }
         if scene.is_some() && !rendered && Instant::now() >= next_frame {
             let frame_start = Instant::now();
@@ -412,17 +430,15 @@ fn live() -> Result<(), String> {
                 return Err(format!("Framebuffer pwrite: {error}"));
             }
         }
+        let Some(generation) = view.as_ref().map(|view| view.input_generation) else {
+            thread::sleep(Duration::from_millis(2));
+            continue;
+        };
         for request in shelf_layouts.borrow_mut().drain(..) {
-            let mut output = io::stdout().lock();
-            serde_json::to_writer(&mut output, &request).map_err(|e| e.to_string())?;
-            writeln!(output).map_err(|e| e.to_string())?;
-            output.flush().map_err(|e| e.to_string())?;
+            input::send(request.generation.bind(request))?;
         }
         for request in list_layouts.borrow_mut().drain(..) {
-            let mut output = io::stdout().lock();
-            serde_json::to_writer(&mut output, &request).map_err(|e| e.to_string())?;
-            writeln!(output).map_err(|e| e.to_string())?;
-            output.flush().map_err(|e| e.to_string())?;
+            input::send(request.generation.bind(request))?;
         }
         let mut actions = terminal.poll().map_err(|e| e.to_string())?;
         if !actions.is_empty() {
@@ -436,57 +452,39 @@ fn live() -> Result<(), String> {
             );
         }
         for intent in intents.borrow_mut().drain(..) {
-            match intent {
+            if intent.generation != generation {
+                continue;
+            }
+            match intent.payload {
                 launcher::Intent::Action(action) => actions.push(action),
                 launcher::Intent::Configuration(request) => {
-                    let mut output = io::stdout().lock();
-                    serde_json::to_writer(
-                        &mut output,
-                        &serde_json::json!({"event":"configuration","request":request}),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    writeln!(output).map_err(|e| e.to_string())?;
-                    output.flush().map_err(|e| e.to_string())?;
+                    input::send(
+                        generation
+                            .bind(serde_json::json!({"event":"configuration","request":request})),
+                    )?;
                 }
                 launcher::Intent::Saves(request) => {
-                    let mut output = io::stdout().lock();
-                    serde_json::to_writer(
-                        &mut output,
-                        &serde_json::json!({"event":"saves","request":request}),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    writeln!(output).map_err(|e| e.to_string())?;
-                    output.flush().map_err(|e| e.to_string())?;
+                    input::send(
+                        generation.bind(serde_json::json!({"event":"saves","request":request})),
+                    )?;
                 }
                 launcher::Intent::Management(request) => {
-                    let mut output = io::stdout().lock();
-                    serde_json::to_writer(
-                        &mut output,
-                        &serde_json::json!({"event":"management","request":request}),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    writeln!(output).map_err(|e| e.to_string())?;
-                    output.flush().map_err(|e| e.to_string())?;
+                    input::send(
+                        generation
+                            .bind(serde_json::json!({"event":"management","request":request})),
+                    )?;
                 }
                 launcher::Intent::Wifi(request) => {
-                    let mut output = io::stdout().lock();
-                    serde_json::to_writer(
-                        &mut output,
-                        &serde_json::json!({"event":"wifi","request":request}),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    writeln!(output).map_err(|e| e.to_string())?;
-                    output.flush().map_err(|e| e.to_string())?;
+                    input::send(
+                        generation.bind(serde_json::json!({"event":"wifi","request":request})),
+                    )?;
                 }
                 launcher::Intent::Game { key, multiplayer } => {
                     sound.input(model::Action::Confirm, render::now(&app));
                     if let Some(scene) = &scene {
                         scene.press(render::now(&app));
                     }
-                    let mut output = io::stdout().lock();
-                    serde_json::to_writer(&mut output, &serde_json::json!({"event":"launcher", "action":if multiplayer {"multiplayer"}else{"launch"}, "key":key})).map_err(|e|e.to_string())?;
-                    writeln!(output).map_err(|e| e.to_string())?;
-                    output.flush().map_err(|e| e.to_string())?;
+                    input::send(generation.bind(serde_json::json!({"event":"launcher", "action":if multiplayer {"multiplayer"}else{"launch"}, "key":key})))?;
                 }
             }
         }
@@ -591,10 +589,8 @@ fn live() -> Result<(), String> {
             {
                 scene.press(render::now(&app));
             }
-            let mut output = io::stdout().lock();
-            serde_json::to_writer(&mut output, &action).map_err(|e| e.to_string())?;
-            writeln!(output).map_err(|e| e.to_string())?;
-            output.flush().map_err(|e| e.to_string())?;
+            render::response::dispatched(action);
+            input::send(generation.bind(action))?;
         }
         let sleep = next_frame
             .saturating_duration_since(Instant::now())
@@ -670,7 +666,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [argument] if argument == "--version" => {
-            println!("arkos-nearby-gui 0.1.0 (mirui 0.53.0)");
+            println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         #[cfg(all(target_os = "linux", not(feature = "gpu")))]
@@ -715,7 +711,7 @@ fn run() -> Result<(), String> {
             #[cfg(not(target_os = "linux"))]
             Err("Use --snapshot on this host".into())
         }
-        _ => Err("Usage: arkos-nearby-gui [--version | --snapshot input.json output.png]".into()),
+        _ => Err("Usage: howff-gui [--version | --snapshot input.json output.png]".into()),
     }
 }
 

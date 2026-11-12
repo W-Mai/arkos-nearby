@@ -82,7 +82,7 @@ fn typed_paths_index_only_real_slots_and_never_promote_unknown_state_sources() {
     let backup = f.find(Kind::Backup);
     assert_eq!(backup.source, SourceMatch::Unrecorded);
     assert!(!backup.thumbnail.is_empty());
-    assert!(files::solo(Path::new("/run/arkos-nearby-rust/room/game/saves/data.srm")).is_err());
+    assert!(files::solo(Path::new("/run/howff/room/game/saves/data.srm")).is_err());
 }
 
 #[test]

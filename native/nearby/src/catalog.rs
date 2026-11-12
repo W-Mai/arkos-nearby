@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,10 +13,13 @@ use crate::{Result, require};
 mod index;
 pub(crate) mod library;
 pub(crate) mod matching;
-mod metadata;
+pub(crate) mod metadata;
 pub(crate) mod shelf;
 mod store;
 pub use index::{Index, IndexJob, SearchJob, SearchResult};
+
+#[cfg(test)]
+pub(crate) mod interleavings;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Entry {
@@ -50,25 +54,25 @@ mod library_tests {
         });
         browser.query = "mario".into();
         let load = |browser: &Browser| {
-            serde_json::from_value::<nearby_menu::LibraryLoad>(
+            serde_json::from_value::<howff_menu::LibraryLoad>(
                 browser.view()["library"]["load"].clone(),
             )
             .unwrap()
         };
         browser.search_running = true;
         assert!(!browser.view()["busy"].as_bool().unwrap());
-        assert_eq!(load(&browser), nearby_menu::LibraryLoad::Loading);
+        assert_eq!(load(&browser), howff_menu::LibraryLoad::Loading);
         browser.search_running = false;
-        assert_eq!(load(&browser), nearby_menu::LibraryLoad::Ready);
+        assert_eq!(load(&browser), howff_menu::LibraryLoad::Ready);
         browser.status = "无法读取目录，请返回后重试。".into();
         assert_eq!(
             load(&browser),
-            nearby_menu::LibraryLoad::Failed {
+            howff_menu::LibraryLoad::Failed {
                 message: browser.status.clone()
             }
         );
         browser.query_due = Some(crate::system::monotonic());
-        assert_eq!(load(&browser), nearby_menu::LibraryLoad::Loading);
+        assert_eq!(load(&browser), howff_menu::LibraryLoad::Loading);
     }
 
     #[test]
@@ -176,7 +180,7 @@ mod library_tests {
         });
         let key = browser.current().unwrap().key();
         let epoch = browser.input_epoch;
-        for rows in [2, 1, nearby_menu::LIST_WINDOW_ITEMS, 3] {
+        for rows in [2, 1, howff_menu::LIST_WINDOW_ITEMS, 3] {
             browser.list_layout(rows);
             let view = browser.view();
             let entries = view["entries"].as_array().unwrap();
@@ -192,7 +196,7 @@ mod library_tests {
             browser.dispatch("page_up").unwrap();
             assert_eq!(browser.current().unwrap().key(), key);
         }
-        for rows in [0, nearby_menu::LIST_WINDOW_ITEMS + 1, usize::MAX] {
+        for rows in [0, howff_menu::LIST_WINDOW_ITEMS + 1, usize::MAX] {
             browser.list_layout(rows);
             assert_eq!(browser.list_rows, 3);
         }
@@ -508,7 +512,7 @@ fn game_file(path: &Path) -> bool {
 
 impl Browser {
     pub fn list_layout(&mut self, rows: usize) {
-        if (1..=nearby_menu::LIST_WINDOW_ITEMS).contains(&rows) {
+        if (1..=howff_menu::LIST_WINDOW_ITEMS).contains(&rows) {
             self.list_rows = rows;
         }
     }
@@ -520,7 +524,7 @@ impl Browser {
     pub fn reopen(&mut self) {
         self.resume();
         self.indexing = true;
-        if let Ok(personal) = library::Library::load(Path::new(context::INSTALL)) {
+        if let Ok(personal) = library::Library::load(Path::new(arkos::PATHS.personal)) {
             self.personal = personal;
         }
         if self.kind() == LibraryPage::Favorites {
@@ -546,7 +550,7 @@ impl Browser {
     }
 
     pub(crate) fn refresh_personal(&mut self) {
-        if let Ok(personal) = library::Library::load(Path::new(context::INSTALL)) {
+        if let Ok(personal) = library::Library::load(Path::new(arkos::PATHS.personal)) {
             self.personal = personal;
             if self.kind() == LibraryPage::Favorites {
                 self.favorites();
@@ -615,7 +619,7 @@ impl Browser {
     fn with_inventory(inventory: IndexJob, launcher: bool) -> Result<Self> {
         let roots = inventory.roots.clone();
         let mut entries = Vec::new();
-        let personal = library::Library::load(Path::new(context::INSTALL));
+        let personal = library::Library::load(Path::new(arkos::PATHS.personal));
         let status = if personal.is_err() {
             "收藏记录无法读取，原文件已保留。".into()
         } else {
@@ -698,7 +702,14 @@ impl Browser {
                 continue;
             };
             if level.kind == LibraryPage::Directory {
-                let selected = level.offset + level.selected;
+                let selected = level
+                    .path
+                    .as_ref()
+                    .zip(level.entries.get(level.selected))
+                    .and_then(|(directory, entry)| {
+                        index.child_position(&directory.path, &entry.path)
+                    })
+                    .unwrap_or(level.offset + level.selected);
                 let _ = self.reload_directory_window(level_index, selected);
             }
             let Some(level) = self.levels.get_mut(level_index) else {
@@ -733,7 +744,7 @@ impl Browser {
         let selected = root.entries.get(root.selected).map(Entry::key);
         root.entries.retain(|entry| entry.platform == "favorites");
         let recent_count = if self.launcher {
-            index.recent(&self.personal.recent).len()
+            index.recent_count(&self.personal.recent)
         } else {
             0
         };
@@ -1094,7 +1105,7 @@ impl Browser {
             return Ok(None);
         }
         if action == "auxiliary" && self.kind() == LibraryPage::Favorites {
-            match library::Library::sort(Path::new(context::INSTALL)) {
+            match library::Library::sort(Path::new(arkos::PATHS.personal)) {
                 Ok(value) => {
                     self.personal = value;
                     self.favorites();
@@ -1172,7 +1183,7 @@ impl Browser {
                 .filter(|entry| !entry.directory)
                 .cloned()
             {
-                match library::Library::toggle(Path::new(context::INSTALL), &entry) {
+                match library::Library::toggle(Path::new(arkos::PATHS.personal), &entry) {
                     Ok(value) => {
                         self.personal = value;
                         if self.kind() == LibraryPage::Favorites {
@@ -1285,7 +1296,7 @@ impl Browser {
                 offset: 0,
                 total: 0,
             });
-            if let Ok(personal) = library::Library::load(Path::new(context::INSTALL)) {
+            if let Ok(personal) = library::Library::load(Path::new(arkos::PATHS.personal)) {
                 self.personal = personal;
             }
             self.favorites();
@@ -1413,13 +1424,13 @@ impl Browser {
             || self.kind() == LibraryPage::Search
                 && (self.query_due.is_some() || self.search_running)
         {
-            nearby_menu::LibraryLoad::Loading
+            howff_menu::LibraryLoad::Loading
         } else if !self.status.is_empty() {
-            nearby_menu::LibraryLoad::Failed {
+            howff_menu::LibraryLoad::Failed {
                 message: self.status.clone(),
             }
         } else {
-            nearby_menu::LibraryLoad::Ready
+            howff_menu::LibraryLoad::Ready
         };
         json!({
             "platforms":self.kind()==LibraryPage::Platforms,
@@ -1436,10 +1447,7 @@ impl Browser {
 }
 
 fn local_platforms() -> Result<(Vec<PathBuf>, Vec<Entry>)> {
-    let roots: Vec<_> = ["/roms", "/roms2"]
-        .iter()
-        .filter_map(|root| Path::new(root).canonicalize().ok())
-        .collect();
+    let roots = crate::platform::content::roots();
     let mut entries = Vec::new();
     for root in &roots {
         for (platform, name) in PLATFORMS {
@@ -1472,7 +1480,7 @@ fn local_platforms() -> Result<(Vec<PathBuf>, Vec<Entry>)> {
                 name: format!(
                     "{}{}",
                     name,
-                    if root.ends_with("roms2") {
+                    if crate::platform::content::secondary_root(root) {
                         " · 卡 2"
                     } else {
                         ""

@@ -8,7 +8,7 @@ use std::os::unix::fs::OpenOptionsExt;
 
 const X: u16 = 307;
 const FUNCTION: u16 = 708;
-const DEVICE: &str = "/dev/input/by-path/platform-odroidgo3-joypad-event-joystick";
+const DEVICE: &str = howff_platform::arkos::input::JOYSTICK.as_str();
 
 pub struct Input {
     file: File,
@@ -22,7 +22,7 @@ pub struct Input {
 
 impl Input {
     pub fn open() -> io::Result<Option<Self>> {
-        let launcher = match std::env::var("ARKOS_NEARBY_LAUNCHER_INPUT").as_deref() {
+        let launcher = match std::env::var("HOWFF_LAUNCHER_INPUT").as_deref() {
             Ok("1") => true,
             Ok("0") => false,
             _ => return Ok(None),
@@ -152,7 +152,7 @@ impl Input {
                     if value == 1 {
                         state.cancel();
                     }
-                    actions.extend(self.controls.update(
+                    let action = self.controls.update(
                         code,
                         if value == 1 {
                             controls::button_for(code, self.launcher)
@@ -160,7 +160,11 @@ impl Input {
                             None
                         },
                         at,
-                    ));
+                    );
+                    if let Some(action) = action {
+                        crate::render::response::observed(action, code);
+                    }
+                    actions.extend(action);
                 }
             }
         }

@@ -9,24 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "arkos-nearby"
-version = "0.12.0"
-dependencies = [
- "crc32fast",
- "flate2",
- "libc",
- "nearby-menu",
- "pinyin",
- "ring",
- "roxmltree",
- "serde",
- "serde_json",
- "sha2",
- "signal-hook",
- "tar",
-]
-
-[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -147,6 +129,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "howff"
+version = "0.13.0"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "howff-menu",
+ "howff-platform",
+ "libc",
+ "pinyin",
+ "ring",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "sha2",
+ "signal-hook",
+ "tar",
+]
+
+[[package]]
+name = "howff-menu"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "howff-platform"
+version = "0.1.0"
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -172,13 +184,6 @@ checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
  "simd-adler32",
-]
-
-[[package]]
-name = "nearby-menu"
-version = "0.1.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]

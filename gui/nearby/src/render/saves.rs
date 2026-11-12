@@ -1,15 +1,17 @@
+use super::deferred::Pane;
 use super::{
     deck::{ActionAnchor, ActionLayout},
     style::*,
     widgets::{control_key, control_label, shadow, text_block},
 };
 use crate::launcher::saves::{Manager, Page};
+use howff_menu::saves::Tab;
 use mirui::prelude::*;
+use mirui::ui::widgets::page_view::{CreatePage, PageView};
 use mirui::ui::widgets::{
     Image, Text,
     TextAlign::{Center, Start},
 };
-use nearby_menu::saves::Tab;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Facts {
@@ -21,7 +23,7 @@ enum Facts {
 fn fact_values(
     state: &crate::launcher::saves::ManagerHandle,
     context: Facts,
-) -> Vec<nearby_menu::details::Fact> {
+) -> Vec<howff_menu::details::Fact> {
     if context == Facts::Preview {
         state.preview_facts()
     } else {
@@ -31,6 +33,29 @@ fn fact_values(
 
 #[compose]
 pub(super) fn panel(state: model!(Manager), metrics: Metrics) -> Entity {
+    ui! {
+        PageView (
+            grow: 1.0,
+            min_width: 0,
+            min_height: 0,
+            page: Pane::Saves
+        ) on CreatePage(create_panel::callback(state, metrics))
+    }
+}
+
+#[event]
+fn create_panel(
+    _event: event!(CreatePage<Pane>),
+    state: model!(Manager),
+    metrics: Metrics,
+) -> Entity {
+    ui! {
+        panel_contents (state, metrics)
+    }
+}
+
+#[compose]
+pub(super) fn panel_contents(state: model!(Manager), metrics: Metrics) -> Entity {
     let modal_layout = ActionLayout::SavesModal;
     let list_layout = ActionLayout::SavesList;
     let preview_facts = Facts::Preview;

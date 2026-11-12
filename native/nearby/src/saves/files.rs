@@ -11,16 +11,27 @@ pub(super) struct Stamp {
     pub revision: String,
 }
 pub(super) fn solo(path: &Path) -> Result<()> {
+    require(
+        !path.starts_with(crate::session::BASE),
+        "联机会话存档属于独立来源",
+    )?;
     let mut actual = path.to_path_buf();
-    while !actual.exists() {
-        actual = actual.parent().ok_or("存档位置不可用")?.into();
+    loop {
+        match fs::symlink_metadata(&actual) {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                actual = actual.parent().ok_or("存档位置不可用")?.into();
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
     let actual = actual.canonicalize()?;
     require(
-        !path.starts_with(crate::session::BASE) && !actual.starts_with(crate::session::BASE),
+        !actual.starts_with(crate::session::BASE),
         "联机会话存档属于独立来源",
     )
 }
+
 pub(super) fn stamp(path: &Path) -> Result<Stamp> {
     solo(path)?;
     let meta = fs::metadata(path)?;
@@ -155,4 +166,45 @@ pub(super) fn replace(source: &Path, target: &Path, digest: &str) -> Result<()> 
         let _ = fs::remove_file(temporary);
     }
     result
+}
+
+#[cfg(test)]
+mod path_admission {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn solo_admission_distinguishes_missing_files_from_unresolved_links() {
+        let root = std::env::temp_dir().join(format!(
+            "howff-save-path-{}",
+            crate::system::random_id().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("progress.srm"), b"progress").unwrap();
+        symlink(root.join("progress.srm"), root.join("present")).unwrap();
+        symlink(&root, root.join("directory")).unwrap();
+        symlink(
+            format!("{}/uncreated/game/saves/progress.srm", crate::session::BASE),
+            root.join("private"),
+        )
+        .unwrap();
+        symlink(root.join("uncreated"), root.join("dangling")).unwrap();
+        symlink(root.join("cycle-b"), root.join("cycle-a")).unwrap();
+        symlink(root.join("cycle-a"), root.join("cycle-b")).unwrap();
+        let accepted = [
+            "progress.srm",
+            "new/file.srm",
+            "present",
+            "directory/new.srm",
+        ]
+        .into_iter()
+        .all(|name| solo(&root.join(name)).is_ok());
+        let denied = ["private", "private/child", "dangling", "cycle-a"]
+            .into_iter()
+            .all(|name| solo(&root.join(name)).is_err());
+        let runtime_denied =
+            solo(&Path::new(crate::session::BASE).join("new/game/save.srm")).is_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(accepted && denied && runtime_denied);
+    }
 }

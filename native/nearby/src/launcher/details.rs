@@ -1,6 +1,6 @@
 use crate::catalog::Entry;
 use crate::{context, core_choice, owned_core};
-use nearby_menu::details::{Document, Fact, FileStatus, Load, Requirement, Row};
+use howff_menu::details::{Document, Fact, FileStatus, Load, Requirement, Row};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Component, Path, PathBuf};

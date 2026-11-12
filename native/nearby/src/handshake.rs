@@ -28,7 +28,7 @@ impl Ephemeral {
         );
         let key = agreement::agree_ephemeral(self.0, &remote, |secret| {
             let mut hash = Sha256::new();
-            hash.update(b"arkos-nearby/credential/v1\0");
+            hash.update(b"howff/credential/v1\0");
             hash.update(secret);
             hash.update(scope);
             hash.finalize()

@@ -38,7 +38,7 @@ pub(super) fn library(kind: LibraryKind, state: model!(DisplayState), metrics: M
                     search (state, metrics)
                 }
                 _ => {
-                    games (state, metrics)
+                    games (state, metrics, kind == LibraryKind::Platforms)
                 }
             }
         }

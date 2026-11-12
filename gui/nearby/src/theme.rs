@@ -4,7 +4,7 @@ use mirui::ui::theme::{Theme, ThemeInfo};
 use std::path::Path;
 
 #[cfg(target_os = "linux")]
-pub const SETTINGS: &str = "/opt/arkos-nearby/ui-theme";
+pub const SETTINGS: &str = howff_platform::arkos::application::THEME.as_str();
 
 pub(crate) mod actor {
     use mirui::prelude::ColorToken;

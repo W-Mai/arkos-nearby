@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -5,11 +6,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use crate::context::{Context, INSTALL};
+use crate::context::Context;
 use crate::system::{mkdir, private_write, random_id, write};
 use crate::{Result, require};
 
-const BASE: &str = "/run/arkos-nearby-launch";
+const BASE: &str = arkos::transient::LAUNCH.as_str();
 
 fn path(id: &str) -> Result<PathBuf> {
     require(crate::protocol::hex(id, 32), "Invalid launch identity")?;
@@ -78,6 +79,7 @@ fn options(
     settings: &crate::game::Settings,
 ) -> Result<Option<PathBuf>> {
     let overrides = crate::core_choice::solo_options(&context.game_path, &context.core_id);
+    let mut controls = String::new();
     if let Some(overrides) = overrides {
         let file = directory.join("core-options.cfg");
         private_write(
@@ -85,19 +87,21 @@ fn options(
             crate::game::isolated(std::str::from_utf8(&settings.options)?, overrides).as_bytes(),
         )?;
         fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
+        controls.push_str(&format!(
+            "core_options_path = \"{}\"\ngame_specific_options = \"false\"\n",
+            file.display()
+        ));
+    }
+    if let Some(entry) = crate::owned_core::by_path(&context.core_path, &context.frontend) {
+        controls.push_str(&entry.frontend_configuration(directory)?);
+    }
+    if controls.is_empty() {
+        Ok(None)
+    } else {
         let config = directory.join("launch.cfg");
-        private_write(
-            &config,
-            format!(
-                "core_options_path = \"{}\"\ngame_specific_options = \"false\"\n",
-                file.display()
-            )
-            .as_bytes(),
-        )?;
+        private_write(&config, controls.as_bytes())?;
         fs::set_permissions(&config, fs::Permissions::from_mode(0o644))?;
         Ok(Some(config))
-    } else {
-        Ok(None)
     }
 }
 
@@ -159,9 +163,11 @@ pub fn resolve(frontend: &str, args: &[String]) -> Result<()> {
     let record = json!({"launch_id":scope.id,"core_id":context.core_id,"core_sha256":context.core_sha256,
         "origin":context.origin(),"game_path":context.game_path,"frontend":context.frontend});
     write(&directory.join("selection.json"), &record)?;
-    mkdir(&Path::new(INSTALL).join("logs"))?;
+    mkdir(arkos::application::LOGS.path())?;
     write(
-        &Path::new(INSTALL).join("logs/last-single-player-selection.json"),
+        &arkos::application::LOGS
+            .path()
+            .join("last-single-player-selection.json"),
         &record,
     )?;
     let mut output = std::io::stdout().lock();

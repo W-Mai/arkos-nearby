@@ -1,7 +1,8 @@
 use crate::catalog::Entry;
 use crate::configuration::{Snapshot, definitions};
 use crate::{Result, require};
-use nearby_menu::configuration::{Document, Load, Projection, Request, View};
+use howff_menu::configuration::{Document, Load, Projection, Request, View};
+use howff_platform::arkos;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 
@@ -34,7 +35,7 @@ fn read_document(entry: &Entry, options: bool) -> Result<(crate::context::Contex
         context
     } else {
         let id = crate::system::random_id()?;
-        let root = Path::new("/run/arkos-nearby-configuration").join(&id);
+        let root = arkos::transient::CONFIGURATION.path().join(&id);
         crate::system::mkdir(&root)?;
         let result = crate::arcade::single_player(&root, &id, &context);
         let stopped = crate::arcade::stop_launch(&root, &id);
@@ -69,7 +70,7 @@ fn read_document(entry: &Entry, options: bool) -> Result<(crate::context::Contex
                 .and_then(|v| v.strip_suffix('"'))
                 .map(std::path::PathBuf::from)
         })
-        .unwrap_or_else(|| Path::new("/roms/bios").into());
+        .unwrap_or_else(|| Path::new(arkos::BIOS).into());
     let options = definitions::read(&context, &system)?;
     let mut snapshot = Snapshot::load(env, document, options)?;
     if let Some(policy) = crate::core_choice::solo_options(&context.game_path, &context.core_id) {

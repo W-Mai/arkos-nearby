@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::content::digest;
 use crate::context::{Context, config};
 use crate::handheld_link::LinkMode;
 use crate::menu::OwnedChild;
@@ -15,9 +14,6 @@ use crate::protocol::{Room, VerifiedRoom};
 use crate::session::{State, best, cmd, current, live_peer, task};
 use crate::system::{Lock, mkdir, monotonic, private_write, read, write};
 use crate::{Result, require};
-
-const ES: &str = "emulationstation.service";
-const ES_FILE: &str = "/etc/systemd/system/emulationstation.service";
 
 fn account() -> Result<(u32, u32)> {
     let value = cmd(&["getent", "passwd", "ark"])?;
@@ -227,6 +223,9 @@ pub fn prepare(
         chown(&path, uid, gid)?;
     }
     let mut overrides = configuration(&directory, context.link_mode)?;
+    if let Some(entry) = crate::owned_core::by_path(&context.core_path, &context.frontend) {
+        overrides.push_str(&entry.frontend_configuration(&directory)?);
+    }
     if !settings.remap.is_empty() {
         let root = directory.join("remaps");
         let folder = root.join(&context.identity.core.name);
@@ -313,53 +312,11 @@ pub fn start(state: &State) -> Result<()> {
 }
 
 fn pause(state: &State, game: &mut Value) -> Result<()> {
-    let pids = best(&["pgrep", "-x", "emulationstatio"]);
-    let active = best(&["systemctl", "is-active", ES]) == "active";
-    require(
-        pids.is_empty() || active,
-        "An unrelated menu owns the display",
-    )?;
-    for pid in pids.lines() {
-        let groups = fs::read_to_string(Path::new("/proc").join(pid).join("cgroup"))?;
-        require(
-            groups.lines().any(|line| {
-                line.rsplit(':').next() == Some("/system.slice/emulationstation.service")
-            }),
-            "Display process is not owned by the installed menu service",
-        )?;
-    }
-    if active {
-        require(
-            cmd(&["systemctl", "show", ES, "-p", "FragmentPath", "--value"])? == ES_FILE,
-            "Unexpected menu service definition",
-        )?;
-        game["frontend_service"] =
-            json!({"unit":ES,"definition_sha256":digest(Path::new(ES_FILE))?});
-        write(&state.root().join("game/game.json"), game)?;
-        cmd(&["systemctl", "stop", ES])?;
-    }
-    Ok(())
+    crate::platform::system::pause_game(&state.root().join("game/game.json"), game)
 }
 
 fn resume(state: &State) -> Result<()> {
-    let path = state.root().join("game/game.json");
-    if !path.exists() {
-        return Ok(());
-    }
-    let mut game: Value = read(&path)?;
-    if game["frontend_service"].is_object() {
-        require(
-            game["frontend_service"]["unit"] == ES
-                && game["frontend_service"]["definition_sha256"] == digest(Path::new(ES_FILE))?,
-            "Menu ownership changed during game handoff",
-        )?;
-        if best(&["systemctl", "is-active", ES]) != "active" {
-            cmd(&["systemctl", "start", ES])?;
-        }
-        game.as_object_mut().unwrap().remove("frontend_service");
-        write(&path, &game)?;
-    }
-    Ok(())
+    crate::platform::system::resume_game(&state.root().join("game/game.json"))
 }
 
 pub fn run(id: &str) -> Result<()> {

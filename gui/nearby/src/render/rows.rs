@@ -158,15 +158,18 @@ pub(super) fn reconcile(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision:
         |current, mut incoming| {
             // Collection merges can notify named watches even when their text
             // is unchanged. Observe content revisions independently of order.
+            let title_changed = current.name != incoming.name;
+            let detail_changed = current.detail != incoming.detail || current.room != incoming.room;
             incoming.title_revision = current
                 .title_revision
-                .wrapping_add(u64::from(current.name != incoming.name));
-            incoming.detail_revision = current.detail_revision.wrapping_add(u64::from(
-                current.detail != incoming.detail || current.room != incoming.room,
-            ));
+                .wrapping_add(u64::from(title_changed));
+            incoming.detail_revision = current
+                .detail_revision
+                .wrapping_add(u64::from(detail_changed));
             std::mem::swap(&mut current.cover_bounds, &mut incoming.cover_bounds);
             std::mem::swap(&mut current.static_picture, &mut incoming.static_picture);
             *current = incoming;
+            TextChanged(title_changed || detail_changed)
         },
     )
     .unwrap_or_else(|failure| panic!("Invalid visible row collection: {:?}", failure.error()));

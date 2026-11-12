@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -8,8 +9,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::content::digest;
-use crate::context::{Context, INSTALL};
+use crate::context::Context;
 use crate::menu::Backend;
 use crate::protocol::{Profile, Room, VerifiedRoom, hex, mac};
 use crate::purpose::{SessionIntent, SessionPurpose};
@@ -17,12 +17,11 @@ use crate::readiness::ReadyPeer;
 use crate::system::{Lock, command, mkdir, monotonic, private_write, random_id, read, write};
 use crate::{Result, require};
 
-pub const BASE: &str = "/run/arkos-nearby-rust";
-pub const BINARY: &str = "/opt/arkos-nearby/arkos-nearby";
+pub const BASE: &str = arkos::PATHS.runtime;
+pub const BINARY: &str = arkos::application::EXECUTABLE.as_str();
 pub use crate::compat::KERNEL_SHA;
-pub const DRIVER_SHA: &str = "e099dcd8f6df0e02749d08c4af201bb1d26ca460a369247630782f0888468965";
-pub const WPA_SHA: &str = "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e";
-pub const SERVICES: [&str; 2] = ["NetworkManager.service", "wpa_supplicant.service"];
+use crate::platform::radio::{self as platform_radio, ScanRequest};
+pub use crate::platform::radio::{DRIVER_SHA, SERVICES, ServicesBefore, WPA_SHA, task};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -96,7 +95,7 @@ pub struct State {
     pub room: RoomEntry,
     pub original_uuid: String,
     pub radio_before: String,
-    pub services_before: [bool; 2],
+    pub services_before: ServicesBefore,
     pub driver_owned: bool,
     pub mounts: Vec<PathBuf>,
     pub game_session: Option<String>,
@@ -124,7 +123,7 @@ impl State {
         Path::new(BASE).join(&self.id)
     }
     pub fn unit(&self) -> String {
-        format!("arkos-nearby-rust-{}", self.id)
+        platform_radio::unit(&self.id)
     }
     pub fn profile(&self) -> String {
         self.unit()
@@ -244,20 +243,14 @@ pub fn identity(force: bool) -> Result<String> {
     crate::compat::identity(force)
 }
 pub fn credentials() -> Result<Value> {
-    let path = Path::new(INSTALL).join("pair.json");
+    let path = arkos::application::PAIRING.path().to_path_buf();
     let meta = path.metadata()?;
     require(
         meta.uid() == 0 && meta.mode() & 0o077 == 0,
         "Wireless credentials must be root-only",
     )?;
     let value: Value = read(&path)?;
-    let psk = value["psk"]
-        .as_str()
-        .ok_or("Missing installed room credential")?;
-    require(
-        (8..=63).contains(&psk.len()) && psk.bytes().all(|b| b.is_ascii_alphanumeric()),
-        "Invalid installed room credential",
-    )?;
+    crate::pairing::validate(&value)?;
     Ok(value)
 }
 pub fn cmd(args: &[&str]) -> Result<String> {
@@ -265,21 +258,6 @@ pub fn cmd(args: &[&str]) -> Result<String> {
 }
 pub fn best(args: &[&str]) -> String {
     command(args[0], &args[1..], 8, false).unwrap_or_default()
-}
-pub fn task(state: &State, suffix: &str, mode: &str, properties: &[String]) -> Result<()> {
-    let mut args = vec![
-        "--collect".into(),
-        format!("--unit={}{}", state.unit(), suffix),
-    ];
-    args.extend_from_slice(properties);
-    args.extend([BINARY.into(), mode.into(), state.id.clone()]);
-    command(
-        "systemd-run",
-        &args.iter().map(String::as_str).collect::<Vec<_>>(),
-        15,
-        true,
-    )?;
-    Ok(())
 }
 fn receipt(state: &State) -> Result<ReadyPeer> {
     let value: Value = read(&state.root().join("readiness.json"))?;
@@ -394,41 +372,13 @@ fn scan_observations(sha: &str, refresh: bool, force: bool) -> Result<Value> {
     let mut cache = read::<Value>(&path).unwrap_or_else(|_| json!({"rooms":[]}));
     let now = monotonic();
     let mut result = collect_scan(&mut cache, &owner, sha, refresh, force, now, |request| {
-        command("nmcli", request.args(), 4, true)
+        platform_radio::scan(request)
     })?;
     write(&path, &cache)?;
-    result["scanning"] = scan_activity()
+    result["scanning"] = platform_radio::scan_activity()
         .unwrap_or(result["refresh_accepted"] == true)
         .into();
     Ok(result)
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ScanRequest {
-    Refresh,
-    List,
-}
-
-impl ScanRequest {
-    fn args(self) -> &'static [&'static str] {
-        match self {
-            Self::Refresh => &["device", "wifi", "rescan", "ifname", "wlan0"],
-            Self::List => &[
-                "-t",
-                "--escape",
-                "no",
-                "-f",
-                "SSID,BSSID,SIGNAL",
-                "device",
-                "wifi",
-                "list",
-                "ifname",
-                "wlan0",
-                "--rescan",
-                "no",
-            ],
-        }
-    }
 }
 
 fn collect_scan(
@@ -568,33 +518,6 @@ mod discovery_contracts {
         }
     }
 }
-fn scan_activity() -> Option<bool> {
-    let path = best(&[
-        "busctl",
-        "call",
-        "fi.w1.wpa_supplicant1",
-        "/fi/w1/wpa_supplicant1",
-        "fi.w1.wpa_supplicant1",
-        "GetInterface",
-        "s",
-        "wlan0",
-    ]);
-    let interface = path.split('"').nth(1)?;
-    let value = best(&[
-        "busctl",
-        "get-property",
-        "fi.w1.wpa_supplicant1",
-        interface,
-        "fi.w1.wpa_supplicant1.Interface",
-        "Scanning",
-    ]);
-    match value.as_str() {
-        "b true" => Some(true),
-        "b false" => Some(false),
-        _ => None,
-    }
-}
-
 pub fn begin(role: &str, context: &Context, selected: Option<RoomEntry>) -> Result<Value> {
     begin_for(
         role,
@@ -651,7 +574,7 @@ pub fn begin_for(role: &str, intent: &SessionIntent, selected: Option<RoomEntry>
             write(&root.join("discover-game.json"), &true)?;
             write(&root.join("origin-game.json"), &intent.context())?;
         }
-        let original = cmd(&["nmcli", "-g", "GENERAL.CON-UUID", "device", "show", "wlan0"])?;
+        let before = platform_radio::capture()?;
         let entry = if role == "host" {
             RoomEntry::observed(
                 &match intent.context() {
@@ -688,14 +611,9 @@ pub fn begin_for(role: &str, intent: &SessionIntent, selected: Option<RoomEntry>
             context_key: intent.key(),
             purpose: intent.purpose(),
             room: entry,
-            original_uuid: if original == "--" {
-                String::new()
-            } else {
-                original
-            },
-            radio_before: best(&["nmcli", "radio", "wifi"]),
-            services_before: SERVICES
-                .map(|service| best(&["systemctl", "is-active", service]) == "active"),
+            original_uuid: before.original_uuid,
+            radio_before: before.radio_before,
+            services_before: before.services_before,
             driver_owned: false,
             mounts: vec![],
             game_session: if role == "host" && intent.purpose() == SessionPurpose::Game {
@@ -703,7 +621,7 @@ pub fn begin_for(role: &str, intent: &SessionIntent, selected: Option<RoomEntry>
             } else {
                 None
             },
-            deadline: monotonic() + 300.0,
+            deadline: monotonic() + platform_radio::STARTUP_SECONDS as f64,
             claim: None,
             claim_deadline: 0.0,
             game_peer_mac: None,
@@ -719,31 +637,8 @@ pub fn begin_for(role: &str, intent: &SessionIntent, selected: Option<RoomEntry>
             original_wps_name: None,
         };
         save(&state)?;
-        task(
-            &state,
-            "-recovery",
-            "recover",
-            &[
-                "--on-active=300s".into(),
-                "--timer-property=AccuracySec=1s".into(),
-                "--setenv=ARKOS_NEARBY_RECOVERY=startup".into(),
-            ],
-        )?;
-        let finalize = format!(
-            "--property=ExecStopPost=/usr/bin/systemd-run --collect --unit={}-finalize {BINARY} recover {}",
-            state.unit(),
-            state.id
-        );
-        if let Err(error) = task(
-            &state,
-            "",
-            "worker",
-            &[
-                "--property=RuntimeMaxSec=infinity".into(),
-                "--property=TimeoutStopSec=10".into(),
-                finalize,
-            ],
-        ) {
+        platform_radio::arm(&state)?;
+        if let Err(error) = platform_radio::start_worker(&state) {
             drop(_lock);
             let _ = recover(&id, "startup_failure");
             return Err(error);
@@ -1073,11 +968,7 @@ fn confirmed(state: &State) -> Result<()> {
         state.stage = "双方已连接，游戏中。".into();
         state.game_peer_mac = peer;
     })?;
-    best(&[
-        "systemctl",
-        "stop",
-        &format!("{}-recovery.timer", state.unit()),
-    ]);
+    platform_radio::disarm(state);
     Ok(())
 }
 
@@ -1374,33 +1265,8 @@ pub fn recover(id: &str, reason: &str) -> Result<Value> {
     if local.id != id || local.phase == "closed" || reason == "startup" && local.established() {
         return status(None);
     }
-    require(
-        digest(Path::new("/boot/Image"))? == KERNEL_SHA,
-        "Recovery kernel identity changed",
-    )?;
-    if let Ok(owner) = fs::read_to_string("/sys/class/net/wlan0/address") {
-        require(
-            owner.trim() == local.self_mac,
-            "Recovery belongs to another device",
-        )?;
-    }
-    let active = best(&["nmcli", "-g", "GENERAL.CON-UUID", "device", "show", "wlan0"]);
-    let profile = best(&[
-        "nmcli",
-        "-g",
-        "GENERAL.CONNECTION",
-        "device",
-        "show",
-        "wlan0",
-    ]);
-    let address = best(&["ip", "-4", "-o", "address", "show", "dev", "wlan0"]);
-    if !active.is_empty()
-        && active != "--"
-        && profile != local.profile()
-        && !address.contains("192.168.49.")
-    {
-        local.original_uuid = active;
-    }
+    platform_radio::validate_recovery(&local)?;
+    platform_radio::refresh_original(&mut local);
     let played = local.phase == "playing";
     local.phase = "restoring".into();
     local.step = "leaving".into();
@@ -1424,14 +1290,7 @@ pub fn recover(id: &str, reason: &str) -> Result<Value> {
             errors.push(format!("{name}: {error}"));
         }
     };
-    best(&[
-        "systemctl",
-        "stop",
-        &format!("{}-recovery.timer", local.unit()),
-    ]);
-    if reason != "worker_exit" {
-        best(&["systemctl", "stop", &format!("{}.service", local.unit())]);
-    }
+    platform_radio::quiesce(&local, reason);
     if local.purpose == SessionPurpose::Game {
         attempt("arcade load check", crate::arcade::stop(&local));
         if local.role == "client" && local.claim.is_some() {
@@ -1447,45 +1306,9 @@ pub fn recover(id: &str, reason: &str) -> Result<Value> {
     attempt("wireless", crate::radio::restore(&local));
     local.stage = "正在恢复当前网络...".into();
     save(&local)?;
-    if !local.original_uuid.is_empty() {
-        attempt(
-            "original Wi-Fi",
-            cmd(&[
-                "nmcli",
-                "--wait",
-                "20",
-                "connection",
-                "up",
-                "uuid",
-                &local.original_uuid,
-            ])
-            .map(|_| ()),
-        );
-    }
-    if local.radio_before == "disabled" {
-        attempt(
-            "original radio",
-            cmd(&["nmcli", "radio", "wifi", "off"]).map(|_| ()),
-        );
-    }
-    let active = best(&["nmcli", "-g", "GENERAL.CON-UUID", "device", "show", "wlan0"]);
-    let ipv4 = best(&["ip", "-4", "-o", "address", "show", "dev", "wlan0"]);
-    let restored = if local.original_uuid.is_empty() {
-        !ipv4.contains("192.168.49.")
-            && best(&[
-                "nmcli",
-                "-g",
-                "GENERAL.CONNECTION",
-                "device",
-                "show",
-                "wlan0",
-            ]) != local.profile()
-    } else {
-        active == local.original_uuid
-    };
-    if !restored {
-        errors.push("Original network is not restored".into());
-    }
+    let connection = platform_radio::restore_connection(&local);
+    errors.extend(connection.errors);
+    let restored = connection.restored;
     if local.purpose == SessionPurpose::Game {
         if let Err(error) = crate::game::restore_menu(&local) {
             errors.push(format!("menu restoration: {error}"));
@@ -1525,7 +1348,7 @@ mod native_admission_tests {
             "id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "self_mac":"02:00:00:00:00:01",
             "role":"host", "phase":"closed", "stage":"", "step":"", "context_key":[],
             "room":{"id":"room", "ssid":"room", "bssid":"02:00:00:00:00:01", "signal":0, "token":"token", "name":"room", "same_game_hint":false},
-            "original_uuid":"", "radio_before":"enabled", "services_before":[true,true],
+            "original_uuid":"", "radio_before":"enabled", "services_before":{"NetworkManager.service":{"active":true,"enabled":"enabled"},"wpa_supplicant.service":{"active":true,"enabled":"enabled"}},
             "driver_owned":false, "mounts":[], "deadline":0.0, "claim_deadline":0.0,
             "network_restored":true, "recovery_errors":[], "timings":[], "stage_started":0.0
         })).unwrap();

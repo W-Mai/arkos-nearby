@@ -1,83 +1,99 @@
 # 安装、更新与卸载
 
-## 下载与校验
+Howff 适用于 R36S 的 ArkOS4Clone 配置，具体内核、无线芯片和系统要求见 [设备兼容性](compatibility.md#设备配置)。两台掌机安装同一版本后即可联机。
 
-两台掌机安装同一个版本。下载 [arkos-nearby-0.12.0-arm64.tar.gz](https://github.com/W-Mai/arkos-nearby/releases/download/v0.12.0/arkos-nearby-0.12.0-arm64.tar.gz) 和 [SHA256SUMS](https://github.com/W-Mai/arkos-nearby/releases/download/v0.12.0/SHA256SUMS)。在下载目录执行 `sha256sum --ignore-missing -c SHA256SUMS`；macOS 可使用 `shasum -a 256 -c SHA256SUMS` 并只核对实际下载的文件。
+## 下载安装包
 
-解压后包含 `arkos-nearby`、`Install Nearby Multiplayer.sh`、安装说明、许可证和可执行文件校验值。
+打开 [GitHub Releases](https://github.com/W-Mai/arkos-nearby/releases)，选择要安装的版本，下载该版本的 `howff-VERSION-arm64.tar.gz` 和 `SHA256SUMS`。`VERSION` 是版本号。
 
-## 从游戏卡安装
-
-将解压出的 `arkos-nearby` 文件夹复制到游戏卡的 `ports` 目录。在掌机的 Ports 中打开 `Install Nearby Multiplayer.sh`。程序与脚本必须放在同一目录。安装器检查实际内核、无线芯片、屏幕、系统工具和启动脚本结构，通过后安装应用并添加手动入口。
-
-安装完成后重启掌机。通过 Options → Nearby Multiplayer 或主页 FN + X 打开工具，已连接 Wi-Fi 时会显示附近房间。向下移动或按 R 展开「仅组网／选择游戏」，向上移动或按 L 返回房间列表。单独按 X 保留主页的随机选择功能。游戏开始加载前按住 X，可直接进入当前游戏的创建／加入房间界面。
-
-在选择模式或创建／加入房间的入口页按 Y 切换松林、落日和夜营主题。配色会自动保存。
-
-## 游戏库
-
-选择游戏平台可查看游戏数量、主机图案与游戏截图。游戏列表中按 X 收藏当前游戏；平台列表顶部的「收藏夹」以横向卡带展示收藏，左右移动选择，按 Y 切换名称或最近使用排序，按 X 移除收藏。
-
-在平台列表按 Y 打开搜索，使用方向键和 A 输入游戏名、文件名或中文名的拼音／首字母。按 Y 退格，按 START 切换键盘与结果列表，按 B 收起键盘或返回平台列表。在结果列表中按 X 收藏，按 A 选择游戏并进入创建／加入房间。
-
-收藏与最近使用记录保存在掌机上。再次打开游戏库时会恢复收藏和排序方式。
-
-## 启动器
-
-Options → Nearby Launcher 直接打开个人收藏。横向卡带按可用空间排成多行，方向键跨行、跨页选择，底部页码随翻页伸缩。选中收藏末尾的游戏库图标，按 A 或下键展开游戏库，收藏架缩小并保留在上方；B 逐级返回，恢复原来的选中卡片。在收藏页按 B 回到第一页。SELECT 打开附近联机面板。
-
-选中游戏后，短按 X 并松开启动单机，长按 X 打开当前游戏的联机面板；A 打开游戏操作，可将游戏移出收藏。在游戏库的游戏列表和搜索结果中按 Y 收藏，收藏页按 Y 排序，平台列表按 Y 搜索。空平台与空文件夹会自动隐藏。游戏退出后返回刚才的列表和选中位置。
-
-按 START → 系统控制打开音量和亮度滑块，上下选择、左右调节，B 返回设置。数值显示实际读回的百分比。系统工具退出后回到原菜单并保留焦点。
-
-系统控制 → 系统工具 → Wi-Fi 设置可以扫描网络、输入密码、连接或管理已保存的网络；连接成功后保留新网络，取消连接时恢复之前的网络。存储空间显示分区的可用量与总容量，按 A 展开设备、文件系统和挂载点；B 收起，再按 B 返回工具菜单。START → 电源提供返回、确认关机和确认重启。
-
-选中游戏后按 A → 游戏详情，查看运行核心、BIOS 文件、存档与配置路径。游戏设置可以切换游戏、核心和前端范围，编辑后查看生效预览，再确认保存。存档管理按即时存档、游戏进度与备份分别展示记录；选择记录可以载入、创建备份或恢复，确认页面显示目标文件。单机沿用原存档位置，联机会话使用独立目录。
-
-单机沿用系统的模拟器设置、游戏存档与即时存档位置。START 打开主题、音效、直连网络管理和退出菜单；选择「返回原系统」回到系统主页。
-
-## 仅组网
-
-选择「仅组网」后，一台创建房间，另一台选择该房间加入。连接完成后显示双方地址，按 A「保持连接，返回系统」可继续从 Ports 打开局域网游戏，并在游戏内创建或加入房间。
-
-再次打开 Nearby Multiplayer 可查看连接，按 B「断开并恢复 Wi-Fi」结束组网。连接意外中断超过 15 秒时，程序恢复原 Wi-Fi。
-
-## 通过 SSH 安装
-
-先在掌机 Options 中启用远程服务，查看当前 IP。将程序复制到可写目录，在设备上使用 sudo 执行：
+在下载目录核对安装包的 SHA-256 与 `SHA256SUMS` 中同名文件的记录：
 
 ```sh
-scp arkos-nearby ark@HANDHELD_IP:/home/ark/arkos-nearby-installer
+# Linux
+sha256sum howff-*-arm64.tar.gz
+# macOS
+shasum -a 256 howff-*-arm64.tar.gz
+```
+
+解压得到 `howff` 文件夹，其中有五个文件：
+
+| 文件 | 用途 |
+| --- | --- |
+| `howff` | 安装程序与运行程序 |
+| `Install Howff.sh` | 掌机安装入口 |
+| `README.md` | 安装与使用说明 |
+| `SHA256SUMS` | 可执行文件的 SHA-256 |
+| `manifest.json` | 版本、设备适配与程序摘要 |
+
+## 在掌机安装
+
+1. 将解压出的整个 `howff` 文件夹复制到游戏卡，例如放在 `ports/howff/`。
+2. 在掌机文件管理器中打开这个文件夹，运行 `Install Howff.sh`。
+3. 按安装器提示完成安装。安装器会检查内核、无线芯片、屏幕与系统工具，并接入系统启动入口。
+4. 安装完成后，在 **Options → Howff Launcher** 打开收藏首页，或在 **Options → Howff Nearby** 打开附近联机。
+
+系统主页按 **FN + X** 打开附近联机；从系统游戏列表启动游戏时按住 **X**，打开当前游戏的联机面板。完整操作见 [使用说明](usage.md)。
+
+## 在界面中更新
+
+1. 下载所需版本的 `howff-VERSION-arm64.tar.gz`，核对 SHA-256 后，将归档复制到游戏卡。
+2. 结束游戏和房间，等待普通 Wi-Fi 恢复。
+3. 打开 Howff，按 **START → 应用管理 → 安装更新**。
+4. 浏览游戏卡，选中安装包。页面显示当前版本、安装包版本和适配结果。
+5. 选择 **安装此版本** 并确认，等待完成，再按画面提示继续进入应用。
+
+安装较早版本也使用这个流程，选择对应版本的安装包即可。更新后，在 **应用管理 → 版本信息** 查看版本；将两台掌机更新到同一版本后再联机。
+
+更新和重复安装会保留设备名称、身份与好友、收藏、最近游玩、偏好和存档备份。数据位置见 [数据与存档](data.md)。也可以解压新版安装包，再运行其中的 `Install Howff.sh` 更新。
+
+## 通过 SSH 安装或更新
+
+在掌机 Options 中开启远程服务，查看当前 IP。以下命令中的 `HANDHELD_IP` 替换为这个地址；在电脑上进入安装包解压后的文件夹，上传其中的 `howff` 可执行文件，再连接掌机：
+
+```sh
+scp howff ark@HANDHELD_IP:/home/ark/howff-installer
 ssh ark@HANDHELD_IP
-chmod 755 /home/ark/arkos-nearby-installer
-sudo /home/ark/arkos-nearby-installer doctor
-sudo /home/ark/arkos-nearby-installer install
+chmod 755 /home/ark/howff-installer
+sudo /home/ark/howff-installer doctor
 ```
 
-`doctor` 返回 `supported: true` 后可以安装，`problems` 列出需要处理的配置问题。
+`doctor` 的 `supported: true` 表示设备检查通过，`problems` 列出检查结果中的问题。接下来按安装情况选择命令。
 
-## 更新
-
-退出游戏和联机房间，等待原 Wi-Fi 恢复，再退出 Nearby Multiplayer 回到游戏列表。运行新版安装脚本或新版可执行文件的 `install` 即可更新。已有配对凭据、设备身份、记住的设备和原启动文件备份会保留。更新完成后重启掌机，两端使用相同版本再联机。
-
-也可以在设备上执行：
+首次安装，在掌机 SSH 会话中执行：
 
 ```sh
-sudo /opt/arkos-nearby/arkos-nearby update /home/ark/arkos-nearby-installer
+sudo /home/ark/howff-installer install
 ```
+
+更新现有安装时，先上传新版 `howff`，结束游戏和房间、等待 Wi-Fi 恢复，并退出正在运行的 Howff 界面，再在掌机 SSH 会话中执行：
+
+```sh
+sudo /opt/howff/howff update /home/ark/howff-installer
+```
+
+命令行 `update` 读取可执行文件；界面中的「安装更新」读取 `.tar.gz` 安装包。
 
 ## 卸载
 
-先退出当前房间和游戏，再执行：
+结束游戏和房间，等待 Wi-Fi 恢复，退出 Howff 后，通过 SSH 执行：
 
 ```sh
-sudo /opt/arkos-nearby/arkos-nearby uninstall
+sudo /opt/howff/howff uninstall
 ```
 
-卸载恢复被本工具修改的游戏启动入口，移除本工具的菜单和已记录安装文件。凭据、设备身份、记住的设备、日志和原启动备份保留，以便重新安装或排查。
+卸载会恢复原系统启动脚本，移除 Howff 的 Options 入口和安装记录中的程序文件。个人数据、偏好、存档备份、日志与原入口备份保留在 `/opt/howff/`，重新安装后可以继续使用。
 
-## 安装内容
+系统主页会重新载入，释放 Howff 的快捷键监听器和输入过滤器。
 
-运行程序、图形界面、核心查询器、无线资产、许可证与诊断日志位于 `/opt/arkos-nearby/`。Options 入口为 `/opt/system/Nearby Multiplayer.sh` 和 `/opt/system/Nearby Launcher.sh`。安装器接入已识别的 RetroArch 启动脚本 X 分支，以及 EmulationStation 的 FN + X 主页快捷键；原始脚本保存在 `original-launch/`，卸载时恢复。
+## 安装位置
 
-创建或加入房间时加载联机驱动，结束联机后恢复原驱动和之前连接的 Wi-Fi。仅组网完成后选择「保持连接，返回系统」会保留网络。临时会话文件位于 `/run/arkos-nearby-rust/`，诊断日志保存在 `/opt/arkos-nearby/logs/`。
+| 内容 | 位置 |
+| --- | --- |
+| 程序、界面、核心与无线组件 | `/opt/howff/` |
+| 启动器入口 | `/opt/system/Howff Launcher.sh` |
+| 附近联机入口 | `/opt/system/Howff Nearby.sh` |
+| 原系统启动脚本备份 | `/opt/howff/original-launch/` |
+| 诊断日志 | `/opt/howff/logs/` |
+| 临时运行与联机会话 | `/run/howff/` |
+
+组件许可证随程序安装到 `/opt/howff/`，来源见 [第三方组件](third-party.md)。

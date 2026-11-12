@@ -1,5 +1,7 @@
 use crate::protocol::{ContentIdentity, CoreIdentity, GameIdentity, Room, VerifiedRoom};
 
+mod protocol_compatibility;
+
 fn room() -> Room {
     Room::new(
         "a".repeat(32),
@@ -47,7 +49,7 @@ fn launch_authority_requires_the_observed_radio_and_room_token() {
     assert!(value.validate().is_err());
 }
 
-fn context() -> crate::context::Context {
+pub(crate) fn context() -> crate::context::Context {
     crate::context::Context {
         frontend: "retroarch".into(),
         frontend_path: "/opt/retroarch/bin/retroarch".into(),
@@ -387,7 +389,7 @@ fn observed_readiness_expires_and_retired_claims_cannot_return() {
 
 #[test]
 fn native_configuration_confines_all_owned_write_destinations() {
-    let path = std::path::Path::new("/run/arkos-nearby-rust/session/game");
+    let path = std::path::Path::new("/run/howff/session/game");
     let overrides = crate::game::configuration(path, None).unwrap();
     let original = "savefile_directory = \"/roms/saves\"\ncache_directory = \"/roms/cache\"\nconfig_save_on_exit = \"true\"\nvideo_driver = \"gl\"\n";
     let isolated = crate::game::isolated(original, &overrides);

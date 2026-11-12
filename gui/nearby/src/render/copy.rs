@@ -27,7 +27,7 @@ pub(super) fn page_heading(view: &View) -> &str {
 }
 
 pub(super) fn loading(view: &View) -> bool {
-    if view.page == Page::Games && view.library.load == nearby_menu::LibraryLoad::Loading {
+    if view.page == Page::Games && view.library.load == howff_menu::LibraryLoad::Loading {
         return true;
     }
     if view.network_only && view.connected && view.phase == Phase::NetworkConnected {

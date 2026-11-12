@@ -23,6 +23,7 @@ pub mod netplay_compression;
 pub mod network;
 pub mod owned_core;
 pub mod pairing;
+pub(crate) mod platform;
 pub mod protocol;
 pub mod purpose;
 pub mod radio;

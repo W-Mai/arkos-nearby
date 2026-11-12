@@ -91,13 +91,9 @@ struct Capture {
 }
 
 fn source_live(world: &mirui::ecs::World, entity: Entity) -> bool {
-    world.get::<Source>(entity).is_some_and(|source| {
-        source
-            .state
-            .entries()
-            .entries()
-            .any(|(member, _)| member == source.member)
-    })
+    world
+        .get::<Source>(entity)
+        .is_some_and(|source| source.state.entries().get_by_id(source.member).is_some())
 }
 
 fn pixel_aligned(layout: Rect, local: Rect, scale: Fixed) -> bool {
@@ -191,12 +187,7 @@ impl Controller {
         for index in (0..self.entries.len()).rev() {
             if !source_live(&app.world, self.entries[index].entity) {
                 let entry = self.entries.remove(index);
-                if entry
-                    .state
-                    .entries()
-                    .entries()
-                    .any(|(member, _)| member == entry.member)
-                {
+                if entry.state.entries().get_by_id(entry.member).is_some() {
                     publish(&entry.picture, false, None);
                 }
                 self.retired.extend(entry.held);
@@ -332,7 +323,10 @@ impl Controller {
         });
         // Reading a prepared widget output does not add another present.
         let texture = if valid && aligned {
-            app.snapshot_widget(capture.entity).ok().flatten()
+            app.take_widget_output(capture.entity)
+                .ok()
+                .flatten()
+                .map(|owned| owned.into_texture())
         } else {
             None
         };

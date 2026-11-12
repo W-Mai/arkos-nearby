@@ -1,28 +1,45 @@
+use howff_platform::arkos;
 use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::bundle::{ALLOWED, Bundle};
+use crate::bundle::{ALLOWED, Asset, Bundle};
 use crate::compat::Device;
 use crate::content::digest;
-use crate::system::{mkdir, private_write, random_id, read, write};
+use crate::system::read;
 use crate::{Result, require};
+
+mod transaction;
+use transaction::{Change, Layout, recover_transaction, transact};
 
 pub const ORIGINAL_SHA: &str = "4d36f0cbab754991eb002b47ba719b9f0986f6ab0f9e66d6830ff8a2e159ab44";
 const START: &[u8] = b"if [ \"$?\" -eq \"10\" ]; then\n";
 const END: &[u8] = b"if [ -f \"/boot/rk3566.dtb\" ]";
-pub const LEGACY_BLOCK:&[u8]=b"if [ \"$?\" -eq \"10\" ]; then\n  # ARKOS_NEARBY_X_BEGIN\n  sudo -n /opt/arkos-nearby/arkos-nearby menu --frontend \"$emulator\" -- \"$@\"\n  result=$?\n  if [ \"$result\" -ne \"230\" ]; then\n    exit \"$result\"\n  fi\n  # ARKOS_NEARBY_X_END\nfi\n\n";
-pub const BLOCK: &[u8] = include_bytes!("launch-wrapper.sh");
-pub const ENTRY: &[u8] = b"#!/bin/sh\nexec sudo -n /opt/arkos-nearby/arkos-nearby manual\n";
-const ENTRY_PATH: &str = "opt/system/Nearby Multiplayer.sh";
-const LAUNCHER_PATH: &str = "opt/system/Nearby Launcher.sh";
-const LAUNCHER_ENTRY: &[u8] = b"#!/bin/sh\nexec sudo -n /opt/arkos-nearby/arkos-nearby launcher\n";
-const ROOT: &str = "opt/arkos-nearby";
+pub static BLOCK: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+    include_str!("launch-wrapper.sh")
+        .replace("@HOWFF_BINARY@", arkos::application::EXECUTABLE.as_str())
+        .replace("@FRONTEND_DIRECTORY@", arkos::firmware::FRONTENDS.as_str())
+        .into_bytes()
+});
+pub static ENTRY: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| entry("manual"));
+const ENTRY_PATH: &str = arkos::firmware::MULTIPLAYER_ENTRY.relative();
+const LAUNCHER_PATH: &str = arkos::firmware::LAUNCHER_ENTRY.relative();
+static LAUNCHER_ENTRY: std::sync::LazyLock<Vec<u8>> =
+    std::sync::LazyLock::new(|| entry("launcher"));
+const ROOT: &str = arkos::application::RELATIVE_ROOT;
+
+fn entry(command: &str) -> Vec<u8> {
+    format!(
+        "#!/bin/sh\nexec sudo -n {} {command}\n",
+        arkos::application::EXECUTABLE.as_str()
+    )
+    .into_bytes()
+}
 
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -46,10 +63,13 @@ pub fn patched(original: &[u8]) -> Result<Vec<u8>> {
     )?;
     let (start, end) = parts(original)?;
     let mut bytes = original[..start].to_vec();
-    bytes.extend_from_slice(BLOCK);
+    bytes.extend_from_slice(&BLOCK);
     bytes.extend_from_slice(
         String::from_utf8(original[end..].to_vec())?
-            .replace("/opt/retroarch/bin/${emulator}", "nearby_launch_frontend")
+            .replace(
+                &format!("{}/${{emulator}}", arkos::firmware::FRONTENDS.as_str()),
+                "howff_launch_frontend",
+            )
             .as_bytes(),
     );
     Ok(bytes)
@@ -62,65 +82,45 @@ pub fn owned_launcher(original: &[u8], current: &[u8]) -> Result<()> {
     if current == original {
         return Ok(());
     }
-    let (start, end) = parts(original)?;
-    let mut legacy = original[..start].to_vec();
-    legacy.extend_from_slice(LEGACY_BLOCK);
-    legacy.extend_from_slice(&original[end..]);
     require(
-        current == legacy || current == patched(original)?,
+        current == patched(original)?,
         "Launcher contains unrelated modifications",
     )
 }
 
-#[derive(Clone)]
-struct Layout {
-    prefix: PathBuf,
-}
-impl Layout {
-    fn system() -> Self {
-        Self { prefix: "/".into() }
-    }
-    fn path(&self, name: &str) -> PathBuf {
-        self.prefix.join(name)
-    }
-    fn file(&self, name: &str) -> PathBuf {
-        self.path(ROOT).join(name)
-    }
-}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
+    product: String,
     schema: u8,
     version: String,
     device: Device,
+    assets: Vec<Asset>,
     files: BTreeMap<String, String>,
-    wrappers: BTreeMap<String, String>,
+    wrappers: BTreeMap<String, Wrapper>,
     entry_sha256: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    launcher_sha256: Option<String>,
+    launcher_sha256: String,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Undo {
-    target: String,
-    backup: String,
-    existed: bool,
-    mode: u32,
+struct Wrapper {
     sha256: String,
-}
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Journal {
-    schema: u8,
-    directory: String,
-    undo: Vec<Undo>,
-}
-struct Change {
-    target: String,
-    data: Option<Vec<u8>>,
     mode: u32,
+    uid: u32,
+    gid: u32,
 }
-
+impl Wrapper {
+    fn capture(path: &Path, bytes: &[u8]) -> Result<Self> {
+        let metadata = fs::symlink_metadata(path)?;
+        require(metadata.is_file(), "Launcher is not a regular file")?;
+        Ok(Self {
+            sha256: hash(bytes),
+            mode: metadata.mode() & 0o7777,
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+        })
+    }
+}
 fn allowed_target(name: &str) -> bool {
     name == ENTRY_PATH
         || name == LAUNCHER_PATH
@@ -133,7 +133,7 @@ fn allowed_target(name: &str) -> bool {
             ALLOWED.contains(&file)
                 || matches!(
                     file,
-                    "arkos-nearby"
+                    "howff"
                         | "device.json"
                         | "pair.json"
                         | "install.json"
@@ -145,116 +145,63 @@ fn allowed_target(name: &str) -> bool {
                 )
         })
 }
-fn recover_transaction(layout: &Layout) -> Result<()> {
-    let file = layout.file("install-journal.json");
-    if !file.exists() {
-        return Ok(());
-    }
-    let journal: Journal = read(&file)?;
-    require(
-        journal.schema == 1
-            && journal.directory.starts_with(".transaction-")
-            && crate::protocol::hex(&journal.directory[13..], 32),
-        "Invalid installation transaction",
-    )?;
-    let directory = layout.file(&journal.directory);
-    for undo in journal.undo.iter().rev() {
-        require(
-            allowed_target(&undo.target) && undo.backup.bytes().all(|byte| byte.is_ascii_digit()),
-            "Invalid installation rollback path",
-        )?;
-        let target = layout.path(&undo.target);
-        if undo.existed {
-            let bytes = fs::read(directory.join(&undo.backup))?;
-            require(
-                hash(&bytes) == undo.sha256,
-                "Installation rollback checksum differs",
-            )?;
-            atomic(&target, &bytes, undo.mode)?;
-        } else if target.exists() {
-            require(!target.is_symlink(), "Unexpected rollback link")?;
-            fs::remove_file(target)?;
-        }
-    }
-    fs::remove_file(file)?;
-    fs::remove_dir_all(directory)?;
-    Ok(())
-}
-fn atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
-    require(!path.is_symlink(), "Refusing an unrelated symbolic link")?;
-    fs::create_dir_all(path.parent().ok_or("Install target has no parent")?)?;
-    let temporary = path.with_extension(format!("{}.install", random_id()?));
-    private_write(&temporary, bytes)?;
-    fs::set_permissions(&temporary, fs::Permissions::from_mode(mode))?;
-    fs::rename(temporary, path)?;
-    File::open(path.parent().unwrap())?.sync_all()?;
-    Ok(())
-}
-fn transact(layout: &Layout, changes: Vec<Change>) -> Result<()> {
-    let directory = format!(".transaction-{}", random_id()?);
-    mkdir(&layout.file(&directory))?;
-    let mut undo = Vec::new();
-    for (index, change) in changes.iter().enumerate() {
-        require(allowed_target(&change.target), "Invalid install target")?;
-        let path = layout.path(&change.target);
-        require(!path.is_symlink(), "Install target is an unrelated link")?;
-        let existed = path.is_file();
-        let (bytes, mode) = if existed {
-            (
-                fs::read(&path)?,
-                path.metadata()?.permissions().mode() & 0o777,
-            )
-        } else {
-            (vec![], 0o644)
-        };
-        let backup = index.to_string();
-        private_write(&layout.file(&directory).join(&backup), &bytes)?;
-        undo.push(Undo {
-            target: change.target.clone(),
-            backup,
-            existed,
-            mode,
-            sha256: hash(&bytes),
-        });
-    }
-    let journal = Journal {
-        schema: 1,
-        directory: directory.clone(),
-        undo,
-    };
-    write(&layout.file("install-journal.json"), &journal)?;
-    let result = (|| -> Result<()> {
-        for change in changes {
-            let path = layout.path(&change.target);
-            if let Some(bytes) = change.data {
-                atomic(&path, &bytes, change.mode)?;
-            } else if path.is_file() {
-                fs::remove_file(&path)?;
-                File::open(path.parent().unwrap())?.sync_all()?;
-            }
-        }
-        Ok(())
-    })();
-    if let Err(error) = result {
-        recover_transaction(layout)?;
-        return Err(error);
-    }
-    fs::remove_file(layout.file("install-journal.json"))?;
-    File::open(layout.path(ROOT))?.sync_all()?;
-    fs::remove_dir_all(layout.file(&directory))?;
-    Ok(())
-}
 fn verify_record(record: &Record, layout: &Layout) -> Result<()> {
-    require(record.schema == 1, "Unsupported installation record")?;
+    require(
+        record.product == "howff" && record.schema == 1,
+        "Unsupported installation record",
+    )?;
+    let installed: Device = read(&layout.file("device.json")?)?;
+    record.device.validate(&installed.mac)?;
+    installed.validate(&record.device.mac)?;
+    let mut expected = BTreeMap::new();
+    for asset in &record.assets {
+        require(
+            ALLOWED.contains(&asset.name.as_str())
+                && expected
+                    .insert(asset.name.clone(), asset.sha256.clone())
+                    .is_none()
+                && matches!(asset.mode, 0o644 | 0o755)
+                && asset.size > 0,
+            "Invalid recorded release asset",
+        )?;
+        let path = layout.file(&asset.name)?;
+        let metadata = fs::symlink_metadata(path)?;
+        require(
+            metadata.is_file()
+                && metadata.len() == asset.size
+                && metadata.mode() & 0o7777 == asset.mode,
+            "Installed release asset metadata differs",
+        )?;
+    }
+    expected.insert(
+        "howff".into(),
+        record
+            .files
+            .get("howff")
+            .ok_or("Missing recorded executable")?
+            .clone(),
+    );
+    require(
+        !record.assets.is_empty() && expected == record.files,
+        "Installation record does not match its release asset inventory",
+    )?;
+    require(
+        record.wrappers.contains_key("retroarch")
+            && record.wrappers.contains_key("retroarch32")
+            && record.wrappers.contains_key("emulationstation")
+                == layout.path(crate::home::LAUNCHER)?.is_file(),
+        "Installation record has an incomplete launcher inventory",
+    )?;
     for (name, expected) in &record.files {
         require(
-            ALLOWED.contains(&name.as_str())
-                || matches!(name.as_str(), "arkos-nearby" | "device.json"),
+            ALLOWED.contains(&name.as_str()) || name == "howff",
             "Installation record contains an unrelated file",
         )?;
-        let path = layout.file(name);
+        let path = layout.file(name)?;
         require(
-            path.is_file() && digest(&path)? == *expected,
+            path.is_file()
+                && digest(&path)? == *expected
+                && (name != "howff" || fs::metadata(&path)?.mode() & 0o7777 == 0o755),
             &format!("Installed file was changed externally: {name}"),
         )?;
     }
@@ -266,20 +213,46 @@ fn verify_record(record: &Record, layout: &Layout) -> Result<()> {
             ),
             "Invalid recorded launcher",
         )?;
+        let path = layout.path(&wrapper_path(name))?;
+        let actual = Wrapper::capture(&path, &fs::read(&path)?)?;
         require(
-            digest(&layout.path(&wrapper_path(name)))? == *expected,
+            actual.sha256 == expected.sha256
+                && actual.mode == expected.mode
+                && actual.uid == expected.uid
+                && actual.gid == expected.gid,
             "Launcher was changed externally",
         )?;
     }
-    if let Some(expected) = &record.launcher_sha256 {
-        require(
-            digest(&layout.path(LAUNCHER_PATH))? == *expected,
-            "Launcher entry was changed externally",
-        )?;
-    }
     require(
-        digest(&layout.path(ENTRY_PATH))? == record.entry_sha256,
+        digest(&layout.path(LAUNCHER_PATH)?)? == record.launcher_sha256
+            && fs::metadata(layout.path(LAUNCHER_PATH)?)?.mode() & 0o7777 == 0o755,
+        "Launcher entry was changed externally",
+    )?;
+    require(
+        digest(&layout.path(ENTRY_PATH)?)? == record.entry_sha256
+            && fs::metadata(layout.path(ENTRY_PATH)?)?.mode() & 0o7777 == 0o755,
         "Options entry was changed externally",
+    )
+}
+fn installed_record(layout: &Layout) -> Result<Record> {
+    let path = layout.file("install.json")?;
+    let metadata = fs::symlink_metadata(&path)?;
+    require(
+        metadata.is_file()
+            && metadata.uid() == unsafe { libc::geteuid() }
+            && metadata.mode() & 0o077 == 0
+            && metadata.len() <= 1024 * 1024,
+        "Invalid installation record ownership",
+    )?;
+    read(&path)
+}
+fn admit_existing(path: &Path, expected: &str) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    require(
+        metadata.is_file()
+            && metadata.uid() == unsafe { libc::geteuid() }
+            && digest(path)? == expected,
+        "Existing application file has unrelated contents or ownership",
     )
 }
 fn wrapper_path(name: &str) -> String {
@@ -328,19 +301,7 @@ fn check_idle_ui(update_parent: Option<u32>) -> Result<()> {
             "Exit the room menu before installing or uninstalling",
         )?;
     }
-    let old = Path::new("/run/arkos-nearby-x/session.json");
-    if old.is_file() {
-        let value: Value = read(old)?;
-        require(
-            matches!(value["phase"].as_str(), Some("closed" | "failed"))
-                && value["network_restored"] == true,
-            "Close the previous room before installing",
-        )?;
-    }
-    require(
-        !Path::new("/etc/systemd/system/arkos-nearby.service").exists(),
-        "Remove the old persistent multiplayer service before installing",
-    )
+    Ok(())
 }
 
 fn install_at(
@@ -349,12 +310,12 @@ fn install_at(
     bundle: &Bundle,
     executable: &Path,
 ) -> Result<Value> {
-    fs::create_dir_all(layout.path(ROOT))?;
     recover_transaction(layout)?;
-    let record_path = layout.file("install.json");
+    let record_path = layout.file("install.json")?;
     let previous = if record_path.exists() {
-        let record: Record = read(&record_path)?;
+        let record = installed_record(layout)?;
         verify_record(&record, layout)?;
+        record.device.validate(&device.mac)?;
         Some(record)
     } else {
         None
@@ -362,18 +323,20 @@ fn install_at(
     let mut changes = Vec::new();
     let mut wrappers = BTreeMap::new();
     for name in ["retroarch", "retroarch32"] {
-        let path = layout.path(&format!("usr/local/bin/{name}"));
+        let path = layout.path(&format!("usr/local/bin/{name}"))?;
         let current = fs::read(&path)?;
-        let backup = layout.file(&format!("original-launch/{name}"));
+        let backup = layout.file(&format!("original-launch/{name}"))?;
         let original = if backup.is_file() {
             fs::read(&backup)?
         } else {
             current.clone()
         };
-        if previous
-            .as_ref()
-            .is_some_and(|record| record.wrappers.get(name) == Some(&hash(&current)))
-        {
+        if previous.as_ref().is_some_and(|record| {
+            record
+                .wrappers
+                .get(name)
+                .is_some_and(|wrapper| wrapper.sha256 == hash(&current))
+        }) {
             require(
                 hash(&original) == ORIGINAL_SHA,
                 "Original launcher backup differs",
@@ -385,33 +348,28 @@ fn install_at(
             changes.push(Change {
                 target: format!("{ROOT}/original-launch/{name}"),
                 data: Some(original.clone()),
-                mode: 0o755,
+                mode: 0o600,
             });
         }
         let updated = patched(&original)?;
-        wrappers.insert(name.into(), hash(&updated));
+        let wrapper = Wrapper::capture(&path, &updated)?;
+        let mode = wrapper.mode;
+        wrappers.insert(name.into(), wrapper);
         changes.push(Change {
             target: format!("usr/local/bin/{name}"),
             data: Some(updated),
-            mode: 0o755,
+            mode,
         });
     }
-    let entry = layout.path(ENTRY_PATH);
-    let launcher = layout.path(LAUNCHER_PATH);
-    if previous
-        .as_ref()
-        .is_none_or(|record| record.launcher_sha256.is_none())
-        && launcher.exists()
-    {
-        require(
-            fs::read(&launcher)? == LAUNCHER_ENTRY,
-            "Launcher entry has unrelated contents",
-        )?;
+    let entry = layout.path(ENTRY_PATH)?;
+    let launcher = layout.path(LAUNCHER_PATH)?;
+    if previous.is_none() && launcher.exists() {
+        admit_existing(&launcher, &hash(&LAUNCHER_ENTRY))?;
     }
-    let home = layout.path(crate::home::LAUNCHER);
+    let home = layout.path(crate::home::LAUNCHER)?;
     if home.is_file() {
         let backup_name = "original-launch/emulationstation";
-        let backup = layout.file(backup_name);
+        let backup = layout.file(backup_name)?;
         let current = fs::read(&home)?;
         let original = if backup.is_file() {
             fs::read(&backup)?
@@ -423,7 +381,10 @@ fn install_at(
             current == original
                 || current == updated
                 || previous.as_ref().is_some_and(|record| {
-                    record.wrappers.get("emulationstation") == Some(&hash(&current))
+                    record
+                        .wrappers
+                        .get("emulationstation")
+                        .is_some_and(|wrapper| wrapper.sha256 == hash(&current))
                 }),
             "Home launcher contains unrelated edits",
         )?;
@@ -431,36 +392,26 @@ fn install_at(
             changes.push(Change {
                 target: format!("{ROOT}/{backup_name}"),
                 data: Some(original),
-                mode: 0o755,
+                mode: 0o600,
             });
         }
-        wrappers.insert("emulationstation".into(), hash(&updated));
+        let wrapper = Wrapper::capture(&home, &updated)?;
+        let mode = wrapper.mode;
+        wrappers.insert("emulationstation".into(), wrapper);
         changes.push(Change {
             target: crate::home::LAUNCHER.into(),
             data: Some(updated),
-            mode: 0o755,
+            mode,
         });
     }
     if previous.is_none() && entry.exists() {
-        let current = fs::read(&entry)?;
-        require(current==ENTRY || current==b"#!/bin/sh\nexec sudo -n /usr/bin/python3 /opt/arkos-nearby/nearby_manual.py\n","Options entry has unrelated contents")?;
+        admit_existing(&entry, &hash(&ENTRY))?;
     }
     let mut files = BTreeMap::new();
     for asset in &bundle.manifest.files {
-        let path = layout.file(&asset.name);
+        let path = layout.file(&asset.name)?;
         if previous.is_none() && path.exists() {
-            let legacy_gui = asset.name == "arkos-nearby-gui"
-                && digest(&path)?
-                    == "4f96c8b47671b325633648368a94568cb4e431195bca3bbb5fbaa64649c0e371";
-            let legacy_report = asset.name == "nearby-gui-build.json"
-                && read::<Value>(&path).is_ok_and(|report| {
-                    report["sha256"]
-                        == "4f96c8b47671b325633648368a94568cb4e431195bca3bbb5fbaa64649c0e371"
-                });
-            require(
-                digest(&path)? == asset.sha256 || legacy_gui || legacy_report,
-                "Existing native asset differs from this release",
-            )?;
+            admit_existing(&path, &asset.sha256)?;
         }
         files.insert(asset.name.clone(), asset.sha256.clone());
         changes.push(Change {
@@ -476,9 +427,13 @@ fn install_at(
             && u16::from_le_bytes(binary[18..20].try_into().unwrap()) == 183,
         "Installer must be the ARM64 release executable",
     )?;
-    files.insert("arkos-nearby".into(), hash(&binary));
+    let installed_binary = layout.file("howff")?;
+    if previous.is_none() && installed_binary.try_exists()? {
+        admit_existing(&installed_binary, &hash(&binary))?;
+    }
+    files.insert("howff".into(), hash(&binary));
     changes.push(Change {
-        target: format!("{ROOT}/arkos-nearby"),
+        target: format!("{ROOT}/howff"),
         data: Some(binary),
         mode: 0o755,
     });
@@ -488,7 +443,7 @@ fn install_at(
         data: Some(bytes),
         mode: 0o600,
     });
-    if !layout.file("pair.json").exists() {
+    if !layout.file("pair.json")?.exists() {
         let code = crate::pairing::generate()?;
         let (psk, group) = crate::pairing::credential(&code)?;
         changes.push(Change {
@@ -499,19 +454,21 @@ fn install_at(
             mode: 0o600,
         });
     } else {
-        crate::pairing::ensure_at(&layout.file("pair.json"))?;
+        crate::pairing::ensure_at(&layout.file("pair.json")?)?;
     }
     let record = Record {
+        product: "howff".into(),
         schema: 1,
         version: bundle.manifest.version.clone(),
         device,
+        assets: bundle.manifest.files.clone(),
         files,
         wrappers,
-        entry_sha256: hash(ENTRY),
-        launcher_sha256: Some(hash(LAUNCHER_ENTRY)),
+        entry_sha256: hash(&ENTRY),
+        launcher_sha256: hash(&LAUNCHER_ENTRY),
     };
     if let Some((key, metadata)) =
-        crate::identity::prepare_at(&layout.path(ROOT), &record.device.mac)?
+        crate::identity::prepare_at(&layout.path(ROOT)?, &record.device.mac)?
     {
         changes.push(Change {
             target: format!("{ROOT}/identity.pk8"),
@@ -580,11 +537,43 @@ fn install_with_parent(update_parent: Option<u32>) -> Result<Value> {
 
 fn uninstall_at(layout: &Layout) -> Result<Value> {
     recover_transaction(layout)?;
-    let record: Record = read(&layout.file("install.json"))?;
+    if !layout.file("install.json")?.try_exists()? {
+        for name in ["retroarch", "retroarch32", "emulationstation"] {
+            let path = layout.path(&wrapper_path(name))?;
+            if name == "emulationstation" && !path.try_exists()? {
+                continue;
+            }
+            require(
+                digest(&path)?
+                    == if name == "emulationstation" {
+                        crate::home::ORIGINAL_SHA
+                    } else {
+                        ORIGINAL_SHA
+                    },
+                "An unrecorded launcher still requires restoration",
+            )?;
+        }
+        for name in [ENTRY_PATH, LAUNCHER_PATH] {
+            require(
+                !layout.path(name)?.try_exists()?,
+                "An unrecorded Options entry remains",
+            )?;
+        }
+        for name in ALLOWED.iter().copied().chain(std::iter::once("howff")) {
+            require(
+                !layout.file(name)?.try_exists()?,
+                "Unrecorded application files remain",
+            )?;
+        }
+        return Ok(
+            json!({"action":"uninstall","installed":false,"launchers_restored":true,"network_changed":false}),
+        );
+    }
+    let record = installed_record(layout)?;
     verify_record(&record, layout)?;
     let mut changes = Vec::new();
-    for name in record.wrappers.keys() {
-        let original = fs::read(layout.file(&format!("original-launch/{name}")))?;
+    for (name, wrapper) in &record.wrappers {
+        let original = fs::read(layout.file(&format!("original-launch/{name}"))?)?;
         require(
             hash(&original)
                 == if name == "emulationstation" {
@@ -597,7 +586,7 @@ fn uninstall_at(layout: &Layout) -> Result<Value> {
         changes.push(Change {
             target: wrapper_path(name),
             data: Some(original),
-            mode: 0o755,
+            mode: wrapper.mode,
         });
     }
     changes.push(Change {
@@ -605,13 +594,11 @@ fn uninstall_at(layout: &Layout) -> Result<Value> {
         data: None,
         mode: 0o755,
     });
-    if record.launcher_sha256.is_some() {
-        changes.push(Change {
-            target: LAUNCHER_PATH.into(),
-            data: None,
-            mode: 0o755,
-        });
-    }
+    changes.push(Change {
+        target: LAUNCHER_PATH.into(),
+        data: None,
+        mode: 0o755,
+    });
     for name in record.files.keys() {
         changes.push(Change {
             target: format!("{ROOT}/{name}"),
@@ -626,17 +613,24 @@ fn uninstall_at(layout: &Layout) -> Result<Value> {
     });
     transact(layout, changes)?;
     Ok(
-        json!({"action":"uninstall","launchers_restored":true,"retained":["device.json","pair.json","identity.json","identity.pk8","friends.json","logs/","original-launch/","python-migration-backup/","saves/"],"network_changed":false}),
+        json!({"action":"uninstall","launchers_restored":true,"retained":["device.json","pair.json","identity.json","identity.pk8","friends.json","logs/","original-launch/","saves/"],"network_changed":false}),
     )
 }
 pub fn uninstall() -> Result<Value> {
     crate::session::identity(false)?;
     check_idle_ui(None)?;
-    crate::session::while_idle(|| uninstall_at(&Layout::system()))
+    crate::session::while_idle(|| {
+        let mut result = uninstall_at(&Layout::system())?;
+        match crate::platform::system::release_uninstalled_frontend() {
+            Ok(restarted) => result["frontend_restarted"] = restarted.into(),
+            Err(error) => result["frontend_restart_error"] = error.to_string().into(),
+        }
+        Ok(result)
+    })
 }
 pub fn installation_status() -> Result<Value> {
     let layout = Layout::system();
-    let record: Record = read(&layout.file("install.json"))?;
+    let record = installed_record(&layout)?;
     verify_record(&record, &layout)?;
     Ok(json!({"files":record.files.len(),"wrappers":record.wrappers.len()}))
 }
@@ -658,11 +652,7 @@ pub fn update(path: &Path) -> Result<Value> {
         true,
     )?;
     let manifest: crate::bundle::Manifest = serde_json::from_str(&text)?;
-    require(
-        manifest.profile == crate::compat::PROFILE
-            && manifest.kernel_sha256 == crate::compat::KERNEL_SHA,
-        "Downloaded release has no profile for this firmware",
-    )?;
+    manifest.validate_profile()?;
     let output = crate::system::command(binary.to_str().unwrap(), &["install"], 60, true)?;
     Ok(serde_json::from_str(&output)?)
 }
@@ -676,46 +666,126 @@ mod tests {
             "etc/passwd",
             "boot/Image",
             "usr/local/bin/netplay.sh",
-            "opt/arkos-nearby/../else",
-            "opt/arkos-nearby/pair.json/child",
+            "opt/howff/../else",
+            "opt/howff/pair.json/child",
         ] {
             assert!(!allowed_target(path));
         }
         assert!(allowed_target(ENTRY_PATH));
-        assert!(allowed_target("opt/arkos-nearby/assets/8188eu.ko"));
+        assert!(allowed_target("opt/howff/assets/8188eu.ko"));
     }
+
     #[test]
-    fn interrupted_owned_transaction_restores_the_previous_bytes() {
-        let root = std::env::temp_dir().join(format!("nearby-installer-{}", random_id().unwrap()));
+    fn installation_inventory_binds_files_wrappers_and_device_as_one_record() {
+        use crate::system::{random_id, write};
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("howff-record-{}", random_id().unwrap()));
+        fs::create_dir(&root).unwrap();
         let layout = Layout {
-            prefix: root.clone(),
+            prefix: root.canonicalize().unwrap(),
         };
-        mkdir(&layout.path(ROOT)).unwrap();
-        let path = layout.path(ENTRY_PATH);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, b"old").unwrap();
-        let directory = format!(".transaction-{}", random_id().unwrap());
-        mkdir(&layout.file(&directory)).unwrap();
-        private_write(&layout.file(&directory).join("0"), b"old").unwrap();
-        write(
-            &layout.file("install-journal.json"),
-            &Journal {
-                schema: 1,
-                directory,
-                undo: vec![Undo {
-                    target: ENTRY_PATH.into(),
-                    backup: "0".into(),
-                    existed: true,
-                    mode: 0o755,
-                    sha256: hash(b"old"),
-                }],
-            },
-        )
-        .unwrap();
-        fs::write(&path, b"new").unwrap();
-        recover_transaction(&layout).unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"old");
-        assert!(!layout.file("install-journal.json").exists());
+        let put = |name: &str, bytes: &[u8], mode| {
+            let path = layout.path(name).unwrap();
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            path
+        };
+        let device = Device {
+            schema: 1,
+            mac: "02:00:00:00:00:01".into(),
+            profile: crate::compat::PROFILE.into(),
+            kernel_sha256: crate::compat::KERNEL_SHA.into(),
+        };
+        put(
+            &format!("{ROOT}/device.json"),
+            &serde_json::to_vec(&device).unwrap(),
+            0o600,
+        );
+        put(&format!("{ROOT}/howff"), b"runtime", 0o755);
+        put(&format!("{ROOT}/howff-gui"), b"gui", 0o755);
+        let wrappers = ["retroarch", "retroarch32", "emulationstation"]
+            .into_iter()
+            .map(|name| {
+                let path = put(&wrapper_path(name), b"wrapper", 0o750);
+                (name.into(), Wrapper::capture(&path, b"wrapper").unwrap())
+            })
+            .collect();
+        put(ENTRY_PATH, &ENTRY, 0o755);
+        put(LAUNCHER_PATH, &LAUNCHER_ENTRY, 0o755);
+        let record = Record {
+            product: "howff".into(),
+            schema: 1,
+            version: "0.13.0".into(),
+            device,
+            assets: vec![Asset {
+                name: "howff-gui".into(),
+                sha256: hash(b"gui"),
+                size: 3,
+                offset: 0,
+                mode: 0o755,
+            }],
+            files: BTreeMap::from([
+                ("howff".into(), hash(b"runtime")),
+                ("howff-gui".into(), hash(b"gui")),
+            ]),
+            wrappers,
+            entry_sha256: hash(&ENTRY),
+            launcher_sha256: hash(&LAUNCHER_ENTRY),
+        };
+        verify_record(&record, &layout).unwrap();
+        for fault in 0..6 {
+            let mut invalid = record.clone();
+            match fault {
+                0 => {
+                    invalid.files.remove("howff-gui");
+                }
+                1 => {
+                    invalid.wrappers.remove("retroarch");
+                }
+                2 => {
+                    invalid.wrappers.remove("emulationstation");
+                }
+                3 => {
+                    invalid.device.mac = "02:00:00:00:00:02".into();
+                }
+                4 => {
+                    invalid.assets.push(invalid.assets[0].clone());
+                }
+                5 => {
+                    invalid.wrappers.get_mut("retroarch").unwrap().mode = 0o755;
+                }
+                _ => unreachable!(),
+            }
+            assert!(verify_record(&invalid, &layout).is_err());
+        }
+        let record_path = layout.file("install.json").unwrap();
+        write(&record_path, &record).unwrap();
+        installed_record(&layout).unwrap();
+        fs::set_permissions(record_path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(installed_record(&layout).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod path_contract {
+    #[test]
+    fn generated_entries_and_game_wrapper_use_one_howff_executable() {
+        let executable = howff_platform::arkos::application::EXECUTABLE.as_str();
+        for (bytes, command) in [
+            (&*super::ENTRY, "manual"),
+            (&*super::LAUNCHER_ENTRY, "launcher"),
+        ] {
+            assert_eq!(
+                bytes,
+                format!("#!/bin/sh\nexec sudo -n {executable} {command}\n").as_bytes()
+            );
+        }
+        let block = std::str::from_utf8(&super::BLOCK).unwrap();
+        assert!(block.contains(executable));
+        assert!(!block.contains("@HOWFF_BINARY@"));
+        assert!(!block.contains("@FRONTEND_DIRECTORY@"));
+        assert!(block.contains("howff_launch_frontend"));
     }
 }

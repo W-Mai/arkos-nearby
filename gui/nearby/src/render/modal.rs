@@ -1,9 +1,8 @@
 use super::{deck::Layer, state::DisplayRuntime};
 use mirui::app::RendererFactory;
-use mirui::core::resource::{ResourceHandle, ResourceManager};
 use mirui::prelude::*;
-use mirui::render::texture::Texture;
 use mirui::surface::Surface;
+use mirui::ui::widgets::image::ImageSource;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -37,16 +36,26 @@ pub(super) struct Modal {
     #[observe]
     pub token: Option<u64>,
     #[observe]
+    pub source: ImageSource,
+    #[observe]
     pub phase: Phase,
 }
 
 #[model]
 impl Modal {
-    fn publish(&mut self, phase: Phase, hidden: bool, paused: bool, token: Option<u64>) {
+    fn publish(
+        &mut self,
+        phase: Phase,
+        hidden: bool,
+        paused: bool,
+        token: Option<u64>,
+        source: ImageSource,
+    ) {
         self.phase = phase;
         self.hidden = hidden;
         self.paused = paused;
         self.token = token;
+        self.source = source;
     }
 }
 
@@ -131,7 +140,6 @@ struct Controller {
     captures: u64,
     held: Option<Held>,
     pending: Option<Pending>,
-    retired: Vec<String>,
     profile: bool,
     profile_events: u32,
     frames: u64,
@@ -147,8 +155,7 @@ struct Controller {
 
 struct Held {
     revision: u64,
-    token: String,
-    _handle: ResourceHandle<Texture<'static>>,
+    source: ImageSource,
 }
 
 struct Pending {
@@ -177,7 +184,6 @@ pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
         captures: 0,
         held: None,
         pending: None,
-        retired: Vec::new(),
         profile: std::env::var("NEARBY_MODAL_PROFILE").as_deref() == Ok("1"),
         profile_events: 0,
         frames: 0,
@@ -239,6 +245,9 @@ impl Controller {
             hidden,
             paused,
             self.held.as_ref().map(|image| image.revision),
+            self.held
+                .as_ref()
+                .map_or_else(ImageSource::default, |image| image.source.clone()),
         );
     }
 
@@ -258,7 +267,7 @@ impl Controller {
                 display.catalog.animation_counts(),
             ]
         });
-        println!(
+        eprintln!(
             "{}",
             serde_json::json!({
                 "modal_profile": true,
@@ -281,15 +290,8 @@ impl Controller {
         );
     }
 
-    fn release<B: Surface, F: RendererFactory<B>>(&mut self, app: &App<B, F>) {
-        if let Some(image) = self.held.take() {
-            self.retired.push(image.token);
-        }
-        if let Some(textures) = app.world.resource::<ResourceManager<Texture<'static>>>() {
-            for token in self.retired.drain(..) {
-                textures.remove_token(&token);
-            }
-        }
+    fn release(&mut self) {
+        self.held.take();
     }
 
     fn before<B: Surface, F: RendererFactory<B>>(&mut self, app: &mut App<B, F>) {
@@ -311,13 +313,10 @@ impl Controller {
         }
         if let Some(pending) = self.pending.take() {
             if wanted && pending.generation == self.generation && pending.stamp == current {
-                if let Some(previous) = self.held.replace(pending.image) {
-                    self.retired.push(previous.token);
-                }
+                self.held.replace(pending.image);
                 self.publish(Phase::Suspended, true, true);
                 self.committing = true;
             } else {
-                self.retired.push(pending.image.token);
                 self.attempted = false;
                 self.log(app, "capture_discarded", None);
             }
@@ -385,7 +384,18 @@ impl Controller {
         if self.mode == Mode::Freeze && self.model.phase() == Phase::Capturing {
             self.capture_calls += 1;
             let start = Instant::now();
-            let captured = app.snapshot_widget(root);
+            // A refused offscreen allocation has no completed image to copy.
+            // Keep the live background instead of recursively rendering a frame.
+            let prepared = app
+                .world
+                .resource::<mirui::ui::Outputs<mirui::ui::WidgetTexture>>()
+                .is_some_and(|outputs| outputs.get(root).is_some());
+            let captured = if prepared {
+                app.take_widget_output(root)
+                    .map(|output| output.map(|owned| owned.into_texture()))
+            } else {
+                Ok(None)
+            };
             self.snapshot_ms = Some(start.elapsed().as_secs_f64() * 1000.0);
             app.world.remove::<mirui::ui::OffscreenRender>(root);
             let texture = match captured {
@@ -403,21 +413,16 @@ impl Controller {
             let event = if let Some(texture) = texture {
                 self.revision += 1;
                 let dimensions = (texture.width(), texture.height());
-                let texture = texture.with_cache_revision(self.revision);
-                let token = texture_token(self.revision);
-                let textures = app
-                    .world
-                    .resource::<ResourceManager<Texture<'static>>>()
-                    .ok_or("Modal texture manager is missing")?;
-                textures.add_factory(token.clone(), move || Some(texture));
-                let handle = textures.load(token.clone());
-                let admitted = handle.get();
+                let source = ImageSource::from(texture.with_cache_revision(self.revision));
+                let admitted = match &source {
+                    ImageSource::Handle(handle) => handle.get(),
+                    _ => unreachable!("owned modal snapshots always use texture handles"),
+                };
                 if (admitted.width(), admitted.height()) == dimensions {
                     self.pending = Some(Pending {
                         image: Held {
                             revision: self.revision,
-                            token,
-                            _handle: handle,
+                            source,
                         },
                         generation: self.capture_generation,
                         stamp: stamp(app),
@@ -426,13 +431,12 @@ impl Controller {
                     self.publish(Phase::Ready, self.model.hidden(), true);
                     "capture_ready"
                 } else {
-                    textures.remove_token(&token);
-                    self.release(app);
+                    self.release();
                     self.publish(Phase::Live, false, false);
                     "capture_rejected"
                 }
             } else {
-                self.release(app);
+                self.release();
                 self.publish(Phase::Live, false, false);
                 "capture_failed"
             };
@@ -442,15 +446,11 @@ impl Controller {
             // Validate restored geometry before retiring the covering image.
             app.dirty_regions()
                 .map_err(|error| format!("Modal restore: {error:?}"))?;
-            self.release(app);
+            self.release();
             self.publish(Phase::Live, false, false);
             app.render_dirty()
                 .map_err(|error| format!("Modal restore commit: {error:?}"))?;
             self.log(app, "restored", None);
-        } else if let Some(textures) = app.world.resource::<ResourceManager<Texture<'static>>>() {
-            for token in self.retired.drain(..) {
-                textures.remove_token(&token);
-            }
         }
         self.sync_background(app);
         self.frames += 1;
@@ -459,10 +459,6 @@ impl Controller {
         }
         Ok(())
     }
-}
-
-pub(super) fn texture_token(revision: u64) -> String {
-    format!("nearby-modal-{revision}")
 }
 
 pub(super) fn before_tick<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
@@ -483,4 +479,44 @@ pub(super) fn after_tick<B: Surface, F: RendererFactory<B>>(
         .resource::<Runtime>()
         .map(|runtime| runtime.controller.clone());
     controller.map_or(Ok(()), |controller| controller.borrow_mut().after(app))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mirui::app::plugin::Plugin;
+    use mirui::ecs::World;
+
+    struct PaintCount(Rc<Cell<usize>>);
+
+    impl<B: Surface, F: RendererFactory<B>> Plugin<B, F> for PaintCount {
+        fn build(&mut self, _app: &mut App<B, F>) {}
+
+        fn pre_render(&mut self, _world: &mut World) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    #[test]
+    fn unavailable_capture_keeps_background_live_without_a_nested_frame() {
+        let mut app = App::headless(640, 480);
+        app.with_default_widgets().with_default_systems();
+        crate::render::install(&mut app).unwrap();
+        app.with_offscreen_pool_budget(0);
+        let root = app.spawn_root().id();
+        app.world.insert(root, BackgroundRoot);
+        let calls = Rc::new(Cell::new(0));
+        app.add_plugin(PaintCount(calls.clone()));
+        let runtime = app.world.resource::<Runtime>().unwrap();
+        let controller = runtime.controller.clone();
+        let model = runtime.model.clone();
+        model.publish(Phase::Capturing, false, false, None, ImageSource::default());
+        controller.borrow_mut().after(&mut app).unwrap();
+        assert_eq!(calls.get(), 0);
+        assert_eq!(model.phase(), Phase::Live);
+        assert!(!model.hidden());
+        assert!(!model.paused());
+        assert!(model.token().is_none());
+        assert_eq!(model.source(), ImageSource::default());
+    }
 }

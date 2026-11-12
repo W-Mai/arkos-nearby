@@ -1,3 +1,4 @@
+use howff_platform::arkos;
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::fs::File;
@@ -211,10 +212,10 @@ pub fn detect() -> Facts {
     for file in [
         "/usr/sbin/dnsmasq",
         "/usr/sbin/dhclient",
-        "/opt/inttools/gptokeyb",
-        "/opt/inttools/gamecontrollerdb.txt",
-        "/etc/systemd/system/emulationstation.service",
-        "/opt/retroarch/bin/retroarch",
+        arkos::firmware::INPUT_MAPPER.as_str(),
+        arkos::firmware::CONTROLLERS.as_str(),
+        arkos::firmware::ES_UNIT,
+        arkos::firmware::RETROARCH.as_str(),
         "/lib/ld-linux-aarch64.so.1",
         "/lib/ld-linux-armhf.so.3",
         "/usr/lib/aarch64-linux-gnu/libnl-3.so.200",
@@ -258,7 +259,7 @@ pub fn identity(force: bool) -> Result<String> {
         .trim()
         .to_ascii_lowercase();
     require(valid_mac(&owner), "No valid local wireless address")?;
-    let path = Path::new(crate::context::INSTALL).join("device.json");
+    let path = arkos::application::DEVICE.path().to_path_buf();
     if path.is_file() {
         let info = path.metadata()?;
         require(

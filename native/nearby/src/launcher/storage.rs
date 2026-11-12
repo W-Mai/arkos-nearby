@@ -1,5 +1,6 @@
 use crate::{Result, require};
-use nearby_menu::details::{Document, Fact, FileStatus, Row};
+use howff_menu::details::{Document, Fact, FileStatus, Row};
+use howff_platform::arkos;
 use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::fs;
@@ -102,8 +103,8 @@ fn bytes(value: u64) -> String {
 pub(super) fn read() -> Document {
     let roots = [
         ("系统分区", Path::new("/")),
-        ("游戏目录", Path::new("/roms")),
-        ("扩展游戏目录", Path::new("/roms2")),
+        ("游戏目录", Path::new(arkos::ROM_ROOTS[0])),
+        ("扩展游戏目录", Path::new(arkos::ROM_ROOTS[1])),
     ];
     let roots: Vec<_> = roots
         .into_iter()

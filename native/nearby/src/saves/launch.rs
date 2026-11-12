@@ -1,9 +1,10 @@
 use crate::{Result, require};
+use howff_platform::arkos;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-pub const BASE: &str = "/run/arkos-nearby-save-launch";
+pub const BASE: &str = arkos::transient::SAVE_LAUNCH.as_str();
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Intent {
@@ -66,7 +67,7 @@ pub fn take(args: &mut Vec<String>) -> Result<Option<String>> {
     let mut id = None;
     let mut clean = Vec::new();
     for arg in std::mem::take(args) {
-        if let Some(value) = arg.strip_prefix("--nearby-save-ticket=") {
+        if let Some(value) = arg.strip_prefix("--howff-save-ticket=") {
             require(
                 id.is_none() && crate::protocol::hex(value, 32),
                 "存档启动凭据无效",
@@ -204,12 +205,12 @@ mod tests {
             "-e".into(),
             "6".into(),
             "/roms/a'$(x).zip".into(),
-            format!("--nearby-save-ticket={}", "a".repeat(32)),
+            format!("--howff-save-ticket={}", "a".repeat(32)),
         ];
         assert_eq!(take(&mut args).unwrap(), Some("a".repeat(32)));
         strip(&mut args, "-e", "--entryslot");
         assert_eq!(args, ["/roms/a'$(x).zip"]);
-        args.push("--nearby-save-ticket=bad".into());
+        args.push("--howff-save-ticket=bad".into());
         assert!(take(&mut args).is_err());
     }
 }
