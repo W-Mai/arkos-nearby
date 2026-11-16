@@ -18,12 +18,16 @@ fn create_page(
 ) -> Entity {
     let route = *event.route();
     #[cfg(any(target_os = "linux", test))]
+    super::response::route_lifecycle("create_begin", route, state.clone());
+    #[cfg(any(target_os = "linux", test))]
     super::response::stage("room_mount_begin");
     let entity = ui! {
-        mounted_page (route, state, metrics)
+        mounted_page (route, state.clone(), metrics)
     };
     #[cfg(any(target_os = "linux", test))]
     super::response::stage("room_mount_end");
+    #[cfg(any(target_os = "linux", test))]
+    super::response::route_lifecycle("create_end", route, state.clone());
     entity
 }
 

@@ -653,6 +653,18 @@
     "included": true
   },
   {
+    "name": "itoa",
+    "version": "1.0.19",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/dtolnay/itoa",
+    "checksum": "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4",
+    "license_files": [
+      "docs/licenses/rust/itoa-1.0.19/LICENSE-APACHE",
+      "docs/licenses/rust/itoa-1.0.19/LICENSE-MIT"
+    ],
+    "included": true
+  },
+  {
     "name": "jni",
     "version": "0.22.4",
     "license": "MIT OR Apache-2.0",
@@ -1320,6 +1332,18 @@
     "included": true
   },
   {
+    "name": "serde_json",
+    "version": "1.0.154",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/serde-rs/json",
+    "checksum": "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6",
+    "license_files": [
+      "docs/licenses/rust/serde_json-1.0.154/LICENSE-APACHE",
+      "docs/licenses/rust/serde_json-1.0.154/LICENSE-MIT"
+    ],
+    "included": true
+  },
+  {
     "name": "sha2",
     "version": "0.10.9",
     "license": "MIT OR Apache-2.0",
@@ -1451,6 +1475,18 @@
   },
   {
     "name": "syn",
+    "version": "3.0.10",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/dtolnay/syn",
+    "checksum": "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79",
+    "license_files": [
+      "docs/licenses/rust/syn-3.0.10/LICENSE-APACHE",
+      "docs/licenses/rust/syn-3.0.10/LICENSE-MIT"
+    ],
+    "included": true
+  },
+  {
+    "name": "syn",
     "version": "3.0.6",
     "license": "MIT OR Apache-2.0",
     "repository": "https://github.com/dtolnay/syn",
@@ -1565,6 +1601,19 @@
       "docs/licenses/rust/unicode-ident-1.0.26/LICENSE-APACHE",
       "docs/licenses/rust/unicode-ident-1.0.26/LICENSE-MIT",
       "docs/licenses/rust/unicode-ident-1.0.26/LICENSE-UNICODE"
+    ],
+    "included": true
+  },
+  {
+    "name": "unicode-ident",
+    "version": "1.0.27",
+    "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+    "repository": "https://github.com/dtolnay/unicode-ident",
+    "checksum": "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563",
+    "license_files": [
+      "docs/licenses/rust/unicode-ident-1.0.27/LICENSE-APACHE",
+      "docs/licenses/rust/unicode-ident-1.0.27/LICENSE-MIT",
+      "docs/licenses/rust/unicode-ident-1.0.27/LICENSE-UNICODE"
     ],
     "included": true
   },

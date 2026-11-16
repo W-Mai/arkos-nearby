@@ -2,7 +2,7 @@
 
 ## 工具与资产
 
-源码包含运行程序、GUI、核心查询器、联机压缩辅助库和 Nestopia 状态恢复补丁。构建资产与源码版本配套，归档文件名和 SHA-256 见 [assets.json](../release/assets.json)，嵌入文件清单见 [manifest.json](../release/manifest.json)。发行标签对应的构建资产和上游源码可从 [GitHub Releases](https://github.com/W-Mai/arkos-nearby/releases) 获取，组件来源见 [第三方组件](third-party.md)。
+源码包含运行程序、GUI、ArkOS 平台插件、核心查询器、联机压缩辅助库和 Nestopia 状态恢复补丁。构建资产与源码版本配套，归档文件名和 SHA-256 见 [assets.json](../release/assets.json)，嵌入文件清单见 [manifest.json](../release/manifest.json)。发行标签对应的构建资产和上游源码可从 [GitHub Releases](https://github.com/W-Mai/arkos-nearby/releases) 获取，组件来源见 [第三方组件](third-party.md)。
 
 需要 Python 3.11+、Rust 1.97.0（界面）和 1.92.0（运行程序）、ARM64 musl 标准库、rustfmt、clippy、clang、llvm-ar 和 Ruff。宿主可以是 Linux 或 macOS；交叉构建使用 Rust 自带的 rust-lld。先准备这些工具，再执行下面的构建命令。
 
@@ -42,6 +42,10 @@ Options 和主页 FN + X 使用直接入口，游戏启动前的 X 入口携带�
 
 准备发行归档时，先完成构建和校验，再执行 `python3 scripts/package.py --binary dist/howff --expected-sha256 VERIFIED_SHA256`。将 `VERIFIED_SHA256` 替换为构建结果的 SHA-256。程序核对摘要与 ARM64 ELF 类型，打包可执行文件、安装脚本、使用说明、校验值和版本清单。组件许可证随可执行文件安装。
 
+## 平台插件
+
+`native/platform-plugin/` 提供独立的 ArkOS 平台进程，`native/nearby-platform/` 定义插件协议与类型化快照。发行资产包含插件程序、签名 manifest 和可信公钥，常规源码构建复用这组已签名资产。运行程序检查平台插件的签名、架构和 Mirui ABI，再读取目录、服务与启动配方。官方签名私钥不包含在源码与发行包中。
+
 ## 质量检查
 
 ```sh
@@ -56,7 +60,7 @@ CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path
 
 重新生成字库时，将来源记录中的 WOFF 解码为 OpenType 文件，使用 ICU 0.11.1 执行 `icu bake-font nearby-pixel.otf --charset-file gui/nearby/assets/nearby-menu-charset.txt --size 12 --bit-depth 1 --format gray -O /tmp/nearby-font`；将字号改为 24 生成标题字库。将产物分别命名为 `nearby-menu-12.mirx` 和 `nearby-title-24.mirx`，并更新来源记录中的摘要与大小。
 
-发行版使用 SDL2/GLES 界面；静态链接构建命令及显示检查见 [GPU 界面构建](gpu-rendering.md)。`scripts/build.py build` 生成 framebuffer 安装程序。
+发行版使用 SDL2/GLES 界面；静态链接构建命令及显示检查见 [GPU 界面构建](gpu-rendering.md)。`scripts/build.py build` 复用准备资产中的界面程序。
 
 ```sh
 python3 scripts/build_howff_gui.py snapshot --view docs/screenshots/views/room-choice.json --output /tmp/arkos-room-choice.png

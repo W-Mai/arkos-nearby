@@ -1,12 +1,17 @@
 //! Platform-owned locations shared by the runtime and interface.
 
 pub mod arkos;
+pub mod backend;
 pub mod content;
+pub mod core;
+pub mod ipc;
+pub mod plugin;
 
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Storage ownership, independent of directories shared on a device.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub enum Storage {
     Program,
     Configuration,

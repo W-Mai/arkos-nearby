@@ -1,7 +1,7 @@
 {
   "product": "howff",
   "schema": 1,
-  "version": "0.13.0",
+  "version": "0.14.0",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
   "gui_version": "0.56.0",
@@ -78,149 +78,170 @@
     },
     {
       "name": "core-inspect-build.json",
-      "sha256": "6c06588204bfabcae6318e6cbe5374abc3b61bc480f622910bdef237063b7b9e",
+      "sha256": "0c36a79f454d4b60e187234258e35eb26467e61e6a5665d9ff031bcfd3844d98",
       "size": 2275,
       "offset": 7524080,
       "mode": 420
     },
     {
       "name": "core-inspect32",
-      "sha256": "4c44440e83846ba69a5aede1a4637697aea1c88ddb80098cd66ca67faac9ab2d",
-      "size": 6748,
+      "sha256": "93d4ebbbe88642c04bd4b0cbf8168d24a3265dccbb7d8bf3c5709f504fb3529c",
+      "size": 6768,
       "offset": 7526355,
       "mode": 493
     },
     {
       "name": "core-inspect64",
-      "sha256": "3a9c414c0c5d3ae44b7f1944f4e5c578c9b0eb1ef2041bb6367b402f73e78610",
-      "size": 8984,
-      "offset": 7533103,
+      "sha256": "eff8d3b31f8a32a94cc697c48efd05e4364375ca7c03d1f8ef7afb3fcf2373c0",
+      "size": 9016,
+      "offset": 7533123,
       "mode": 493
     },
     {
       "name": "core-probe-build.json",
-      "sha256": "f30989af922f604b17701d20c2e385a1aedbd2505d5b6a4184cd16692e2d1537",
+      "sha256": "58a388725d7b8b89b9c5a57a120ed52e89195a13083a77f29485d3ec4d9dcc7e",
       "size": 1725,
-      "offset": 7542087,
+      "offset": 7542139,
       "mode": 420
     },
     {
       "name": "core-probe64",
-      "sha256": "b19a9387a7e52ea9bcedd0d39a08d55fb48c253f30e28656c9ef921b4d5fbc94",
-      "size": 13240,
-      "offset": 7543812,
+      "sha256": "c2ba9413b9df23b3d5e8e769f78102646e7d62c942919fc1fb099133b90d14ef",
+      "size": 13336,
+      "offset": 7543864,
       "mode": 493
     },
     {
       "name": "cores/nestopia_nearby_libretro.so",
       "sha256": "2c276c3338e7df8105213f7c2008a8e2a0cd307a89f40f19fbde05fc2c84f430",
       "size": 5272832,
-      "offset": 7557052,
+      "offset": 7557200,
       "mode": 420
     },
     {
       "name": "cores/owned-core-build.json",
       "sha256": "d11aae219cff2b035edf127985b8155828ba135507a2dd4c52846b0b9dc88e0d",
       "size": 2702,
-      "offset": 12829884,
+      "offset": 12830032,
       "mode": 420
     },
     {
       "name": "font/OFL.txt",
       "sha256": "6b3abf023bf86aeabb68e66894d194cd9760aea0ddf479bf42464093e40f69f8",
       "size": 18641,
-      "offset": 12832586,
+      "offset": 12832734,
       "mode": 420
     },
     {
       "name": "font/font-source.json",
       "sha256": "ef983d3d68a7e29e7a26e0ffad294de6eb56abb4ad14744c664193c9f8320ea5",
       "size": 1247,
-      "offset": 12851227,
+      "offset": 12851375,
       "mode": 420
     },
     {
       "name": "howff-gui",
-      "sha256": "d80acc881ebd5ee64c44c82996dbfc1376caf32fc4d7f8aaa8abcdab10163fa4",
-      "size": 25083912,
-      "offset": 12852474,
+      "sha256": "faf13979927085cca24077c693befab48bbc80790afb67727fa5d050b690807e",
+      "size": 25085384,
+      "offset": 12852622,
       "mode": 493
     },
     {
       "name": "howff-gui-build.json",
-      "sha256": "fbd311a8f140c1b6341347a93ebe1301e81691e50ca8c71d62685c89e5f263d6",
+      "sha256": "2c347767dde7c8d232c9d114a77e7597465b83a93d44d4ee0dca7115c462e1da",
       "size": 772,
-      "offset": 37936386,
+      "offset": 37938006,
       "mode": 420
     },
     {
       "name": "licenses/NOTICE.txt",
       "sha256": "f9dd8977c714c32a682cd27c633a3a9a36ccdfc63b9cd10a26983ab00752b27b",
       "size": 10116,
-      "offset": 37937158,
+      "offset": 37938778,
       "mode": 420
     },
     {
       "name": "licenses/core-probe-ABI-LICENSE.txt",
       "sha256": "33fde21f1c1da14841c616e1d668435965efea826626a8cfe1f85968d7b9fbb9",
       "size": 1067,
-      "offset": 37947274,
+      "offset": 37948894,
       "mode": 420
     },
     {
       "name": "licenses/driver-COPYING.txt",
       "sha256": "af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7",
       "size": 18693,
-      "offset": 37948341,
+      "offset": 37949961,
       "mode": 420
     },
     {
       "name": "licenses/gcc-runtime-COPYING.txt",
       "sha256": "6e5031de1c9c6a678cad8d05046ae6d43f6131c72bf97506a15ac930b6b44988",
       "size": 38536,
-      "offset": 37967034,
+      "offset": 37968654,
       "mode": 420
     },
     {
       "name": "licenses/nestopia-COPYING.txt",
       "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
       "size": 15122,
-      "offset": 38005570,
+      "offset": 38007190,
       "mode": 420
     },
     {
       "name": "licenses/netplay-compression-COPYING.txt",
       "sha256": "d3891b7bea9affc9738fcedf0d2cac581f743092f35d5fe5c3de65eecd28cec1",
       "size": 2444,
-      "offset": 38020692,
+      "offset": 38022312,
       "mode": 420
     },
     {
       "name": "licenses/pinyin-LICENSE.txt",
       "sha256": "dbee1336f5286b3b26fb6b4a71ab1e8d89f80b4073d9c8d2b2b33c06abc3bcbe",
       "size": 1077,
-      "offset": 38023136,
+      "offset": 38024756,
       "mode": 420
     },
     {
       "name": "licenses/ring-LICENSE.txt",
       "sha256": "5fb6716f68e863ec2fdacbe3aa1d0f16e84e5f29e1ab96182f2b62383a2cef4c",
       "size": 16104,
-      "offset": 38024213,
+      "offset": 38025833,
       "mode": 420
     },
     {
       "name": "licenses/wpa-COPYING.txt",
       "sha256": "b878788aa037728ade1983e7a6c9b425ab077382cc1dc5b48f7bb3771c4aa5c3",
       "size": 1866,
-      "offset": 38040317,
+      "offset": 38041937,
+      "mode": 420
+    },
+    {
+      "name": "plugins/arkos-platform/howff-platform-plugin",
+      "sha256": "b1cd95bfe80f5a3739d980899b9bbb75122b3ce0a835fff82d1fd825399ff951",
+      "size": 834720,
+      "offset": 38043803,
+      "mode": 493
+    },
+    {
+      "name": "plugins/arkos-platform/plugin.json",
+      "sha256": "10e854452cf4ecae8dd8eb31a4327b0ea49d5b41c0c4bd856ee68d92a31157a5",
+      "size": 444,
+      "offset": 38878523,
+      "mode": 420
+    },
+    {
+      "name": "plugins/arkos-platform/trust-key.bin",
+      "sha256": "5d5ed8e88164e912c3e1f9f5c7ae3b2e73abf963ced5888efe6187ccc9a2a36e",
+      "size": 32,
+      "offset": 38878967,
       "mode": 420
     },
     {
       "name": "release-sources.json",
-      "sha256": "a16431dcc71bb130fa2c739715d7a65530aa81d7f35cef830a97b6059d7997b6",
-      "size": 8280,
-      "offset": 38042183,
+      "sha256": "5d599283408dd58f72ecb6eebaded6089c58008cb1312814e4f9442c3c15ae59",
+      "size": 8731,
+      "offset": 38878999,
       "mode": 420
     }
   ]

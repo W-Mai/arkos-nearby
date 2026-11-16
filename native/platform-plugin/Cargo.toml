@@ -1,0 +1,10 @@
+[package]
+name = "howff-platform-plugin"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[dependencies]
+howff-platform = { path = "../nearby-platform" }
+serde_json = "1"

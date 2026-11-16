@@ -15,6 +15,8 @@ use crate::{Result, require};
 
 pub const PROFILE: &str = "arkos4clone-4.4.189-rtl8188eu";
 pub const KERNEL_SHA: &str = "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a";
+pub const GUI_ABI: &str = "howff-gui-1";
+pub const MIRUI_ABI: &str = "mirui-0.56.0";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

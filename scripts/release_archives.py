@@ -8,7 +8,18 @@ from pathlib import Path
 import tarfile
 
 
-def write(output, release, binary, *, version, target, profile, kernel_sha256):
+def write(
+    output,
+    release,
+    binary,
+    *,
+    version,
+    target,
+    profile,
+    kernel_sha256,
+    gui_abi,
+    mirui_abi,
+):
     output, release = Path(output), Path(release)
     output.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(binary).hexdigest()
@@ -21,6 +32,8 @@ def write(output, release, binary, *, version, target, profile, kernel_sha256):
             "target": target,
             "profile": profile,
             "kernel_sha256": kernel_sha256,
+            "gui_abi": gui_abi,
+            "mirui_abi": mirui_abi,
             "executable_sha256": digest,
         },
         separators=(",", ":"),

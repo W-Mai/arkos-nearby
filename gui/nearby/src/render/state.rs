@@ -78,6 +78,22 @@ fn renders_rows(role: DisplayRole, view: &View) -> bool {
     role != DisplayRole::Primary || !(view.launcher.enabled || view.return_to_launcher)
 }
 
+fn platform_items_match(
+    items: &[(usize, super::consoles::Platform)],
+    entries: &[crate::model::GameRow],
+    limit: usize,
+) -> bool {
+    let entries = entries.iter().take(limit);
+    items.len() == entries.len()
+        && items
+            .iter()
+            .zip(entries)
+            .enumerate()
+            .all(|(index, ((slot, platform), row))| {
+                *slot == index && *platform == super::consoles::Platform::from_id(&row.icon)
+            })
+}
+
 #[derive(Clone, Copy, Default)]
 pub(super) struct Changes(u16);
 
@@ -286,16 +302,20 @@ impl DisplayState {
                 && view.page == Page::Games
                 && view.library.kind == crate::model::LibraryKind::Platforms
             {
-                changes.update(
-                    &mut self.platform_preview.items,
-                    view.entries
-                        .iter()
-                        .take(limit)
-                        .enumerate()
-                        .map(|(index, row)| (index, super::consoles::Platform::from_id(&row.icon)))
-                        .collect(),
-                    Changes::PLATFORM_PREVIEWS,
-                );
+                if !platform_items_match(&self.platform_preview.items, &view.entries, limit) {
+                    changes.update(
+                        &mut self.platform_preview.items,
+                        view.entries
+                            .iter()
+                            .take(limit)
+                            .enumerate()
+                            .map(|(index, row)| {
+                                (index, super::consoles::Platform::from_id(&row.icon))
+                            })
+                            .collect(),
+                        Changes::PLATFORM_PREVIEWS,
+                    );
+                }
                 self.platform_preview.selected = view.selected;
                 changes.update(
                     &mut self.platform_preview.title,
@@ -306,16 +326,24 @@ impl DisplayState {
                     Changes::PLATFORM_TITLE,
                 );
             }
-            if bind_rows
-                && (binding_activated
-                    || self
-                        .library
-                        .entries
-                        .iter()
-                        .take(limit)
-                        .ne(view.entries.iter().take(limit)))
-            {
-                self.artwork_revision = self.artwork_revision.wrapping_add(1);
+            let entries_changed = self
+                .library
+                .entries
+                .iter()
+                .take(limit)
+                .ne(view.entries.iter().take(limit));
+            let artwork_changed = self.library.artwork != view.artwork;
+            let neighbors_changed = self
+                .library
+                .artwork_neighbors
+                .iter()
+                .ne(view.artwork_neighbors.iter().take(2));
+            let detail_changed = self.library.detail != view.library;
+            let kind_changed = self.library.detail.kind != view.library.kind;
+            if bind_rows && (binding_activated || entries_changed) {
+                if !entries_changed {
+                    self.artwork_revision = self.artwork_revision.wrapping_add(1);
+                }
                 self.row_revision = self.row_revision.wrapping_add(1);
                 let entries = view
                     .entries
@@ -336,24 +364,28 @@ impl DisplayState {
                     rows::reconcile(&mut self.entries, entries, self.row_revision);
                 }
             }
-            if self.library.artwork != view.artwork
-                || self
-                    .library
-                    .artwork_neighbors
-                    .iter()
-                    .ne(view.artwork_neighbors.iter().take(2))
-                || self.library.detail.kind != view.library.kind
+            if (bind_rows && entries_changed)
+                || artwork_changed
+                || neighbors_changed
+                || kind_changed
             {
                 self.artwork_revision = self.artwork_revision.wrapping_add(1);
             }
-            self.library = LibraryPresentation {
-                entries: view.entries.iter().take(limit).cloned().collect(),
-                detail: view.library.clone(),
-                selected: view.selected,
-                platforms: view.platforms,
-                artwork: view.artwork.clone(),
-                artwork_neighbors: view.artwork_neighbors.iter().take(2).cloned().collect(),
-            };
+            if entries_changed {
+                self.library.entries = view.entries.iter().take(limit).cloned().collect();
+            }
+            if detail_changed {
+                self.library.detail = view.library.clone();
+            }
+            if artwork_changed {
+                self.library.artwork = view.artwork.clone();
+            }
+            if neighbors_changed {
+                self.library.artwork_neighbors =
+                    view.artwork_neighbors.iter().take(2).cloned().collect();
+            }
+            self.library.selected = view.selected;
+            self.library.platforms = view.platforms;
         }
         let mut devices = vec![crate::model::NetworkPeer {
             name: "本机".into(),

@@ -31,9 +31,18 @@ fn create_library(
     metrics: Metrics,
 ) -> Entity {
     let route = *event.route();
-    ui! {
+    #[cfg(any(target_os = "linux", test))]
+    super::response::route_lifecycle("create_begin", route, state.clone());
+    #[cfg(any(target_os = "linux", test))]
+    super::response::stage("library_mount_begin");
+    let entity = ui! {
         library_page (route, state, metrics)
-    }
+    };
+    #[cfg(any(target_os = "linux", test))]
+    super::response::stage("library_mount_end");
+    #[cfg(any(target_os = "linux", test))]
+    super::response::route_lifecycle("create_end", route, state.clone());
+    entity
 }
 
 #[compose]

@@ -25,6 +25,9 @@ impl Tool {
     }
 
     fn available(self) -> std::result::Result<(), String> {
+        crate::platform::plugin::require_capability("services")
+            .map(|_| ())
+            .map_err(|error| error.to_string())?;
         crate::platform::system::check_tool_runtime()?;
         crate::session::require_idle().map_err(|_| "请先结束房间并完成网络恢复".to_string())?;
         crate::platform::system::check_tool(self)

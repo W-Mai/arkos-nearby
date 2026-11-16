@@ -107,6 +107,23 @@ pub fn log(values: Value) -> Result<()> {
     write(&path, &record)
 }
 
+pub(crate) fn profile_span(stage: &str, elapsed_ns: u128, changed: Option<bool>) {
+    let enabled = std::env::var("HOWFF_RESPONSE_PROFILE").as_deref() == Ok("1")
+        || std::env::var("HOWFF_INTERACTION_PROFILE").as_deref() == Ok("1");
+    if !enabled {
+        return;
+    }
+    let mut value = json!({
+        "nearby_profile": true,
+        "stage": stage,
+        "elapsed_ns": elapsed_ns,
+    });
+    if let Some(changed) = changed {
+        value["changed"] = changed.into();
+    }
+    eprintln!("{}", value);
+}
+
 mod display;
 mod input;
 

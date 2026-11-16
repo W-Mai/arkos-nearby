@@ -1,5 +1,6 @@
 //! ArkOS installation, user data and firmware locations.
 
+use crate::content::{ArtworkKind, ArtworkSource};
 use crate::{Location, PlatformPaths, Storage};
 
 macro_rules! locations {
@@ -25,6 +26,11 @@ pub mod application {
         GUI: Program = "howff-gui";
         GUI_BUILD: Program = "howff-gui-build.json";
         ASSETS: Program = "assets";
+        PLUGINS: Program = "plugins";
+        PLATFORM_PLUGIN: Program = "plugins/arkos-platform";
+        PLATFORM_PLUGIN_EXECUTABLE: Program = "plugins/arkos-platform/howff-platform-plugin";
+        PLATFORM_PLUGIN_MANIFEST: Program = "plugins/arkos-platform/plugin.json";
+        PLATFORM_PLUGIN_TRUST_KEY: Program = "plugins/arkos-platform/trust-key.bin";
         CORES: Program = "cores";
         CORE_INSPECT32: Program = "core-inspect32";
         CORE_INSPECT64: Program = "core-inspect64";
@@ -135,13 +141,29 @@ pub mod system_program {
 
 pub const ROM_ROOTS: &[&str] = &["/roms", "/roms2"];
 
+pub(crate) const ARTWORK_SOURCES: &[ArtworkSource] = &[
+    ArtworkSource::new("rom-primary", ArtworkKind::Rom, "/roms"),
+    ArtworkSource::new("rom-secondary", ArtworkKind::Rom, "/roms2"),
+    ArtworkSource::new(
+        "save-preview",
+        ArtworkKind::SavePreview,
+        application::SAVE_BACKUPS.as_str(),
+    ),
+    ArtworkSource::new(
+        "frontend-config-64",
+        ArtworkKind::FrontendConfig,
+        home::RETROARCH.as_str(),
+    ),
+    ArtworkSource::new(
+        "frontend-config-32",
+        ArtworkKind::FrontendConfig,
+        home::RETROARCH32.as_str(),
+    ),
+];
+
 pub(crate) const CONTENT: crate::content::ContentPaths = crate::content::ContentPaths {
     rom_roots: ROM_ROOTS,
-    artwork_extra: &[
-        application::SAVE_BACKUPS,
-        home::RETROARCH,
-        home::RETROARCH32,
-    ],
+    artwork_sources: ARTWORK_SOURCES,
     catalog_index: application::CATALOG_INDEX,
     launcher_index: application::LAUNCHER_INDEX,
 };
@@ -259,6 +281,11 @@ application::LIBRARY	/opt/howff/library.json
 application::LOGS	/opt/howff/logs
 application::ORIGINAL_LAUNCH	/opt/howff/original-launch
 application::PAIRING	/opt/howff/pair.json
+application::PLATFORM_PLUGIN	/opt/howff/plugins/arkos-platform
+application::PLATFORM_PLUGIN_EXECUTABLE	/opt/howff/plugins/arkos-platform/howff-platform-plugin
+application::PLATFORM_PLUGIN_MANIFEST	/opt/howff/plugins/arkos-platform/plugin.json
+application::PLATFORM_PLUGIN_TRUST_KEY	/opt/howff/plugins/arkos-platform/trust-key.bin
+application::PLUGINS	/opt/howff/plugins
 application::PRIVATE_KEY	/opt/howff/identity.pk8
 application::SAVE_BACKUPS	/opt/howff/saves/backups
 application::SOUND	/opt/howff/ui-sound.json

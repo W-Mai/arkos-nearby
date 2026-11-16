@@ -77,13 +77,81 @@ impl ForegroundOrigin {
     }
 }
 
+const FOREGROUND_LEASE_SCHEMA: u8 = 2;
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ForegroundLeaseState {
+    #[default]
+    Prepared,
+    StoppingPrevious,
+    Running,
+    Recovering,
+    Failed,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ReturnTarget {
+    #[default]
+    OriginalFrontend,
+    Launcher,
+    Application,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ForegroundLease {
+    #[serde(default = "legacy_lease_schema")]
+    schema: u8,
+    #[serde(default)]
+    state: ForegroundLeaseState,
     origin: ForegroundOrigin,
+    #[serde(default)]
+    owner_pid: u32,
+    #[serde(default)]
+    owner_starttime: u64,
+    #[serde(default)]
+    boot_id: String,
     definition_sha256: String,
     #[serde(default)]
     keep_network: bool,
+    #[serde(default)]
+    return_target: ReturnTarget,
+    #[serde(default)]
+    session_id: String,
+}
+
+fn legacy_lease_schema() -> u8 {
+    1
+}
+
+impl ForegroundLease {
+    #[cfg(target_os = "linux")]
+    fn new(origin: ForegroundOrigin, definition_sha256: String) -> Result<Self> {
+        Ok(Self {
+            schema: FOREGROUND_LEASE_SCHEMA,
+            state: ForegroundLeaseState::Prepared,
+            origin,
+            owner_pid: std::process::id(),
+            owner_starttime: crate::updates::started(std::process::id())?,
+            boot_id: crate::updates::boot_id()?,
+            definition_sha256,
+            keep_network: false,
+            return_target: ReturnTarget::OriginalFrontend,
+            session_id: crate::system::random_id()?,
+        })
+    }
+
+    fn normalized(mut self) -> Self {
+        if self.schema != FOREGROUND_LEASE_SCHEMA {
+            self.schema = FOREGROUND_LEASE_SCHEMA;
+            self.state = ForegroundLeaseState::Prepared;
+        }
+        self
+    }
 }
 
 pub fn foreground_origin() -> Result<ForegroundOrigin> {
@@ -91,7 +159,9 @@ pub fn foreground_origin() -> Result<ForegroundOrigin> {
     if !path.try_exists()? {
         return Ok(ForegroundOrigin::BorrowedEs);
     }
-    Ok(crate::system::read::<ForegroundLease>(path)?.origin)
+    Ok(crate::system::read::<ForegroundLease>(path)?
+        .normalized()
+        .origin)
 }
 
 pub fn patched(original: &[u8]) -> Result<Vec<u8>> {
@@ -148,12 +218,12 @@ mod device {
         )?;
         write(
             Path::new(OWNER),
-            &ForegroundLease {
-                origin: ForegroundOrigin::OriginalWrapper,
-                definition_sha256: platform_system::definition()?,
-                keep_network: false,
-            },
+            &ForegroundLease::new(
+                ForegroundOrigin::OriginalWrapper,
+                platform_system::definition()?,
+            )?,
         )?;
+        set_state(ForegroundLeaseState::Running)?;
         let result = run_launcher(true);
         let recovery = resume();
         result.and(recovery)
@@ -171,12 +241,12 @@ mod device {
         )?;
         write(
             Path::new(OWNER),
-            &ForegroundLease {
-                origin: ForegroundOrigin::StandaloneUnit,
-                definition_sha256: platform_system::definition()?,
-                keep_network: false,
-            },
+            &ForegroundLease::new(
+                ForegroundOrigin::StandaloneUnit,
+                platform_system::definition()?,
+            )?,
         )?;
+        set_state(ForegroundLeaseState::Running)?;
         let result = run_launcher(true);
         let recovery = resume();
         result.and(recovery)
@@ -204,13 +274,14 @@ mod device {
         )?;
         write(
             Path::new(OWNER),
-            &ForegroundLease {
-                origin: ForegroundOrigin::BorrowedEs,
-                definition_sha256: platform_system::definition()?,
-                keep_network: false,
-            },
+            &ForegroundLease::new(ForegroundOrigin::BorrowedEs, platform_system::definition()?)?,
         )?;
-        platform_system::stop_frontend()?;
+        set_state(ForegroundLeaseState::StoppingPrevious)?;
+        if let Err(error) = platform_system::stop_frontend() {
+            let _ = set_state(ForegroundLeaseState::Failed);
+            return Err(error);
+        }
+        set_state(ForegroundLeaseState::Running)?;
         let result = run_launcher(launcher);
         let recovery = resume();
         result.and(recovery)
@@ -241,8 +312,8 @@ mod device {
             if session::state().is_ok_and(|state| {
                 state.purpose == crate::purpose::SessionPurpose::NetworkOnly && state.established()
             }) {
-                let mut owner: serde_json::Value = read(Path::new(OWNER))?;
-                owner["keep_network"] = true.into();
+                let mut owner: ForegroundLease = read_lease(Path::new(OWNER))?;
+                owner.keep_network = true;
                 write(Path::new(OWNER), &owner)?;
             }
         }
@@ -254,15 +325,16 @@ mod device {
         if !Path::new(OWNER).is_file() {
             return Ok(());
         }
-        let owner: serde_json::Value = read(Path::new(OWNER))?;
+        let mut owner = read_lease(Path::new(OWNER))?;
         require(
-            owner["definition_sha256"] == platform_system::definition()?,
+            owner.definition_sha256 == platform_system::definition()?,
             "Frontend definition changed during shortcut session",
         )?;
+        owner.state = ForegroundLeaseState::Recovering;
+        write(Path::new(OWNER), &owner)?;
         crate::launcher::tools::recover_pending()?;
         if let Ok(state) = session::state() {
-            if (state.purpose == crate::purpose::SessionPurpose::Game
-                || owner["keep_network"] != true)
+            if (state.purpose == crate::purpose::SessionPurpose::Game || !owner.keep_network)
                 && (!state.closed() || !state.network_restored)
             {
                 session::recover(&state.id, "home_exit")?;
@@ -275,6 +347,17 @@ mod device {
         }
         fs::remove_file(OWNER)?;
         Ok(())
+    }
+
+    fn read_lease(path: &Path) -> Result<ForegroundLease> {
+        Ok(read::<ForegroundLease>(path)?.normalized())
+    }
+
+    fn set_state(state: ForegroundLeaseState) -> Result<()> {
+        let path = Path::new(OWNER);
+        let mut owner = read_lease(path)?;
+        owner.state = state;
+        write(path, &owner)
     }
 }
 
@@ -336,6 +419,9 @@ mod tests {
             serde_json::json!({"origin":"borrowed_es","definition_sha256":"a","keep_network":true}),
         )
         .unwrap();
+        let old = old.normalized();
+        assert_eq!(old.schema, FOREGROUND_LEASE_SCHEMA);
+        assert_eq!(old.state, ForegroundLeaseState::Prepared);
         assert_eq!(old.origin, ForegroundOrigin::BorrowedEs);
         assert_eq!(old.origin.unit(), "howff-launcher.service");
         assert_eq!(ForegroundOrigin::StandaloneUnit.unit(), old.origin.unit());
@@ -344,6 +430,27 @@ mod tests {
             "emulationstation.service"
         );
         assert!(serde_json::from_str::<ForegroundOrigin>("\"other.service\"").is_err());
+    }
+
+    #[test]
+    fn foreground_lease_roundtrip_keeps_owner_identity_and_recovery_target() {
+        let lease = ForegroundLease {
+            schema: FOREGROUND_LEASE_SCHEMA,
+            state: ForegroundLeaseState::Recovering,
+            origin: ForegroundOrigin::BorrowedEs,
+            owner_pid: 42,
+            owner_starttime: 7,
+            boot_id: "boot".into(),
+            definition_sha256: "a".repeat(64),
+            keep_network: true,
+            return_target: ReturnTarget::Application,
+            session_id: "session".into(),
+        };
+        let decoded: ForegroundLease =
+            serde_json::from_value(serde_json::to_value(&lease).unwrap()).unwrap();
+        assert_eq!(decoded.state, ForegroundLeaseState::Recovering);
+        assert_eq!(decoded.return_target, ReturnTarget::Application);
+        assert_eq!(decoded.session_id, "session");
     }
 
     #[test]

@@ -223,13 +223,17 @@ fn preview_label(state: model!(DisplayState), metrics: Metrics, platforms: bool)
             return state.platform_preview_title();
         }
         let selected = state.library_selection();
-        state
-            .entries()
-            .entries()
-            .into_iter()
-            .find(|(_, row)| row.index() == selected)
-            .map(|(_, row)| row.label(true))
-            .unwrap_or_default()
+        let entries = state.entries();
+        if let Some(row) = entries.get(selected).filter(|row| row.index() == selected) {
+            row.label(true)
+        } else {
+            entries
+                .entries()
+                .into_iter()
+                .find(|(_, row)| row.index() == selected)
+                .map(|(_, row)| row.label(true))
+                .unwrap_or_default()
+        }
     };
     ui! {
         Text (

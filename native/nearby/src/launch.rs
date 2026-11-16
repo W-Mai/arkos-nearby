@@ -135,6 +135,7 @@ pub fn resolve(frontend: &str, args: &[String]) -> Result<()> {
         }
         return Ok(());
     }
+    crate::platform::plugin::require_capability("launch")?;
     crate::configuration::recover()?;
     let initial = crate::context::parse(frontend, args)?;
     let mut scope = Scope {

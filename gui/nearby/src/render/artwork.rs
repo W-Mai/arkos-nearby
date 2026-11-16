@@ -118,7 +118,10 @@ pub(super) fn save_source(
     if path.is_empty() {
         String::new()
     } else {
-        resources::token(&(path, revision))
+        resources::token_for(
+            howff_platform::content::ArtworkKind::SavePreview,
+            &(path, revision),
+        )
     }
 }
 

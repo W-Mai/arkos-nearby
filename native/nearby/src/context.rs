@@ -462,11 +462,17 @@ impl Context {
     }
 
     pub fn origin(&self) -> crate::owned_core::Origin {
-        if crate::owned_core::by_path(&self.core_path, &self.frontend).is_some() {
-            crate::owned_core::Origin::Optimized
-        } else {
-            crate::owned_core::Origin::Device
+        match self.source() {
+            howff_platform::core::CoreSource::OptimizedOwned => {
+                crate::owned_core::Origin::Optimized
+            }
+            howff_platform::core::CoreSource::DeviceInstalled
+            | howff_platform::core::CoreSource::Unavailable => crate::owned_core::Origin::Device,
         }
+    }
+
+    pub fn source(&self) -> howff_platform::core::CoreSource {
+        crate::owned_core::source(&self.frontend, &self.core_id, &self.core_path)
     }
 
     pub fn with_core(&self, choice: crate::core_choice::Choice) -> Result<Self> {

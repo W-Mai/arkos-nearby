@@ -1,4 +1,5 @@
 use howff_platform::arkos;
+use howff_platform::core::CoreSource;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
@@ -90,6 +91,15 @@ pub fn entry(id: &str) -> Option<&'static Entry> {
 
 pub fn by_path(path: &Path, frontend: &str) -> Option<&'static Entry> {
     (frontend == NESTOPIA.frontend && path == NESTOPIA.path()).then_some(&NESTOPIA)
+}
+
+/// Classify a selected core once for every launch path, including netplay.
+pub fn source(frontend: &str, core_id: &str, path: &Path) -> CoreSource {
+    if by_path(path, frontend).is_some_and(|entry| entry.id == core_id) {
+        CoreSource::OptimizedOwned
+    } else {
+        CoreSource::DeviceInstalled
+    }
 }
 
 pub fn replacement(
@@ -229,5 +239,21 @@ mod tests {
         ] {
             assert!(replacement(frontend, id, hash, bits, Path::new(game)).is_none());
         }
+    }
+
+    #[test]
+    fn source_classification_is_shared_by_solo_and_netplay_contexts() {
+        assert_eq!(
+            source("retroarch", NESTOPIA.id, &NESTOPIA.path()),
+            CoreSource::OptimizedOwned
+        );
+        assert_eq!(
+            source(
+                "retroarch",
+                "nestopia",
+                Path::new("/opt/retroarch/bin/retroarch")
+            ),
+            CoreSource::DeviceInstalled
+        );
     }
 }

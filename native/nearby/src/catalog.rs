@@ -1447,7 +1447,7 @@ impl Browser {
 }
 
 fn local_platforms() -> Result<(Vec<PathBuf>, Vec<Entry>)> {
-    let roots = crate::platform::content::roots();
+    let roots = crate::platform::content::roots()?;
     let mut entries = Vec::new();
     for root in &roots {
         for (platform, name) in PLATFORMS {

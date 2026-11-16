@@ -1,3 +1,4 @@
+use crate::compat::{GUI_ABI, MIRUI_ABI};
 use crate::{Result, require};
 use howff_menu::management::{Package, Update};
 use howff_platform::arkos;
@@ -24,6 +25,8 @@ struct Manifest {
     profile: String,
     kernel_sha256: String,
     target: String,
+    gui_abi: String,
+    mirui_abi: String,
     executable_sha256: String,
 }
 struct Contents {
@@ -150,6 +153,10 @@ fn unpack(path: &Path) -> Result<Contents> {
         "安装包更新协议不匹配",
     )?;
     require(
+        manifest.gui_abi == GUI_ABI && manifest.mirui_abi == MIRUI_ABI,
+        "安装包 GUI 或 Mirui ABI 不匹配",
+    )?;
+    require(
         manifest.executable_sha256 == digest
             && sums.lines().any(|line| line == format!("{digest}  howff")),
         "安装包文件摘要不匹配",
@@ -199,9 +206,13 @@ pub fn inspect(path: &str) -> Result<Update> {
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 enum Phase {
-    Staging,
+    #[serde(alias = "staging")]
+    Staged,
+    Admitted,
     Installing,
+    Verifying,
     Complete,
+    RolledBack,
     Failed,
 }
 #[derive(Serialize, Deserialize)]
@@ -220,12 +231,12 @@ impl Owner {
         self.schema == UPDATE_PROTOCOL && self.boot_id == boot && started == Some(self.started)
     }
 }
-fn boot_id() -> Result<String> {
+pub(crate) fn boot_id() -> Result<String> {
     Ok(fs::read_to_string("/proc/sys/kernel/random/boot_id")?
         .trim()
         .into())
 }
-fn started(pid: u32) -> Result<u64> {
+pub(crate) fn started(pid: u32) -> Result<u64> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat"))?;
     let (_, tail) = stat.rsplit_once(')').ok_or("Missing process identity")?;
     Ok(tail
@@ -303,12 +314,14 @@ pub fn apply(update: &Update) -> Result<String> {
         boot_id: boot_id()?,
         foreground: crate::home::foreground_origin()?,
         executable_sha256: contents.manifest.executable_sha256,
-        phase: Phase::Staging,
+        phase: Phase::Staged,
     };
     crate::system::write(&root.join("owner.json"), &owner)?;
     let result = (|| -> Result<()> {
         crate::system::private_write(&executable, &contents.executable)?;
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))?;
+        owner.phase = Phase::Admitted;
+        crate::system::write(&root.join("owner.json"), &owner)?;
         owner.phase = Phase::Installing;
         crate::system::write(&root.join("owner.json"), &owner)?;
         let log = File::create(root.join("install.log"))?;
@@ -331,6 +344,8 @@ pub fn apply(update: &Update) -> Result<String> {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+        owner.phase = Phase::Verifying;
+        crate::system::write(&root.join("owner.json"), &owner)?;
         require(
             crate::content::digest(Path::new(crate::session::BINARY))? == owner.executable_sha256,
             "安装后运行程序摘要不匹配",
@@ -357,6 +372,8 @@ pub fn apply(update: &Update) -> Result<String> {
     }
     if let Err(error) = result {
         recovery?;
+        owner.phase = Phase::RolledBack;
+        crate::system::write(&root.join("owner.json"), &owner)?;
         fs::remove_dir_all(root)?;
         return Err(error);
     }
@@ -434,6 +451,8 @@ mod tests {
             profile: crate::compat::PROFILE.into(),
             kernel_sha256: crate::compat::KERNEL_SHA.into(),
             target: "aarch64-unknown-linux-musl".into(),
+            gui_abi: GUI_ABI.into(),
+            mirui_abi: MIRUI_ABI.into(),
             executable_sha256: digest.clone(),
         };
         let mut manifest = serde_json::to_value(manifest).unwrap();
@@ -478,13 +497,28 @@ mod tests {
             boot_id: "boot-a".into(),
             foreground: crate::home::ForegroundOrigin::OriginalWrapper,
             executable_sha256: "a".repeat(64),
-            phase: Phase::Staging,
+            phase: Phase::Staged,
         };
         assert!(lease.matches_lifetime("boot-a", Some(42)));
         assert!(!lease.matches_lifetime("boot-b", Some(42)));
         assert!(!lease.matches_lifetime("boot-a", Some(43)));
         assert!(!lease.matches_lifetime("boot-a", None));
         assert!(Path::new(ROOT).starts_with(crate::context::INSTALL));
+    }
+
+    #[test]
+    fn old_staging_owner_records_are_read_as_staged() {
+        let owner: Owner = serde_json::from_value(serde_json::json!({
+            "schema": 1,
+            "pid": 123,
+            "started": 42,
+            "boot_id": "boot-a",
+            "foreground": "original_wrapper",
+            "executable_sha256": "a".repeat(64),
+            "phase": "staging"
+        }))
+        .unwrap();
+        assert_eq!(owner.phase, Phase::Staged);
     }
     #[test]
     fn package_admission_reads_metadata_without_executing_and_keeps_real_card_boundaries() {
@@ -503,6 +537,9 @@ mod tests {
             let rejected = fixture(&root, "invalid.tar.gz", "0.11.0", product);
             assert!(unpack(&rejected).is_err());
         }
+        let mut missing_abi = serde_json::to_value(&contents.manifest).unwrap();
+        missing_abi.as_object_mut().unwrap().remove("gui_abi");
+        assert!(serde_json::from_value::<Manifest>(missing_abi).is_err());
         let mut bytes = fs::read(&path).unwrap();
         bytes.truncate(bytes.len() / 2);
         fs::write(&path, bytes).unwrap();

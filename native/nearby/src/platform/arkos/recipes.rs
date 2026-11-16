@@ -32,7 +32,18 @@ fn field(node: roxmltree::Node<'_, '_>, name: &str) -> String {
         .into()
 }
 
-pub fn parse(text: &str) -> Result<Vec<System>> {
+#[cfg(test)]
+fn parse(text: &str) -> Result<Vec<System>> {
+    parse_with_roots(
+        text,
+        &arkos::ROM_ROOTS
+            .iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>(),
+    )
+}
+
+pub fn parse_with_roots(text: &str, roots: &[PathBuf]) -> Result<Vec<System>> {
     let mut systems = Vec::new();
     // Parse each system separately: manufacturer Options commands contain bare ampersands.
     for block in text.split("<system>").skip(1) {
@@ -45,7 +56,7 @@ pub fn parse(text: &str) -> Result<Vec<System>> {
         };
         let node = doc.root_element();
         let path = PathBuf::from(field(node, "path"));
-        if !arkos::ROM_ROOTS.iter().any(|root| path.starts_with(root)) {
+        if !roots.iter().any(|root| path.starts_with(root)) {
             continue;
         }
         let emulators = node
@@ -76,21 +87,6 @@ pub fn parse(text: &str) -> Result<Vec<System>> {
     }
     require(!systems.is_empty(), "No local system launch recipes")?;
     Ok(systems)
-}
-
-pub fn load() -> Result<Vec<System>> {
-    let path = [
-        arkos::home::ES_SYSTEMS.as_str(),
-        arkos::firmware::ES_SYSTEMS,
-    ]
-    .into_iter()
-    .find(|p| Path::new(p).is_file())
-    .ok_or("Missing system catalog")?;
-    require(
-        fs::metadata(path)?.len() <= 4 * 1024 * 1024,
-        "System catalog is too large",
-    )?;
-    parse(&fs::read_to_string(path)?)
 }
 
 pub(crate) fn settings(text: &str) -> BTreeMap<String, String> {
@@ -270,7 +266,7 @@ pub fn finish() -> Result<()> {
 pub(crate) fn recipe(path: &Path) -> Result<Launch> {
     let path = path.canonicalize()?;
     require(path.is_file(), "Game file is unavailable")?;
-    let systems = load()?;
+    let systems = crate::platform::content::recipe_systems()?;
     let system = systems
         .iter()
         .filter(|s| path.starts_with(&s.path) && s.accepts(&path))
@@ -349,5 +345,16 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn recipe_filter_uses_snapshot_roots() {
+        let systems = parse_with_roots(
+            "<systemList><system><name>nes</name><path>/custom/nes</path><extension>.nes</extension><command>retroarch %ROM%</command></system></systemList>",
+            &[PathBuf::from("/custom")],
+        )
+        .unwrap();
+        assert_eq!(systems.len(), 1);
+        assert_eq!(systems[0].path, PathBuf::from("/custom/nes"));
     }
 }

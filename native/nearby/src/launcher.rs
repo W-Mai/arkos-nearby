@@ -17,7 +17,7 @@ use howff_menu::{MenuAction, MenuItem};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub enum Intent {
@@ -233,6 +233,7 @@ impl Controller {
         self.entry = self.game();
     }
     pub fn view(&mut self) -> Value {
+        let total_started = Instant::now();
         self.details.poll();
         self.wifi.poll();
         self.management.poll();
@@ -241,9 +242,36 @@ impl Controller {
         if self.overlay == Some(Overlay::Saves) && self.saves.close_after && !self.saves.view.busy {
             self.close_saves();
         }
-        let mut view = self.browser().view();
-        let shelf = self.browsers[0].view();
-        let catalog = self.browsers[1].view();
+        let active_index = self.tab.min(1);
+        let active_started = Instant::now();
+        let mut view = self.browsers[active_index].view();
+        crate::menu::profile_span(
+            "controller.active_browser_view",
+            active_started.elapsed().as_nanos(),
+            None,
+        );
+        let shelf_started = Instant::now();
+        let shelf = if active_index == 0 {
+            view.clone()
+        } else {
+            self.browsers[0].view()
+        };
+        crate::menu::profile_span(
+            "controller.shelf_browser_view",
+            shelf_started.elapsed().as_nanos(),
+            None,
+        );
+        let catalog_started = Instant::now();
+        let catalog = if active_index == 1 {
+            view.clone()
+        } else {
+            self.browsers[1].view()
+        };
+        crate::menu::profile_span(
+            "controller.catalog_browser_view",
+            catalog_started.elapsed().as_nanos(),
+            None,
+        );
         let game = self.game();
         let options = self.options();
         let title = match self.overlay {
@@ -312,6 +340,7 @@ impl Controller {
             "上级"
         }
         .into();
+        crate::menu::profile_span("controller.view", total_started.elapsed().as_nanos(), None);
         view
     }
     fn tab(&mut self, value: usize) -> Option<Intent> {
@@ -823,9 +852,11 @@ impl Controller {
 }
 
 pub fn run() -> Result<i32> {
+    crate::platform::plugin::require_capability("paths")?;
     run_page(false)
 }
 pub fn run_application() -> Result<i32> {
+    crate::platform::plugin::require_capability("paths")?;
     run_page(true)
 }
 fn run_page(application: bool) -> Result<i32> {

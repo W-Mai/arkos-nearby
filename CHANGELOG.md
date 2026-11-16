@@ -2,14 +2,14 @@
 
 ## [Unreleased]
 
-- Recover interrupted installation transactions without mixing application versions.
-- Preserve launcher ownership and permissions through updates and removal.
-- Validate recorded release inventories and device identity before installation changes.
-- Support repeated removal after restoring the system launchers.
+## [0.14.0] - 2026-11-16
 
-- Add Howff application packages and installer archives.
-
-- Prevent button presses from affecting the next page during screen transitions.
+- Improve responsiveness when browsing the game library and nearby rooms.
+- Preserve Howff launch entries and platform integration during updates.
+- Include the ArkOS platform plugin in installation and update packages.
+- Keep artwork loading scoped to its registered content source.
+- Preserve foreground ownership across application and system-tool transitions.
+- Enable KMSDRM, OpenGL ES, ALSA and PulseAudio in the bundled SDL2 renderer.
 
 ## [0.13.0] - 2026-11-12
 

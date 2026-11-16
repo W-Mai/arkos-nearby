@@ -36,6 +36,30 @@ pub(super) struct Target {
     overlay: String,
 }
 
+#[cfg(any(target_os = "linux", test))]
+pub(super) fn route_lifecycle(
+    phase: &str,
+    route: super::state::PageKey,
+    state: super::state::DisplayStateHandle,
+) {
+    if !enabled() && !interactions() {
+        return;
+    }
+    record(
+        "route_lifecycle",
+        json!({
+            "phase": phase,
+            "page": format!("{:?}", route.page),
+            "library": format!("{:?}", route.library),
+            "network_only": route.network_only,
+            "entries_len": state.entries().len(),
+            "platform_previews_len": state.platform_previews().len(),
+            "library_selection": state.library_selection(),
+            "list_rows": state.list_layout().rows(),
+        }),
+    );
+}
+
 impl Target {
     pub(super) fn from_view(view: &View) -> Self {
         let key = if view.launcher.enabled && !view.launcher.key.is_empty() {

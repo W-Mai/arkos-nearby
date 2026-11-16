@@ -47,6 +47,9 @@ pub const ALLOWED: &[&str] = &[
     "cores/nestopia_nearby_libretro.so",
     "cores/owned-core-build.json",
     "licenses/nestopia-COPYING.txt",
+    "plugins/arkos-platform/howff-platform-plugin",
+    "plugins/arkos-platform/plugin.json",
+    "plugins/arkos-platform/trust-key.bin",
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -165,6 +168,7 @@ impl Bundle {
 #[cfg(all(test, feature = "release-bundle"))]
 mod tests {
     use super::*;
+    use howff_platform::plugin::{PluginKind, PluginManifest};
 
     #[test]
     fn embedded_bundle_requires_explicit_howff_identity() {
@@ -255,5 +259,77 @@ mod tests {
             assert!(report[report_field].as_str().is_some());
             assert_eq!(sources["renderer"][field], report[report_field]);
         }
+    }
+
+    #[test]
+    fn embedded_platform_plugin_is_signed_and_scoped() {
+        let bundle = Bundle::embedded().expect("The built release must decode");
+        let asset = |name: &str| {
+            bundle
+                .manifest
+                .files
+                .iter()
+                .find(|asset| asset.name == name)
+                .expect("The release contains the platform plugin asset")
+        };
+        let executable = asset("plugins/arkos-platform/howff-platform-plugin");
+        let manifest_asset = asset("plugins/arkos-platform/plugin.json");
+        let trust_key = asset("plugins/arkos-platform/trust-key.bin");
+        assert_eq!(executable.mode, 0o755);
+        assert_eq!(manifest_asset.mode, 0o644);
+        assert_eq!(trust_key.mode, 0o644);
+        assert!(bundle.bytes(executable).starts_with(b"\x7fELF\x02"));
+        let manifest: PluginManifest =
+            serde_json::from_slice(bundle.bytes(manifest_asset)).unwrap();
+        assert_eq!(manifest.kind, PluginKind::Platform);
+        assert_eq!(manifest.plugin_id, "arkos-platform");
+        assert_eq!(manifest.target, "aarch64-unknown-linux-musl");
+        assert_eq!(
+            manifest.mirui_abi,
+            format!("mirui-{}", bundle.manifest.gui_version)
+        );
+        for capability in ["paths", "launch", "services"] {
+            assert!(
+                manifest
+                    .capabilities
+                    .iter()
+                    .any(|value| value == capability)
+            );
+        }
+        assert_eq!(
+            bundle.bytes(trust_key),
+            crate::platform::plugin::TRUSTED_PLATFORM_PUBLIC_KEY
+        );
+        let admitted = crate::plugin::admit(
+            bundle.bytes(manifest_asset),
+            bundle.bytes(executable),
+            crate::plugin::requirements(
+                "aarch64-unknown-linux-musl",
+                &format!("mirui-{}", bundle.manifest.gui_version),
+            ),
+            crate::platform::plugin::TRUSTED_PLATFORM_PUBLIC_KEY,
+        )
+        .expect("the bundled plugin signature admits");
+        assert_eq!(admitted.manifest, manifest);
+        let sources: serde_json::Value = serde_json::from_slice(
+            bundle.bytes(
+                bundle
+                    .manifest
+                    .files
+                    .iter()
+                    .find(|asset| asset.name == "release-sources.json")
+                    .unwrap(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(sources["platform_plugin"]["plugin_id"], "arkos-platform");
+        assert_eq!(
+            sources["platform_plugin"]["payload_sha256"],
+            manifest.payload_sha256
+        );
+        assert_eq!(
+            sources["platform_plugin"]["source"],
+            "native/platform-plugin"
+        );
     }
 }

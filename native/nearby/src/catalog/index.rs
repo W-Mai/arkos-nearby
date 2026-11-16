@@ -290,7 +290,7 @@ impl IndexJob {
         Ok(Self {
             roots,
             platforms,
-            cache: content::index_path(CatalogKind::Launcher),
+            cache: content::index_path(CatalogKind::Launcher)?,
             seed: None,
         })
     }
@@ -300,7 +300,7 @@ impl IndexJob {
         Ok(Self {
             roots,
             platforms,
-            cache: content::index_path(CatalogKind::Multiplayer),
+            cache: content::index_path(CatalogKind::Multiplayer)?,
             seed: None,
         })
     }

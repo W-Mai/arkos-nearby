@@ -24,6 +24,8 @@ pub mod network;
 pub mod owned_core;
 pub mod pairing;
 pub(crate) mod platform;
+pub mod plugin;
+pub mod plugin_ipc;
 pub mod protocol;
 pub mod purpose;
 pub mod radio;

@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "runtime_version": "0.13.0",
+  "runtime_version": "0.14.0",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
   "renderer": {
     "version": "0.56.0",
     "mirx_version": "0.56.0",
-    "sha256": "d80acc881ebd5ee64c44c82996dbfc1376caf32fc4d7f8aaa8abcdab10163fa4",
-    "source_sha256": "103476a929616de65a6c36fdcb08b248c07db8cca272093b90a24c15c0e7ac5a",
-    "cargo_lock_sha256": "0aafcfdf6efcbf0ddd0ad5ef4f9c86550704eb4e1dabc64ff3b0194745ebda89",
+    "sha256": "faf13979927085cca24077c693befab48bbc80790afb67727fa5d050b690807e",
+    "source_sha256": "4fd06a2e2a5d0d112a52af61015164afa023cd329f55a0786903f32ea9b7a5a6",
+    "cargo_lock_sha256": "238e56d69f7db2fb2be04516ac5ea9f243d9fb0004c96d37cad173772d87c1cd",
     "mirui_crate_sha256": "c1fe6aa364fb4d7feb43e085cec92dd7480e8a35758dd9234277584c61f500b9",
     "mirui_macros_crate_sha256": "a6e7004d8a3a6be495a765c36418b120dbe011a0de889f26fbfcd9bf686fb1c4",
     "mirx_crate_sha256": "e81734fa8e9d0796dadd9cdb244825c5de8fcf7eb1b1ef16e8321edacd9ac61f"
@@ -180,7 +180,16 @@
         "sha256": "77c6bc3f4a0367c4c0c28539af2e51cdc9d84a7c977501a2fcc726c3798f144d"
       }
     },
-    "bytes": 13240,
-    "sha256": "b19a9387a7e52ea9bcedd0d39a08d55fb48c253f30e28656c9ef921b4d5fbc94"
+    "bytes": 13336,
+    "sha256": "c2ba9413b9df23b3d5e8e769f78102646e7d62c942919fc1fb099133b90d14ef"
+  },
+  "platform_plugin": {
+    "plugin_id": "arkos-platform",
+    "target": "aarch64-unknown-linux-musl",
+    "mirui_abi": "mirui-0.56.0",
+    "payload_sha256": "b1cd95bfe80f5a3739d980899b9bbb75122b3ce0a835fff82d1fd825399ff951",
+    "source": "native/platform-plugin",
+    "source_sha256": "d8f07b7ea01146b53f650121b884eb0f4e9895fdd8d1ab673f250e4b81c44b2a",
+    "cargo_lock_sha256": "6bab160b3a79cd7c6735d2e23992d43c733ca94af105219e3d66b0955e6dbb2f"
   }
 }

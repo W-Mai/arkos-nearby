@@ -36,6 +36,8 @@ def main():
         target="aarch64-unknown-linux-musl",
         profile=manifest["profile"],
         kernel_sha256=manifest["kernel_sha256"],
+        gui_abi="howff-gui-1",
+        mirui_abi=f"mirui-{manifest['gui_version']}",
     )
     print(json.dumps(archive))
 

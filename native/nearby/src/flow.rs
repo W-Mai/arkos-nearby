@@ -19,6 +19,7 @@ pub enum Page {
     Leaving,
     Unavailable,
 }
+
 impl Page {
     pub fn name(self) -> &'static str {
         match self {
@@ -32,6 +33,93 @@ impl Page {
             Self::Leaving => "leaving",
             Self::Unavailable => "unavailable",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Flow, Page};
+    use serde_json::json;
+
+    fn rooms() -> serde_json::Value {
+        json!({
+            "rooms": [
+                {"id": "a", "signal": 80, "detail": "a"},
+                {"id": "b", "signal": 20, "detail": "b"}
+            ]
+        })
+    }
+
+    fn flow() -> Flow {
+        let mut flow = Flow::network();
+        flow.page = Page::Rooms;
+        flow
+    }
+
+    #[test]
+    fn repeated_room_views_reuse_the_sorted_projection() {
+        let mut flow = flow();
+        flow.scan(flow.generation, rooms());
+        let first = flow.view();
+        let revision = flow.rooms_cache_revision;
+        let rows = first["rooms"].clone();
+        flow.scan(flow.generation, rooms());
+        let second = flow.view();
+        assert_eq!(flow.rooms_cache_revision, revision);
+        assert_eq!(rows, second["rooms"]);
+    }
+
+    #[test]
+    fn non_display_room_changes_keep_the_projection_cache() {
+        let mut flow = flow();
+        flow.scan(flow.generation, rooms());
+        let rows = flow.view()["rooms"].clone();
+        let revision = flow.rooms_cache_revision;
+        flow.scan(
+            flow.generation,
+            json!({"rooms":[
+                {"id":"a","signal":80,"detail":"changed"},
+                {"id":"b","signal":20,"detail":"changed"}
+            ]}),
+        );
+        assert_eq!(flow.view()["rooms"], rows);
+        assert_eq!(flow.rooms_cache_revision, revision);
+    }
+
+    #[test]
+    fn scanning_new_signals_rebuilds_order_and_rows() {
+        let mut flow = flow();
+        flow.scan(flow.generation, rooms());
+        let before = flow.view()["rooms"].clone();
+        flow.scan(
+            flow.generation,
+            json!({"rooms":[{"id":"a","signal":10},{"id":"b","signal":90}]}),
+        );
+        let after = flow.view()["rooms"].clone();
+        assert_eq!(before[0]["key"], after[1]["key"]);
+        assert_eq!(before[1]["key"], after[0]["key"]);
+        assert_eq!(after[0]["signal"], 90);
+    }
+
+    #[test]
+    fn direction_changes_only_selection_and_keeps_rows() {
+        let mut flow = flow();
+        flow.scan(flow.generation, rooms());
+        let rows = flow.view()["rooms"].clone();
+        flow.dispatch("down", crate::system::monotonic() + 1.0);
+        assert_eq!(flow.view()["rooms"], rows);
+    }
+
+    #[test]
+    fn expire_marks_unseen_rooms_unavailable_in_the_cached_rows() {
+        let mut flow = flow();
+        flow.scan(flow.generation, rooms());
+        flow.rooms.get_mut("b").unwrap().seen = crate::system::monotonic() - 10.0;
+        flow.expire();
+        let view = flow.view();
+        let rows = view["rooms"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1]["available"], false);
     }
 }
 
@@ -95,6 +183,10 @@ pub struct Flow {
     choice: usize,
     selected: Option<String>,
     rooms: BTreeMap<String, Record>,
+    ordered_rooms: Vec<String>,
+    room_rows: Vec<Value>,
+    rooms_revision: u64,
+    rooms_cache_revision: u64,
     target: Option<Value>,
     state: Value,
     message: String,
@@ -140,6 +232,26 @@ fn room_name(value: &Value) -> String {
     }
 }
 
+fn room_projection_changed(record: &Record, room: &Value, available: bool) -> bool {
+    let previous_token = record
+        .room
+        .get("token")
+        .and_then(Value::as_str)
+        .or_else(|| record.room.get("session_id").and_then(Value::as_str))
+        .unwrap_or_default();
+    let next_token = room
+        .get("token")
+        .and_then(Value::as_str)
+        .or_else(|| room.get("session_id").and_then(Value::as_str))
+        .unwrap_or_default();
+    record.available != available
+        || record.room["signal"] != room["signal"]
+        || previous_token != next_token
+        || string(&record.room, "ssid").starts_with("DIRECT-NW-")
+            != string(room, "ssid").starts_with("DIRECT-NW-")
+        || truth(&record.room, "same_game_hint") != truth(room, "same_game_hint")
+}
+
 impl Flow {
     pub fn new(context: Option<Context>) -> Self {
         let page = if context.as_ref().is_some_and(|context| context.supported) {
@@ -164,6 +276,10 @@ impl Flow {
             choice: 0,
             selected: None,
             rooms: BTreeMap::new(),
+            ordered_rooms: Vec::new(),
+            room_rows: Vec::new(),
+            rooms_revision: 0,
+            rooms_cache_revision: u64::MAX,
             target: None,
             state: json!({"phase":"idle"}),
             message: if page == Page::Unavailable {
@@ -237,7 +353,13 @@ impl Flow {
         };
         self.refresh_requested = matches!(page, Page::Rooms | Page::Lobby);
     }
-    fn order(&self) -> Vec<String> {
+    fn mark_rooms_dirty(&mut self) {
+        self.rooms_revision = self.rooms_revision.wrapping_add(1);
+    }
+    fn refresh_room_cache(&mut self) {
+        if self.rooms_cache_revision == self.rooms_revision {
+            return;
+        }
         let mut ids: Vec<_> = self.rooms.keys().cloned().collect();
         ids.sort_by_key(|id| {
             let record = &self.rooms[id];
@@ -247,7 +369,35 @@ impl Flow {
                 id.clone(),
             )
         });
-        ids
+        self.ordered_rooms = ids;
+        self.room_rows = if self.scans() {
+            self.ordered_rooms
+                .iter()
+                .map(|id| {
+                    let record = &self.rooms[id];
+                    json!({
+                        "key": format!("{:x}", Sha256::digest(id.as_bytes())),
+                        "name": room_name(&record.room),
+                        "detail": if string(&record.room, "ssid").starts_with("DIRECT-NW-") {
+                            "仅组网 · 保持局域网连接"
+                        } else if truth(&record.room, "same_game_hint") {
+                            "当前游戏 · 加入后核对"
+                        } else {
+                            "游戏房间 · 加入后查找本地游戏"
+                        },
+                        "signal": record.room["signal"].as_i64().unwrap_or(0).clamp(0, 100),
+                        "available": record.available,
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.rooms_cache_revision = self.rooms_revision;
+    }
+    fn order(&mut self) -> &[String] {
+        self.refresh_room_cache();
+        &self.ordered_rooms
     }
     fn begin(&mut self, operation: Operation, mut payload: Value) {
         if self.operation.is_some() {
@@ -402,9 +552,10 @@ impl Flow {
             self.choice = 2;
             return;
         }
+        let selected = self.selected.clone();
         if self.page == Page::Lobby
             && (action == "page_down"
-                || action == "down" && self.order().last() == self.selected.as_ref())
+                || action == "down" && self.order().last() == selected.as_ref())
         {
             self.set_page(Page::Mode);
             return;
@@ -450,7 +601,7 @@ impl Flow {
                     },
                 ) as usize;
             } else if self.scans() && !self.rooms.is_empty() {
-                let ids = self.order();
+                let ids = self.order().to_vec();
                 let index = ids
                     .iter()
                     .position(|id| Some(id) == self.selected.as_ref())
@@ -526,23 +677,34 @@ impl Flow {
         let now = monotonic();
         let rows = result["rooms"].as_array().cloned().unwrap_or_default();
         let mut present = std::collections::BTreeSet::new();
+        let mut display_changed = false;
         for room in &rows {
             if let Some(id) = room["id"].as_str() {
                 present.insert(id.to_owned());
-                self.rooms.insert(
-                    id.into(),
-                    Record {
-                        room: room.clone(),
-                        seen: now,
-                        available: true,
-                    },
-                );
+                let changed = self
+                    .rooms
+                    .get(id)
+                    .map(|record| room_projection_changed(record, room, true))
+                    .unwrap_or(true);
+                let record = self.rooms.entry(id.into()).or_insert_with(|| Record {
+                    room: Value::Null,
+                    seen: now,
+                    available: true,
+                });
+                record.room = room.clone();
+                record.seen = now;
+                record.available = true;
+                display_changed |= changed;
             }
         }
         for (id, record) in &mut self.rooms {
             if !present.contains(id) {
+                display_changed |= record.available;
                 record.available = false;
             }
+        }
+        if display_changed {
+            self.mark_rooms_dirty();
         }
         self.expire();
         if self.selected.is_none() {
@@ -560,12 +722,24 @@ impl Flow {
     }
     pub fn expire(&mut self) {
         let now = monotonic();
+        let before = self.rooms.len();
+        let mut changed = false;
+        for record in self.rooms.values_mut() {
+            if now - record.seen > 9.0 && record.available {
+                record.available = false;
+                changed = true;
+            }
+        }
         self.rooms.retain(|id, record| {
             if now - record.seen > 9.0 {
                 record.available = false;
             }
             record.available || now - record.seen <= 15.0 || Some(id) == self.selected.as_ref()
         });
+        changed |= before != self.rooms.len();
+        if changed {
+            self.mark_rooms_dirty();
+        }
     }
     pub fn status(&mut self, generation: u64, value: Value) {
         if generation != self.generation {
@@ -769,7 +943,7 @@ impl Flow {
             self.accept_status(self.state.clone());
         }
     }
-    pub fn view(&self) -> Value {
+    pub fn view(&mut self) -> Value {
         let joined_game = self.session_id.is_some() && !self.network_only;
         let title = if self.network_only {
             "仅组网".into()
@@ -789,20 +963,22 @@ impl Flow {
                 .map(|context| context.core_label())
                 .unwrap_or_default()
         };
-        let ids = self.order();
-        let rows: Vec<_> = if self.scans() {
-            ids.iter().map(|id| { let record = &self.rooms[id]; json!({"key":format!("{:x}", Sha256::digest(id.as_bytes())),"name":room_name(&record.room),"detail":if string(&record.room,"ssid").starts_with("DIRECT-NW-") { "仅组网 · 保持局域网连接" } else if truth(&record.room,"same_game_hint") { "当前游戏 · 加入后核对" } else { "游戏房间 · 加入后查找本地游戏" },"signal":record.room["signal"].as_i64().unwrap_or(0).clamp(0,100),"available":record.available}) }).collect()
+        let selected_room = self.selected.clone();
+        let room_selected = self
+            .order()
+            .iter()
+            .position(|id| Some(id) == selected_room.as_ref());
+        let rows = if self.scans() {
+            self.room_rows.clone()
         } else {
-            vec![]
+            Vec::new()
         };
         let selected = if self.page == Page::Candidates {
             self.candidate.min(3)
         } else if matches!(self.page, Page::Choice | Page::Mode) {
             self.choice
         } else {
-            ids.iter()
-                .position(|id| Some(id) == self.selected.as_ref())
-                .unwrap_or(0)
+            room_selected.unwrap_or(0)
         };
         let room = if matches!(self.page, Page::Joined | Page::Leaving) {
             self.target.as_ref().unwrap_or(&self.state["room"])
@@ -842,6 +1018,6 @@ impl Flow {
         } else {
             "取消加入"
         };
-        json!({"lobby":self.lobby,"current_game":self.context.is_some(),"entries":if self.page == Page::Candidates { self.state["candidates"].as_array().cloned().unwrap_or_default().into_iter().skip(self.candidate.saturating_sub(3)).take(4).collect::<Vec<_>>() } else { vec![] },"network_only":self.network_only,"local_address":self.state["local_address"].as_str().unwrap_or(""),"peers":self.state["peers"].as_array().cloned().unwrap_or_default(),"connected":truth(&self.state,"connected"),"page":self.page.name(),"title":title,"core":core,"selected":selected,"room_selected":ids.iter().position(|id| Some(id) == self.selected.as_ref()),"rooms":rows,"room_name":if room.is_null() { String::new() } else { room_name(room) },"ready":truth(&self.state,"ready") && self.state["context_matches"] != false && self.pending_back.is_none() && matches!(self.phase.as_str(),"host_ready"|"waiting_start"|"starting"),"busy":self.operation.is_some(),"refreshing":self.scans() && self.scanning.unwrap_or(monotonic()<self.refreshing_until),"status":label(&self.message),"phase":self.phase,"back_label":back})
+        json!({"lobby":self.lobby,"current_game":self.context.is_some(),"entries":if self.page == Page::Candidates { self.state["candidates"].as_array().cloned().unwrap_or_default().into_iter().skip(self.candidate.saturating_sub(3)).take(4).collect::<Vec<_>>() } else { vec![] },"network_only":self.network_only,"local_address":self.state["local_address"].as_str().unwrap_or(""),"peers":self.state["peers"].as_array().cloned().unwrap_or_default(),"connected":truth(&self.state,"connected"),"page":self.page.name(),"title":title,"core":core,"selected":selected,"room_selected":room_selected,"rooms":rows,"room_name":if room.is_null() { String::new() } else { room_name(room) },"ready":truth(&self.state,"ready") && self.state["context_matches"] != false && self.pending_back.is_none() && matches!(self.phase.as_str(),"host_ready"|"waiting_start"|"starting"),"busy":self.operation.is_some(),"refreshing":self.scans() && self.scanning.unwrap_or(monotonic()<self.refreshing_until),"status":label(&self.message),"phase":self.phase,"back_label":back})
     }
 }

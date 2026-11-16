@@ -22,6 +22,7 @@ class ReleaseContract(unittest.TestCase):
                         (
                             "native/nearby-menu/",
                             "native/nearby-platform/",
+                            "native/platform-plugin/",
                             "native/nearby/",
                             "native/core_inspect/",
                             "native/core_probe/",

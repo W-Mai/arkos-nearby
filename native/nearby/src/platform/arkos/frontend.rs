@@ -32,6 +32,11 @@ pub(crate) fn gui_command(launcher: bool, log: File) -> Command {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(log));
+    for name in ["HOWFF_RESPONSE_PROFILE", "HOWFF_INTERACTION_PROFILE"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
     command
 }
 
@@ -425,21 +430,32 @@ mod tests {
             let command = gui_command(launcher, File::open("/dev/null").unwrap());
             assert_eq!(command.get_program(), arkos::application::GUI.path());
             assert_eq!(command.get_args().len(), 0);
-            let environment: std::collections::BTreeMap<_, _> = command
+            let environment: std::collections::BTreeMap<String, String> = command
                 .get_envs()
-                .map(|(key, value)| (key.to_str().unwrap(), value.unwrap().to_str().unwrap()))
+                .map(|(key, value)| {
+                    (
+                        key.to_str().unwrap().to_owned(),
+                        value.unwrap().to_str().unwrap().to_owned(),
+                    )
+                })
                 .collect();
-            assert_eq!(
-                environment,
-                std::collections::BTreeMap::from([
-                    ("HOWFF_LAUNCHER_INPUT", if launcher { "1" } else { "0" }),
-                    ("SDL_INPUT_LINUX_KEEP_KBD", "1"),
-                    ("SDL_RENDER_BATCHING", "1"),
-                    ("TERM", "linux"),
-                    ("LANG", "C.UTF-8"),
-                    ("LC_ALL", "C.UTF-8"),
-                ])
-            );
+            let mut expected = std::collections::BTreeMap::from([
+                (
+                    "HOWFF_LAUNCHER_INPUT".to_owned(),
+                    if launcher { "1" } else { "0" }.to_owned(),
+                ),
+                ("SDL_INPUT_LINUX_KEEP_KBD".to_owned(), "1".to_owned()),
+                ("SDL_RENDER_BATCHING".to_owned(), "1".to_owned()),
+                ("TERM".to_owned(), "linux".to_owned()),
+                ("LANG".to_owned(), "C.UTF-8".to_owned()),
+                ("LC_ALL".to_owned(), "C.UTF-8".to_owned()),
+            ]);
+            for name in ["HOWFF_RESPONSE_PROFILE", "HOWFF_INTERACTION_PROFILE"] {
+                if let Ok(value) = std::env::var(name) {
+                    expected.insert(name.to_owned(), value);
+                }
+            }
+            assert_eq!(environment, expected);
         }
     }
 

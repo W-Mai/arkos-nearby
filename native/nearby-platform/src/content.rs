@@ -1,6 +1,7 @@
 //! Content and artwork locations for the selected platform.
 
 use crate::Location;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// The two catalog snapshots consumed by the application.
@@ -10,10 +11,33 @@ pub enum CatalogKind {
     Launcher,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtworkKind {
+    Rom,
+    Metadata,
+    SavePreview,
+    FrontendConfig,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtworkSource {
+    pub id: &'static str,
+    pub kind: ArtworkKind,
+    pub root: &'static str,
+}
+
+impl ArtworkSource {
+    pub const fn new(id: &'static str, kind: ArtworkKind, root: &'static str) -> Self {
+        Self { id, kind, root }
+    }
+}
+
 /// Immutable content locations, separate from resource loading and indexing.
 pub struct ContentPaths {
     pub(crate) rom_roots: &'static [&'static str],
-    pub(crate) artwork_extra: &'static [Location],
+    pub(crate) artwork_sources: &'static [ArtworkSource],
     pub(crate) catalog_index: Location,
     pub(crate) launcher_index: Location,
 }
@@ -23,16 +47,23 @@ impl ContentPaths {
         self.rom_roots
     }
 
-    /// Artwork also includes save previews and frontend configuration images.
-    pub fn artwork_roots(&self) -> Vec<PathBuf> {
-        self.rom_roots
+    pub const fn artwork_sources(&self) -> &'static [ArtworkSource] {
+        self.artwork_sources
+    }
+
+    pub fn roots_for(&self, kind: ArtworkKind) -> Vec<PathBuf> {
+        self.artwork_sources
             .iter()
-            .map(PathBuf::from)
-            .chain(
-                self.artwork_extra
-                    .iter()
-                    .map(|location| location.path().to_path_buf()),
-            )
+            .filter(|source| source.kind == kind)
+            .map(|source| PathBuf::from(source.root))
+            .collect()
+    }
+
+    /// All registered artwork roots, retained for the existing decoder boundary.
+    pub fn artwork_roots(&self) -> Vec<PathBuf> {
+        self.artwork_sources
+            .iter()
+            .map(|source| PathBuf::from(source.root))
             .collect()
     }
 
@@ -68,11 +99,20 @@ mod tests {
             ]
             .map(PathBuf::from)
         );
+        assert_eq!(
+            paths.roots_for(ArtworkKind::Rom),
+            ["/roms", "/roms2"].map(PathBuf::from)
+        );
+        assert!(paths.roots_for(ArtworkKind::Metadata).is_empty());
+        assert_eq!(
+            paths.roots_for(ArtworkKind::SavePreview),
+            ["/opt/howff/saves/backups"].map(PathBuf::from)
+        );
         assert!(
             paths
-                .artwork_extra
+                .artwork_sources()
                 .iter()
-                .all(|location| !paths.rom_roots().contains(&location.as_str()))
+                .all(|source| !source.root.is_empty() && !source.id.is_empty())
         );
         assert_eq!(
             paths.index(CatalogKind::Launcher),

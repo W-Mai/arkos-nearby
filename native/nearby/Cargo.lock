@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "howff"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -157,6 +157,10 @@ dependencies = [
 [[package]]
 name = "howff-platform"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "itoa"

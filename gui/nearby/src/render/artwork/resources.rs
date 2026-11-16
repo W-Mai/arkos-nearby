@@ -9,8 +9,11 @@ use mirui::core::resource::{FormatMatch, LoadContext, LoadError, LoadInput, Load
 use mirui::render::texture::{ColorFormat, Texture, TextureMeta};
 
 use super::{ArtworkKey, PREVIEW_HEIGHT, PREVIEW_WIDTH, source_key};
+use howff_platform::content::ArtworkKind;
 
 const PREFIX: &str = "nearby-artwork:";
+const SAVE_PREFIX: &str = "nearby-artwork-save-preview:";
+const FRONTEND_PREFIX: &str = "nearby-artwork-frontend-config:";
 const MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_DIMENSION: u32 = 4096;
 const MAX_DECODE_BYTES: u64 = 24 * 1024 * 1024;
@@ -18,8 +21,17 @@ const WORK_QUEUE: usize = 4;
 static REVISION: AtomicU64 = AtomicU64::new(1);
 
 pub(super) fn token(key: &ArtworkKey) -> String {
+    token_for(ArtworkKind::Rom, key)
+}
+
+pub(super) fn token_for(kind: ArtworkKind, key: &ArtworkKey) -> String {
+    let prefix = match kind {
+        ArtworkKind::Rom | ArtworkKind::Metadata => PREFIX,
+        ArtworkKind::SavePreview => SAVE_PREFIX,
+        ArtworkKind::FrontendConfig => FRONTEND_PREFIX,
+    };
     format!(
-        "{PREFIX}{}",
+        "{prefix}{}",
         serde_json::to_string(key).expect("artwork key")
     )
 }
@@ -52,15 +64,35 @@ type Job = Box<dyn FnOnce() + Send>;
 /// File I/O and image codecs execute outside the resource-owner thread.
 pub(super) struct ArtworkDecoder {
     send: mpsc::SyncSender<Job>,
-    roots: Arc<[PathBuf]>,
+    default_roots: Arc<[PathBuf]>,
+    save_preview_roots: Arc<[PathBuf]>,
+    frontend_config_roots: Arc<[PathBuf]>,
 }
 
 impl ArtworkDecoder {
     pub(super) fn new() -> Self {
-        Self::with_roots(howff_platform::content::paths().artwork_roots())
+        let paths = howff_platform::content::paths();
+        Self::with_scoped_roots(
+            paths
+                .roots_for(ArtworkKind::Rom)
+                .into_iter()
+                .chain(paths.roots_for(ArtworkKind::Metadata))
+                .collect(),
+            paths.roots_for(ArtworkKind::SavePreview),
+            paths.roots_for(ArtworkKind::FrontendConfig),
+        )
     }
 
+    #[cfg(test)]
     fn with_roots(roots: Vec<PathBuf>) -> Self {
+        Self::with_scoped_roots(roots, Vec::new(), Vec::new())
+    }
+
+    fn with_scoped_roots(
+        default_roots: Vec<PathBuf>,
+        save_preview_roots: Vec<PathBuf>,
+        frontend_config_roots: Vec<PathBuf>,
+    ) -> Self {
         let (send, jobs) = mpsc::sync_channel::<Job>(WORK_QUEUE);
         std::thread::Builder::new()
             .name("nearby-artwork".into())
@@ -72,7 +104,17 @@ impl ArtworkDecoder {
             .expect("artwork worker");
         Self {
             send,
-            roots: roots.into(),
+            default_roots: default_roots.into(),
+            save_preview_roots: save_preview_roots.into(),
+            frontend_config_roots: frontend_config_roots.into(),
+        }
+    }
+
+    fn roots(&self, scope: Scope) -> Arc<[PathBuf]> {
+        match scope {
+            Scope::Default => self.default_roots.clone(),
+            Scope::SavePreview => self.save_preview_roots.clone(),
+            Scope::FrontendConfig => self.frontend_config_roots.clone(),
         }
     }
 
@@ -143,8 +185,26 @@ impl DecodeState {
     }
 }
 
-fn key(cx: &LoadContext<'_>) -> Result<ArtworkKey, LoadError> {
-    serde_json::from_str(cx.token().strip_prefix(PREFIX).ok_or(LoadError::NotMine)?)
+#[derive(Clone, Copy)]
+enum Scope {
+    Default,
+    SavePreview,
+    FrontendConfig,
+}
+
+fn key(cx: &LoadContext<'_>) -> Result<(Scope, ArtworkKey), LoadError> {
+    let token = cx.token();
+    let (scope, encoded) = if let Some(value) = token.strip_prefix(PREFIX) {
+        (Scope::Default, value)
+    } else if let Some(value) = token.strip_prefix(SAVE_PREFIX) {
+        (Scope::SavePreview, value)
+    } else if let Some(value) = token.strip_prefix(FRONTEND_PREFIX) {
+        (Scope::FrontendConfig, value)
+    } else {
+        return Err(LoadError::NotMine);
+    };
+    serde_json::from_str(encoded)
+        .map(|key| (scope, key))
         .map_err(|_| LoadError::Failed("invalid artwork key"))
 }
 
@@ -223,7 +283,13 @@ impl Loader<Texture<'static>> for ArtworkDecoder {
 
     fn recognize(&self, input: LoadInput<'_>) -> FormatMatch {
         match input {
-            LoadInput::Token(token) if token.starts_with(PREFIX) => FormatMatch::Match,
+            LoadInput::Token(token)
+                if token.starts_with(PREFIX)
+                    || token.starts_with(SAVE_PREFIX)
+                    || token.starts_with(FRONTEND_PREFIX) =>
+            {
+                FormatMatch::Match
+            }
             _ => FormatMatch::NoMatch,
         }
     }
@@ -235,8 +301,8 @@ impl Loader<Texture<'static>> for ArtworkDecoder {
     ) -> Poll<Result<Texture<'static>, LoadError>> {
         if !state.decoding {
             if state.opened.is_none() && state.completion.is_none() {
-                let key = key(cx)?;
-                let roots = self.roots.clone();
+                let (scope, key) = key(cx)?;
+                let roots = self.roots(scope);
                 self.submit(state, move || {
                     open(key, &roots).and_then(decode).map(Output::Pixels)
                 })?;
@@ -282,8 +348,8 @@ impl ProbeLoader<Texture<'static>> for ArtworkDecoder {
             return Poll::Ready(Ok(opened.meta));
         }
         if state.completion.is_none() {
-            let key = key(cx)?;
-            let roots = self.roots.clone();
+            let (scope, key) = key(cx)?;
+            let roots = self.roots(scope);
             self.submit(state, move || open(key, &roots).map(Output::Opened))?;
         }
         match core::task::ready!(state.poll(self, cx))? {
@@ -358,6 +424,19 @@ mod tests {
             images.poll_pending(&mut Context::from_waker(Waker::noop()));
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    #[test]
+    fn source_kind_tokens_keep_non_game_roots_out_of_default_artwork() {
+        let game = Fixture::new();
+        let save = Fixture::new();
+        let key = save.image("preview.png", 32, 24);
+
+        assert!(open(key.clone(), std::slice::from_ref(&game.0)).is_err());
+        assert!(open(key.clone(), std::slice::from_ref(&save.0)).is_ok());
+        assert!(token(&key).starts_with(PREFIX));
+        assert!(token_for(ArtworkKind::SavePreview, &key).starts_with(SAVE_PREFIX));
+        assert!(token_for(ArtworkKind::FrontendConfig, &key).starts_with(FRONTEND_PREFIX));
     }
 
     #[test]

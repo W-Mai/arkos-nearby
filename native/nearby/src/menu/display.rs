@@ -312,11 +312,25 @@ impl Display {
         }
         self.target = Some(target);
         view["input_generation"] = serde_json::to_value(self.generation)?;
-        if view != self.previous {
+        let changed = view != self.previous;
+        crate::menu::profile_span("display.view_compare", 0, Some(changed));
+        if changed {
             let stdin = self.stdin.as_mut().ok_or("GUI has no input channel")?;
+            let serialize_started = std::time::Instant::now();
             serde_json::to_writer(&mut *stdin, &view)?;
+            crate::menu::profile_span(
+                "display.serialize_view",
+                serialize_started.elapsed().as_nanos(),
+                None,
+            );
+            let flush_started = std::time::Instant::now();
             stdin.write_all(b"\n")?;
             stdin.flush()?;
+            crate::menu::profile_span(
+                "display.write_flush_view",
+                flush_started.elapsed().as_nanos(),
+                None,
+            );
             self.previous = view;
         }
         Ok(())

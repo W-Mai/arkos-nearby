@@ -520,7 +520,7 @@ fn address_reassignment_cannot_preserve_another_stations_readiness() {
 
 #[test]
 fn renderer_contract_contains_display_fields_without_launch_authority() {
-    let flow = crate::flow::Flow::new(Some(context()));
+    let mut flow = crate::flow::Flow::new(Some(context()));
     let view = flow.view();
     let keys: std::collections::BTreeSet<_> = view
         .as_object()
