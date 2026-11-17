@@ -12,16 +12,17 @@
   "size": 12,
   "format": "gray",
   "bit_depth": 1,
-  "charset_count": 22050,
+  "charset_count": 36724,
   "charset_file": "nearby-menu-charset.txt",
   "output": "nearby-menu-12.mirx",
-  "output_sha256": "8552dcecff0800b32dab2bf6e480b78b3b279822e2ff99fb40b9027c41d6aade",
-  "output_size": 4573380,
+  "output_sha256": "b27ba91c943eb25f936bfb7b614a3192363d0bbd03fa9907a364b80fc348005d",
+  "output_size": 6871368,
   "title_output": "nearby-title-24.mirx",
   "title_size": 24,
-  "title_output_sha256": "46cc994d22d9269c8cafa1b274d1f784753237cd3b4397aa764dabfe28a41b4f",
-  "title_output_size": 5757124,
+  "title_output_sha256": "b236a916bab6884d6bae7dce9b515d36175e97532698f068f05e2cfa344ea0fb",
+  "title_output_size": 8769352,
   "bake_source": "nearby-pixel.otf",
   "bake_source_sha256": "58836813b4e32027c41d87f598cb2ba7761c73227677f41de13f58f9d870e76e",
-  "source_conversion": "Decode the WOFF container with fontTools 4.68.0, preserving source head timestamps, then save an uncompressed OpenType font."
+  "source_conversion": "Decode the WOFF container with fontTools 4.68.0, preserving source head timestamps, then save an uncompressed OpenType font.",
+  "charset_policy": "Printable source cmap and interface text"
 }

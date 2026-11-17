@@ -306,11 +306,11 @@ impl Flow {
         flow.message = "请选择仅组网或选择游戏。".into();
         flow
     }
-    pub fn lobby(context: Option<Context>, connected: bool) -> Self {
+    pub fn lobby(context: Option<Context>) -> Self {
         let mut flow = Self::new(context);
         flow.lobby = true;
         flow.single_player = false;
-        flow.set_page(if connected { Page::Lobby } else { Page::Mode });
+        flow.set_page(Page::Lobby);
         flow.message = "选择附近房间，或向下创建自己的房间。".into();
         flow
     }

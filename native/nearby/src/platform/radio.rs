@@ -1,6 +1,5 @@
 //! The active platform's wireless implementation.
 
-pub(crate) use super::arkos::radio::has_ipv4;
 pub use super::arkos::radio::{
     Control, DRIVER_SHA, SERVICES, WPA_SHA, dhcp_hook, host, join, restore, services,
 };

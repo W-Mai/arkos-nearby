@@ -1399,6 +1399,10 @@ fn launcher_feedback_retains_shelf_geometry_and_selected_action() {
             gesture.press(start);
             paint_at(&mut app, &scene, start + 240);
             assert!(gesture.progress() > 0);
+            assert!(app.world.query::<Text>().iter().any(|(entity, text)| {
+                text.resolve(None) == "操作"
+                    && !mirui::ui::branch::is_effectively_hidden(&app.world, entity)
+            }));
             assert_eq!(
                 scene.deck.height(),
                 height,
@@ -1674,7 +1678,18 @@ fn launcher_shortcuts_and_catalog_fit_after_expanding_the_favorite_shelf() {
 fn action_panels_keep_labels_inside_their_cards() {
     for size in [[480, 320], [640, 480], [800, 480]] {
         for (kind, labels) in [
-            ("game", vec!["开始游戏", "附近联机", "移出收藏", "返回"]),
+            (
+                "game",
+                vec![
+                    "开始游戏",
+                    "和朋友玩",
+                    "取消收藏",
+                    "游戏详情",
+                    "游戏设置",
+                    "存档",
+                    "返回",
+                ],
+            ),
             (
                 "tools",
                 vec![
@@ -1689,10 +1704,12 @@ fn action_panels_keep_labels_inside_their_cards() {
             (
                 "system",
                 vec![
-                    "切换主题",
-                    "音效开关",
-                    "系统控制",
-                    "管理直连网络",
+                    "主题",
+                    "音效",
+                    "亮度与音量",
+                    "设备与好友",
+                    "应用",
+                    "直连网络",
                     "返回原系统",
                     "电源",
                 ],
@@ -1718,7 +1735,11 @@ fn action_panels_keep_labels_inside_their_cards() {
                         name: (*label).into(),
                         ..Default::default()
                     };
-                    if kind == "controls"
+                    if kind == "system" && *label == "主题" {
+                        item.action = crate::model::MenuAction::CycleTheme;
+                    } else if kind == "system" && *label == "音效" {
+                        item.action = crate::model::MenuAction::ToggleSound;
+                    } else if kind == "controls"
                         && (label.starts_with("音量") || label.starts_with("亮度"))
                     {
                         let control = if label.starts_with("音量") {
@@ -1760,6 +1781,31 @@ fn action_panels_keep_labels_inside_their_cards() {
                 assert!(bounds.x >= Fixed::ZERO && bounds.y >= Fixed::ZERO);
                 assert!(bounds.x + bounds.w <= Fixed::from_int(i32::from(size[0])));
                 assert!(bounds.y + bounds.h <= Fixed::from_int(i32::from(size[1])));
+            }
+            for &(card, _) in &anchors {
+                let texts = app.world.query::<Text>();
+                let values: Vec<_> = texts
+                    .iter()
+                    .filter(|(entity, text)| {
+                        visible_in_tree(&app.world, *entity)
+                            && !text.resolve(app.world.resource()).is_empty()
+                            && selection::contains(card, *entity, |node| {
+                                app.world.get::<mirui::ui::Parent>(node).map(|p| p.0)
+                            })
+                    })
+                    .map(|(entity, _)| app.world.get::<ComputedRect>(entity).unwrap().0)
+                    .collect();
+                for (index, a) in values.iter().enumerate() {
+                    for b in &values[index + 1..] {
+                        assert!(
+                            a.x + a.w <= b.x
+                                || b.x + b.w <= a.x
+                                || a.y + a.h <= b.y
+                                || b.y + b.h <= a.y,
+                            "{size:?} {kind}: menu text overlaps: {a:?} {b:?}"
+                        );
+                    }
+                }
             }
             for (entity, text) in app.world.query::<Text>().iter() {
                 let Some(bounds) = app.world.get::<ComputedRect>(entity).map(|rect| rect.0) else {
@@ -2860,7 +2906,8 @@ fn network_status_keeps_connection_actions_inside_the_viewport() {
                     address: format!("192.168.49.{}", index + 2),
                 })
                 .collect();
-            let _scene = draw(&mut app, &view).unwrap();
+            let scene = draw(&mut app, &view).unwrap();
+            paint_at(&mut app, &scene, 800);
             let footer = rect(&app, "nearby_footer");
             let [x, y, w, h] = focus_rect(&app).unwrap();
             assert!(x >= 0 && y >= 0 && w > 40 && h >= 26);
@@ -2872,7 +2919,10 @@ fn network_status_keeps_connection_actions_inside_the_viewport() {
                     .world
                     .query::<Text>()
                     .iter()
-                    .find(|(_, text)| text.resolve(app.world.resource()).as_ref() == value)
+                    .find(|(entity, text)| {
+                        text.resolve(app.world.resource()).as_ref() == value
+                            && visible_in_tree(&app.world, *entity)
+                    })
                     .unwrap_or_else(|| panic!("Missing device text: {value}"))
                     .0;
                 app.world.get::<ComputedRect>(entity).unwrap().0
@@ -2902,7 +2952,7 @@ fn network_status_keeps_connection_actions_inside_the_viewport() {
                 );
                 assert!(
                     hint.is_none_or(|hint| address.y + address.h <= hint.y),
-                    "Addresses stay above the connection hint"
+                    "{size:?} {page:?}: address {address:?}, hint {hint:?}"
                 );
                 previous_bottom = address.y + address.h;
             }
@@ -5054,7 +5104,8 @@ fn management_navigation_and_update_progress_keep_framework_anchors() {
             .query::<Text>()
             .iter()
             .find_map(|(e, t)| {
-                (t.resolve(None).contains("Nearby 0.11.0")
+                (t.resolve(None)
+                    .contains(&format!("{} 0.11.0", howff_menu::brand::NAME))
                     && !mirui::ui::branch::is_effectively_hidden(&app.world, e))
                 .then(|| app.world.get::<ComputedRect>(e).map(|r| r.0))
                 .flatten()
@@ -5459,7 +5510,7 @@ fn save_reading_keeps_complete_paragraphs_and_uses_framework_scroll_bounds() {
         current.launcher.enabled = true;
         current.launcher.overlay = "存档".into();
         current.launcher.overlay_kind = "saves".into();
-        let content = (0..20)
+        let content = (0..40)
             .map(|i| format!("/private/session/path/{i:02}"))
             .collect::<Vec<_>>()
             .join("\n");
@@ -5483,7 +5534,7 @@ fn save_reading_keeps_complete_paragraphs_and_uses_framework_scroll_bounds() {
             .unwrap();
         let text = app.world.get::<ComputedRect>(text_entity).unwrap().0;
         assert!(
-            text.h >= Fixed::from_int(20 * i32::from(style::BODY_SIZE)),
+            text.h >= Fixed::from_int(40 * i32::from(style::BODY_SIZE)),
             "{size:?}: paragraph truncated {text:?}"
         );
         let bounds_query = app
@@ -5617,4 +5668,514 @@ fn retained_reading_scroll_updates_pixels_without_a_geometry_subscriber() {
         before != app.backend.framebuffer().read_pixels().unwrap().bytes(),
         "scroll changed offset but not painted pixels"
     );
+}
+
+#[test]
+fn product_header_keeps_identity_and_context_inside_its_bounds() {
+    use mirui::ui::Parent;
+    for size in [[480, 320], [640, 480], [640, 640]] {
+        for page in [Page::Choice, Page::Games, Page::Host] {
+            let mut app = app(size);
+            let mut current = view(page);
+            current.title = "超级长的游戏标题 / A game with a long name".repeat(4);
+            current.room_name = "房间 A216".into();
+            current.connected = true;
+            let _scene = draw(&mut app, &current).unwrap();
+            let header = section(&app, Section::Header);
+            let bounds = app.world.get::<ComputedRect>(header).unwrap().0;
+            let labels = app
+                .world
+                .query::<Text>()
+                .iter()
+                .filter(|(entity, _)| {
+                    visible_in_tree(&app.world, *entity)
+                        && selection::contains(header, *entity, |node| {
+                            app.world.get::<Parent>(node).map(|parent| parent.0)
+                        })
+                })
+                .map(|(entity, text)| (entity, text.resolve(None).to_string()))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                labels
+                    .iter()
+                    .filter(|(_, text)| text.as_str() == howff_menu::brand::NAME)
+                    .count(),
+                1
+            );
+            assert!(labels.iter().all(|(_, text)| !text.starts_with("步骤")));
+            let name = labels
+                .iter()
+                .find(|(_, text)| text == howff_menu::brand::NAME)
+                .unwrap()
+                .0;
+            let name_rect = app.world.get::<ComputedRect>(name).unwrap().0;
+            for (entity, text) in &labels {
+                if !text.is_empty() && text != howff_menu::brand::NAME {
+                    let context = app.world.get::<ComputedRect>(*entity).unwrap().0;
+                    assert!(
+                        context.x >= name_rect.x + name_rect.w,
+                        "{size:?} {page:?}: context overlaps the wordmark"
+                    );
+                }
+            }
+            for (entity, _) in labels {
+                let rect = app.world.get::<ComputedRect>(entity).unwrap().0;
+                assert!(
+                    rect.x >= bounds.x && rect.x + rect.w <= bounds.x + bounds.w,
+                    "{size:?} {page:?}: {rect:?} {bounds:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn embedded_room_headers_follow_the_object_without_repeating_the_product_name() {
+    use mirui::ui::Parent;
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut home = view(Page::Games);
+        home.status.clear();
+        home.library.kind = crate::model::LibraryKind::Favorites;
+        home.launcher.enabled = true;
+        home.launcher.key = home.entries[0].key.clone();
+        let mut scene = draw(&mut app, &home).unwrap();
+        paint_at(&mut app, &scene, 800);
+        for (index, page) in [Page::Lobby, Page::Choice].into_iter().enumerate() {
+            let mut popup = view(page);
+            popup.status.clear();
+            popup.return_to_launcher = true;
+            popup.current_game = page == Page::Choice;
+            popup.launcher_shelf = Some(Box::new(home.clone()));
+            popup.title = "魂斗罗".into();
+            update(&mut scene, &popup).unwrap();
+            let now = 1600 + index as u64 * 1600;
+            paint_at(&mut app, &scene, now);
+            let scope = app
+                .world
+                .query::<deck::ActorScope>()
+                .iter()
+                .find_map(|(entity, scope)| {
+                    (visible_in_tree(&app.world, entity)
+                        && matches!(scope, deck::ActorScope::Layer(deck::Layer::Room)))
+                    .then_some(entity)
+                })
+                .unwrap();
+            let header = app
+                .world
+                .query::<Section>()
+                .iter()
+                .find_map(|(entity, section)| {
+                    (*section == Section::Header
+                        && selection::contains(scope, entity, |node| {
+                            app.world.get::<Parent>(node).map(|parent| parent.0)
+                        }))
+                    .then_some(entity)
+                })
+                .unwrap();
+            let texts = app
+                .world
+                .query::<Text>()
+                .iter()
+                .filter(|(entity, _)| {
+                    selection::contains(header, *entity, |node| {
+                        app.world.get::<Parent>(node).map(|parent| parent.0)
+                    }) && visible_in_tree(&app.world, *entity)
+                })
+                .map(|(_, text)| text.resolve(None).to_string())
+                .collect::<Vec<_>>();
+            assert!(scene.room.embedded());
+            assert!(!texts.iter().any(|text| text == howff_menu::brand::NAME));
+            assert!(texts.iter().any(|text| text
+                == if page == Page::Choice {
+                    "魂斗罗"
+                } else {
+                    "好友房间"
+                }));
+            if let Ok(directory) = std::env::var("HOWFF_BRAND_CAPTURE_DIR") {
+                let directory = std::path::Path::new(&directory);
+                std::fs::create_dir_all(directory).unwrap();
+                let file = std::fs::File::create(
+                    directory.join(format!("panel-{page:?}-{}x{}.png", size[0], size[1])),
+                )
+                .unwrap();
+                let mut encoder = png::Encoder::new(file, u32::from(size[0]), u32::from(size[1]));
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .unwrap()
+                    .write_image_data(app.backend.framebuffer().read_pixels().unwrap().bytes())
+                    .unwrap();
+            }
+            update(&mut scene, &home).unwrap();
+            paint_at(&mut app, &scene, now + 800);
+        }
+    }
+}
+
+fn visible_in_tree(world: &mirui::ecs::World, mut entity: Entity) -> bool {
+    loop {
+        if mirui::ui::branch::is_effectively_hidden(world, entity) {
+            return false;
+        }
+        match world.get::<mirui::ui::Parent>(entity) {
+            Some(parent) => entity = parent.0,
+            None => return true,
+        }
+    }
+}
+
+fn settle_text_flow(app: &mut TestApp) {
+    let base = now_ns() / 1_000_000;
+    for offset in [0, 16, 100, 400, 416] {
+        let time = base + offset;
+        TIME.with(|clock| clock.set(time * 1_000_000));
+        super::paint_at(app, time).unwrap();
+    }
+}
+
+#[test]
+fn text_flow_management_hints_keep_key_and_action_pairs_disjoint() {
+    use howff_menu::management::{Entry, View as ManagementView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let state = app
+            .add_model(crate::launcher::management::Manager::default())
+            .finish();
+        state.sync(Some(&ManagementView {
+            epoch: 1,
+            entry: Entry::Application,
+            ..Default::default()
+        }));
+        let root = app.spawn_root().id();
+        app.compose(
+            root,
+            management::hints(state.clone(), Metrics::for_height(size[1])),
+        );
+        settle_text_flow(&mut app);
+        let mut bounds: Vec<_> = app
+            .world
+            .query::<Text>()
+            .iter()
+            .filter(|(entity, _)| visible_in_tree(&app.world, *entity))
+            .map(|(entity, text)| {
+                (
+                    text.resolve(app.world.resource()).to_string(),
+                    app.world.get::<ComputedRect>(entity).unwrap().0,
+                )
+            })
+            .collect();
+        assert_eq!(bounds.len(), 4);
+        bounds.sort_by_key(|(_, rect)| rect.x);
+        for pair in bounds.windows(2) {
+            assert!(
+                pair[0].1.x + pair[0].1.w <= pair[1].1.x,
+                "{size:?}: {pair:?}"
+            );
+        }
+        assert!(bounds.iter().all(|(_, rect)| rect.w > Fixed::ZERO
+            && rect.h >= Fixed::from_int(i32::from(style::BODY_SIZE))));
+    }
+}
+
+#[test]
+fn text_flow_multiline_summary_stays_above_management_rows() {
+    use howff_menu::management::{Device, View as ManagementView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let state = app
+            .add_model(crate::launcher::management::Manager::default())
+            .finish();
+        state.sync(Some(&ManagementView {
+            epoch: 1,
+            device: Device {
+                id: "a".repeat(64),
+                name: "山岚的游戏掌机".into(),
+                address: String::new(),
+            },
+            ..Default::default()
+        }));
+        let root = app.spawn_root().id();
+        app.compose(
+            root,
+            management::panel(state.clone(), Metrics::for_height(size[1])),
+        );
+        settle_text_flow(&mut app);
+        let summary = state.summary();
+        let text = app
+            .world
+            .query::<Text>()
+            .iter()
+            .find(|(entity, text)| {
+                visible_in_tree(&app.world, *entity)
+                    && text.resolve(app.world.resource()).as_ref() == summary
+            })
+            .unwrap()
+            .0;
+        let rect = app.world.get::<ComputedRect>(text).unwrap().0;
+        let native = if size[1] < 400 {
+            style::BODY_SIZE
+        } else {
+            style::TITLE_SIZE
+        };
+        assert!(
+            rect.h >= Fixed::from_int(2 * i32::from(native)),
+            "{size:?}: multiline summary collapsed: {rect:?}"
+        );
+        let row = app
+            .world
+            .query::<deck::ActionAnchor>()
+            .iter()
+            .find(|(entity, anchor)| {
+                anchor.0 == 0
+                    && anchor.1 == deck::ActionLayout::Management
+                    && visible_in_tree(&app.world, *entity)
+            })
+            .unwrap()
+            .0;
+        let first = app.world.get::<ComputedRect>(row).unwrap().0;
+        assert!(
+            rect.y + rect.h <= first.y,
+            "{size:?}: summary {rect:?} overlaps row {first:?}"
+        );
+    }
+}
+
+#[test]
+fn text_flow_save_facts_stack_wrapped_values_without_overlapping() {
+    use crate::model::Action;
+    for size in [[320, 240], [480, 320], [640, 480]] {
+        let mut app = app(size);
+        let state = app
+            .add_model(crate::launcher::saves::Manager::default())
+            .finish();
+        let mut fixture = crate::launcher::saves::tests::fixture();
+        fixture.document.as_mut().unwrap().core =
+            "Super Nintendo Entertainment System / Snes9x / 长名称核心构建".repeat(2);
+        state.sync(Some(&fixture));
+        state.input(Action::Confirm);
+        let root = app.spawn_root().id();
+        app.compose(
+            root,
+            saves::facts(
+                state.clone(),
+                Metrics::for_height(size[1]),
+                crate::launcher::saves::FactContext::Panel,
+            ),
+        );
+        settle_text_flow(&mut app);
+        let facts = state.facts();
+        assert!(facts.len() >= 4);
+        let mut bottom = Fixed::ZERO;
+        let mut wrapped_height = Fixed::ZERO;
+        for fact in facts {
+            let find = |value: &str| {
+                let text = app
+                    .world
+                    .query::<Text>()
+                    .iter()
+                    .find(|(entity, text)| {
+                        visible_in_tree(&app.world, *entity)
+                            && text.resolve(app.world.resource()).as_ref() == value
+                    })
+                    .unwrap()
+                    .0;
+                app.world.get::<ComputedRect>(text).unwrap().0
+            };
+            let label = find(&fact.label);
+            let value = find(&fact.value);
+            assert!(
+                label.y >= bottom,
+                "{size:?}: {} {label:?} overlaps previous bottom {bottom:?}",
+                fact.label
+            );
+            assert_eq!(label.y, value.y);
+            assert!(label.x + label.w <= value.x);
+            assert!(value.x + value.w <= Fixed::from_int(i32::from(size[0])));
+            assert!(value.h >= Fixed::from_int(i32::from(style::BODY_SIZE)));
+            if fact.label == "当前核心" {
+                wrapped_height = value.h;
+            }
+            bottom = (label.y + label.h).max(value.y + value.h);
+        }
+        assert!(bottom <= Fixed::from_int(i32::from(size[1])));
+        fixture.document.as_mut().unwrap().core = "Snes9x".into();
+        state.sync(Some(&fixture));
+        settle_text_flow(&mut app);
+        let text = app
+            .world
+            .query::<Text>()
+            .iter()
+            .find(|(entity, text)| {
+                visible_in_tree(&app.world, *entity)
+                    && text.resolve(app.world.resource()).as_ref() == "Snes9x"
+            })
+            .unwrap()
+            .0;
+        let short = app.world.get::<ComputedRect>(text).unwrap().0;
+        assert!(
+            short.h <= wrapped_height,
+            "short values must release the wrapped height"
+        );
+        assert!(short.h < wrapped_height);
+    }
+}
+
+#[test]
+fn text_flow_rename_preedit_and_mode_share_the_available_row() {
+    use crate::model::Action;
+    use howff_menu::management::{Device, View as ManagementView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "设备与好友".into();
+        current.launcher.overlay_kind = "management".into();
+        current.launcher.management = Some(ManagementView {
+            epoch: 10,
+            revision: 1,
+            device: Device {
+                id: "a".repeat(64),
+                name: "我的掌机".into(),
+                address: String::new(),
+            },
+            ..Default::default()
+        });
+        let scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let launcher = scene.state.launcher();
+        launcher.management_input(Action::Confirm);
+        paint_at(&mut app, &scene, 1000);
+        let entry = launcher.management().text();
+        for letter in ["w", "o"] {
+            let index = (0..30)
+                .find(|index| entry.key_label(*index) == letter)
+                .unwrap();
+            while entry.selected() < index {
+                launcher.management_input(Action::Right);
+            }
+            while entry.selected() > index {
+                launcher.management_input(Action::Left);
+            }
+            launcher.management_input(Action::Confirm);
+        }
+        paint_at(&mut app, &scene, 1400);
+        assert_eq!(entry.preedit(), "wo");
+        if let Ok(directory) = std::env::var("HOWFF_TEXT_INPUT_CAPTURES") {
+            let directory = std::path::Path::new(&directory);
+            std::fs::create_dir_all(directory).unwrap();
+            let file =
+                std::fs::File::create(directory.join(format!("rename-{}.png", size[0]))).unwrap();
+            let mut encoder = png::Encoder::new(file, u32::from(size[0]), u32::from(size[1]));
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(app.backend.framebuffer().read_pixels().unwrap().bytes())
+                .unwrap();
+        }
+        let find = |value: &str| {
+            let entity = app
+                .world
+                .query::<Text>()
+                .iter()
+                .find(|(entity, text)| {
+                    visible_in_tree(&app.world, *entity)
+                        && text.resolve(app.world.resource()).as_ref() == value
+                })
+                .unwrap()
+                .0;
+            app.world.get::<ComputedRect>(entity).unwrap().0
+        };
+        let mode = find("拼音");
+        let preedit = find("wo");
+        assert!(
+            mode.x + mode.w <= preedit.x,
+            "{size:?}: mode and preedit overlap"
+        );
+        assert!(
+            preedit.x + preedit.w <= Fixed::from_int(i32::from(size[0])),
+            "{size:?}: preedit leaves viewport: {preedit:?}"
+        );
+        assert_eq!(mode.y, preedit.y);
+    }
+}
+
+#[test]
+fn text_flow_friend_identity_and_address_keep_separate_rows() {
+    use crate::model::Action;
+    use howff_menu::management::{Device, View as ManagementView};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.launcher.enabled = true;
+        current.launcher.overlay = "设备与好友".into();
+        current.launcher.overlay_kind = "management".into();
+        let friend = Device {
+            id: "b".repeat(64),
+            name: "溪谷".into(),
+            address: "192.168.49.2".into(),
+        };
+        current.launcher.management = Some(ManagementView {
+            epoch: 1,
+            device: Device {
+                id: "a".repeat(64),
+                name: "山岚".into(),
+                address: String::new(),
+            },
+            friends: vec![friend.clone()],
+            ..Default::default()
+        });
+        let scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 800);
+        let launcher = scene.state.launcher();
+        launcher.management_input(Action::Down);
+        launcher.management_input(Action::Confirm);
+        paint_at(&mut app, &scene, 1200);
+        assert!(launcher.management().page() == crate::launcher::management::Page::Friend);
+        capture_text_audit(&mut app, "friend", size);
+        let find = |value: &str| {
+            let entity = app
+                .world
+                .query::<Text>()
+                .iter()
+                .find(|(entity, text)| {
+                    visible_in_tree(&app.world, *entity)
+                        && text.resolve(app.world.resource()).as_ref() == value
+                })
+                .unwrap()
+                .0;
+            app.world.get::<ComputedRect>(entity).unwrap().0
+        };
+        let id = find(&friend.id);
+        let address = find(&friend.address);
+        let id_label = find("设备标识");
+        let address_label = find("记录地址");
+        assert_eq!(id.y, id_label.y);
+        assert_eq!(address.y, address_label.y);
+        assert!(
+            id.y + id.h <= address.y,
+            "{size:?}: friend fields overlap: {id:?} {address:?}"
+        );
+        assert!(id.x + id.w <= Fixed::from_int(i32::from(size[0])));
+    }
+}
+
+fn capture_text_audit(app: &mut TestApp, name: &str, size: [u16; 2]) {
+    if let Ok(directory) = std::env::var("HOWFF_TEXT_INPUT_CAPTURES") {
+        let directory = std::path::Path::new(&directory);
+        std::fs::create_dir_all(directory).unwrap();
+        let file =
+            std::fs::File::create(directory.join(format!("{name}-{}.png", size[0]))).unwrap();
+        let mut encoder = png::Encoder::new(file, u32::from(size[0]), u32::from(size[1]));
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(app.backend.framebuffer().read_pixels().unwrap().bytes())
+            .unwrap();
+    }
 }

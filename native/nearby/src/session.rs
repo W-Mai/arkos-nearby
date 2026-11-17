@@ -942,7 +942,7 @@ fn native_admission(role: &str, bytes: &[u8]) -> bool {
     let text = String::from_utf8_lossy(bytes);
     if role == "host" {
         text.lines().any(|line| {
-            line.contains("ArkOS_peer")
+            line.contains(howff_menu::brand::PEER_NICK)
                 && (line.to_ascii_lowercase().contains("joined as player 2")
                     || line.contains("已加入为玩家「2")
                     || line.contains("已加入为玩家 2"))
@@ -1391,8 +1391,20 @@ mod native_admission_tests {
     fn unrelated_log_encoding_cannot_hide_the_current_native_admission() {
         let mut host = b"content.zip#\xb3\xac\xbc\xb6\n".to_vec();
         host.extend_from_slice(
-            "[INFO] [Netplay] 「ArkOS_peer」已加入为玩家「2」 (ping: 14 ms)\n".as_bytes(),
+            format!(
+                "[INFO] [Netplay] 「{}」已加入为玩家「2」 (ping: 14 ms)\n",
+                howff_menu::brand::PEER_NICK
+            )
+            .as_bytes(),
         );
+        assert!(native_admission(
+            "host",
+            format!(
+                "[Netplay] {} joined as player 2 (ping: 12 ms)",
+                howff_menu::brand::PEER_NICK
+            )
+            .as_bytes()
+        ));
         assert!(native_admission("host", &host));
         let mut client = b"content.zip#\xb3\xac\xbc\xb6\n".to_vec();
         client

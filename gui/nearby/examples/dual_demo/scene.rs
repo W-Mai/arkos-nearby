@@ -1,3 +1,4 @@
+use howff_menu::brand::NAME as PRODUCT_NAME;
 use mirui::prelude::*;
 use mirui::types::Transform;
 use mirui::ui::widgets::TextAlign::Center;
@@ -425,8 +426,8 @@ pub fn stage(state: model!(Promo)) -> Entity {
                     bg_color: ${ if state.frame().stage == i as usize { GOLD } else { Color::rgb(66, 87, 66) } }
                 )
             }
-            caption ("ARKOS NEARBY", 36, 724, 180, PAPER)
-            caption ("附近联机  /  R36S", 886, 724, 198, QUIET)
+            caption (PRODUCT_NAME, 36, 724, 180, PAPER)
+            caption ("R36S", 886, 724, 198, QUIET)
         }
     }
 }

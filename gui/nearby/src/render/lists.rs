@@ -70,7 +70,6 @@ pub(super) fn lobby(state: model!(DisplayState), metrics: Metrics) -> Entity {
                         super::deck::ActorScope::Pane(if actions { crate::model::Page::Mode } else { crate::model::Page::Lobby }),
                     ] {
                         if actions {
-                            label ("仅组网 / 选择游戏", metrics.body, SECONDARY, Start)
                             choice (super::state::PageKey { page: crate::model::Page::Mode, network_only: false, library: crate::model::LibraryKind::Directory }, state, metrics)
                         } else {
                             label ("附近正在玩的伙伴", metrics.title, FOREGROUND, Start)
@@ -242,8 +241,8 @@ fn preview_label(state: model!(DisplayState), metrics: Metrics, platforms: bool)
             height: metrics.preview_title_height(),
             min_width: 0,
             shrink: 0.0,
-            font: font(metrics.title),
-            font_size: metrics.title,
+            font: font(TITLE_SIZE),
+            font_size: TITLE_SIZE,
             text_color: FOREGROUND,
             bg_color: BACKGROUND,
             paragraph: paragraph(Center, 2)

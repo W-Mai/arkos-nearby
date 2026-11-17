@@ -1,35 +1,44 @@
 {
   "page": "games",
-  "title": "选择游戏",
+  "title": "NES / FC",
   "core": "NES / FC",
   "selected": 1,
   "entries": [
     {
       "name": "超级马里奥1",
-      "detail": "选择游戏",
-      "directory": false
+      "detail": "NES / FC",
+      "directory": false,
+      "icon": "nes"
     },
     {
       "name": "魂斗罗1",
-      "detail": "选择游戏",
-      "directory": false
+      "detail": "NES / FC",
+      "directory": false,
+      "icon": "nes"
     },
     {
       "name": "1943",
-      "detail": "选择游戏",
-      "directory": false
+      "detail": "NES / FC",
+      "directory": false,
+      "icon": "nes"
     },
     {
       "name": "俄罗斯方块",
-      "detail": "选择游戏",
-      "directory": false
+      "detail": "NES / FC",
+      "directory": false,
+      "icon": "nes"
     }
   ],
   "rooms": [],
   "room_name": "",
   "ready": false,
   "busy": false,
-  "status": "2 / 4",
+  "status": "",
   "phase": "idle",
-  "back_label": "上级"
+  "back_label": "上级",
+  "library": {
+    "kind": "directory",
+    "total": 4,
+    "position": 2
+  }
 }

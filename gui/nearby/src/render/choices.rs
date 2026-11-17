@@ -81,7 +81,7 @@ pub(super) fn choice(view: PageKey, state: model!(DisplayState), metrics: Metric
                                     FONT_PAINT,
                                 ]
                             }
-                            label (card.1, metrics.title, FOREGROUND, Center)
+                            label (card.1, TITLE_SIZE, FOREGROUND, Center)
                             if !metrics.tiny {
                                 Text (
                                     card.2,

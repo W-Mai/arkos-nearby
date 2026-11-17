@@ -391,7 +391,7 @@ impl MenuSession {
             let mut flow = if mode_picker {
                 self.lobby_flow
                     .take()
-                    .unwrap_or_else(|| Flow::lobby(context, crate::platform::radio::has_ipv4()))
+                    .unwrap_or_else(|| Flow::lobby(context))
             } else if purpose == SessionPurpose::NetworkOnly {
                 Flow::network()
             } else {

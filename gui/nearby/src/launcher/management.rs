@@ -74,6 +74,9 @@ pub struct Manager {
     rows_cache: Vec<Row>,
     parents: Vec<(Page, usize)>,
     friend: String,
+    #[observe]
+    friend_layout_revision: u64,
+    friend_measurements: [Option<(Fact, Fixed)>; 2],
     confirmation: Option<Operation>,
     pending: Option<Request>,
     awaiting: Option<Operation>,
@@ -104,6 +107,8 @@ impl Default for Manager {
             rows_cache: vec![],
             parents: vec![],
             friend: String::new(),
+            friend_layout_revision: 0,
+            friend_measurements: std::array::from_fn(|_| None),
             confirmation: None,
             pending: None,
             awaiting: None,
@@ -241,7 +246,7 @@ impl Manager {
             Page::Device => "设备与好友",
             Page::Friend => "好友详情",
             Page::Rename => "设备名称",
-            Page::Application => "应用管理",
+            Page::Application => "应用",
             Page::Version => "版本信息",
             Page::Startup => "启动方式",
             Page::Home => "开机首页",
@@ -270,7 +275,7 @@ impl Manager {
                 .find(|f| f.id == self.friend)
                 .map(|f| f.name.clone())
                 .unwrap_or_default(),
-            Page::Application => format!("Nearby {}", view.version),
+            Page::Application => format!("{} {}", howff_menu::brand::NAME, view.version),
             Page::Detail => self
                 .detail
                 .as_ref()
@@ -282,12 +287,14 @@ impl Manager {
                 Some(Operation::SetHome { home }) => format!(
                     "开机进入{}",
                     if home == Home::Howff {
-                        "Nearby 收藏首页"
+                        howff_menu::brand::NAME
                     } else {
                         "原系统游戏列表"
                     }
                 ),
-                Some(Operation::Install { .. }) => "安装完成后重新打开 Nearby".into(),
+                Some(Operation::Install { .. }) => {
+                    format!("安装完成后重新打开 {}", howff_menu::brand::NAME)
+                }
                 _ => String::new(),
             },
             Page::Packages => view.directory.clone(),
@@ -354,7 +361,7 @@ impl Manager {
                     "home",
                     "开机首页",
                     if view.home == Home::Howff {
-                        "Nearby"
+                        howff_menu::brand::NAME
                     } else {
                         "原系统"
                     },
@@ -363,7 +370,7 @@ impl Manager {
             ],
             Page::Home => vec![
                 row("original", "原系统", "游戏列表", idle),
-                row("nearby", "Nearby", "收藏首页", idle),
+                row("nearby", howff_menu::brand::NAME, "收藏首页", idle),
             ],
             Page::Confirm => vec![
                 row("cancel", "返回", "", true),
@@ -432,6 +439,26 @@ impl Manager {
             .map(|v| v.value.clone())
             .unwrap_or_default()
     }
+    pub fn measure_friend(&mut self, index: usize, height: Fixed) {
+        let Some(fact) = self.snapshot_friend_field(index) else {
+            return;
+        };
+        let measurement = (fact, height);
+        if self.friend_measurements[index].as_ref() != Some(&measurement) {
+            self.friend_measurements[index] = Some(measurement);
+            self.friend_layout_revision += 1;
+        }
+    }
+
+    fn snapshot_friend_height(&self, index: usize) -> Fixed {
+        self.friend_measurements
+            .get(index)
+            .and_then(Option::as_ref)
+            .filter(|(fact, _)| self.snapshot_friend_field(index).as_ref() == Some(fact))
+            .map(|(_, height)| *height)
+            .unwrap_or_default()
+    }
+
     pub fn snapshot_friend_field(&self, index: usize) -> Option<Fact> {
         let friend = self
             .view
@@ -774,7 +801,15 @@ impl ManagerHandle {
         self.snapshot_detail_value()
     }
 
+    pub fn friend_height(&self, index: usize) -> Fixed {
+        self.revision();
+        self.page();
+        self.friend_layout_revision();
+        self.snapshot_friend_height(index)
+    }
+
     pub fn friend_field(&self, index: usize) -> Option<Fact> {
+        self.page();
         self.revision();
         self.snapshot_friend_field(index)
     }

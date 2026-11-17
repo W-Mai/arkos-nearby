@@ -7,12 +7,17 @@
   "selected": 0,
   "entries": [],
   "rooms": [],
-  "room_name": "附近房间",
+  "room_name": "房间 A216",
   "ready": false,
   "busy": false,
   "status": "可以返回系统，打开支持局域网联机的游戏。",
   "phase": "network_connected",
   "back_label": "关闭网络",
   "local_address": "192.168.49.1",
-  "peers": [{"name": "好友掌机", "address": "192.168.49.2"}]
+  "peers": [
+    {
+      "name": "好友掌机",
+      "address": "192.168.49.2"
+    }
+  ]
 }

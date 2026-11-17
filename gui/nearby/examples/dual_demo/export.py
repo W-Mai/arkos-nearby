@@ -9,7 +9,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "scripts"))
-import build_nearby_gui as gui  # noqa: E402
+import build_howff_gui as gui  # noqa: E402
 
 
 def main():
@@ -18,7 +18,7 @@ def main():
     parser.add_argument(
         "--frames", type=Path, default=Path("/tmp/arkos-nearby-demo-frames")
     )
-    parser.add_argument("--toolchain", default="1.92")
+    parser.add_argument("--toolchain", default="1.97.0")
     parser.add_argument("--quality", type=int, default=75)
     parser.add_argument("--width", type=int)
     parser.add_argument("--crf", type=int, default=22)

@@ -96,7 +96,14 @@ pub fn frontend_arguments(context: &Context, directory: &Path, host: bool) -> Ve
         directory.join("base.cfg").to_string_lossy().into_owned(),
         "--appendconfig".into(),
         directory.join("netplay.cfg").to_string_lossy().into_owned(),
-        format!("--nick=ArkOS_{}", if host { "host" } else { "peer" }),
+        format!(
+            "--nick={}",
+            if host {
+                howff_menu::brand::HOST_NICK
+            } else {
+                howff_menu::brand::PEER_NICK
+            }
+        ),
         "--sram-mode=noload-nosave".into(),
     ];
     // Device types in base.cfg are ignored by RetroArch. The CLI sets the

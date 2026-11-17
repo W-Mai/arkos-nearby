@@ -56,9 +56,9 @@ CC_aarch64_unknown_linux_musl=/path/to/clang AR_aarch64_unknown_linux_musl=/path
 
 ## 界面截图
 
-界面使用 Fusion Pixel 简体中文像素字体，正文为 12px，标题为 24px。两个字库覆盖 `gui/nearby/assets/nearby-menu-charset.txt` 中的 22,050 个字符。字体来源、转换输入和输出摘要见 `font-source.json`，字体及其衍生来源许可证合并保存在 `OFL.txt`。
+界面使用 Fusion Pixel 简体中文像素字体，正文为 12px，标题为 24px。两个字库覆盖原字体 cmap 与界面文本，字符清单 `gui/nearby/assets/nearby-menu-charset.txt` 收录 36,724 个可打印字符。字体来源、转换输入和输出摘要见 `font-source.json`，字体及其衍生来源许可证合并保存在 `OFL.txt`。
 
-重新生成字库时，将来源记录中的 WOFF 解码为 OpenType 文件，使用 ICU 0.11.1 执行 `icu bake-font nearby-pixel.otf --charset-file gui/nearby/assets/nearby-menu-charset.txt --size 12 --bit-depth 1 --format gray -O /tmp/nearby-font`；将字号改为 24 生成标题字库。将产物分别命名为 `nearby-menu-12.mirx` 和 `nearby-title-24.mirx`，并更新来源记录中的摘要与大小。
+重新生成字库时，使用 fontTools 4.68.0 将来源记录中的 WOFF 解码为 OpenType 文件并保留 head 时间戳，使用 ICU 0.11.1 执行 `icu bake-font nearby-pixel.otf --charset-file gui/nearby/assets/nearby-menu-charset.txt --size 12 --bit-depth 1 --format gray -O /tmp/nearby-font`；将字号改为 24 生成标题字库。将产物分别命名为 `nearby-menu-12.mirx` 和 `nearby-title-24.mirx`，并更新来源记录中的摘要与大小。
 
 发行版使用 SDL2/GLES 界面；静态链接构建命令及显示检查见 [GPU 界面构建](gpu-rendering.md)。`scripts/build.py build` 复用准备资产中的界面程序。
 
@@ -113,3 +113,11 @@ python3 gui/nearby/examples/dual_demo/svg.py --output /tmp/nearby-dual-demo.svg
 ## 街机载入检查器
 
 `native/core_probe/` 保存 ARM64 街机载入检查器及 libretro ABI 声明。`python3 scripts/build_core_probe.py check` 检查 C 源码；构建命令、固定运行库与许可证见 [检查器说明](../native/core_probe/README.md)。
+
+## 品牌图形
+
+Logo 和字标使用实际界面组件导出。命令生成 `docs/assets/logo.svg` 和 `docs/assets/wordmark.svg`，字标随文档的明暗配色切换。
+
+```sh
+python3 scripts/export_howff_brand.py --output docs/assets
+```

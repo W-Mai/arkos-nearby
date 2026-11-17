@@ -61,7 +61,7 @@ pub(super) fn host(state: model!(DisplayState), metrics: Metrics) -> Entity {
                     Section::FocusHost,
                     FocusTarget::fixed(0),
                 ] {
-                    action_label (state, metrics.title)
+                    action_label (state, TITLE_SIZE)
                 }
                 shadow (metrics)
             }
@@ -83,32 +83,28 @@ pub(super) fn network_panel(state: model!(DisplayState), metrics: Metrics) -> En
                     row_gap: metrics.gap
                 ) {
                     Row (
-                        height: if metrics.compact { 24 } else { 32 },
+                        height: i32::from(TITLE_SIZE) + LABEL_LEADING,
                         shrink: 0.0,
                         align: AlignItems::Center,
                         column_gap: metrics.gap
                     ) {
                         Column (grow: 1.0, min_width: 0) {
-                            live_label (state, Headline, metrics.title, FOREGROUND, Start)
-                        }
-                        View (
-                            width: 120,
-                            shrink: 0.0,
-                            height: Dimension::percent(100),
-                            clip_children: true
-                        ) [
-                            pixel::SessionSprite {
-                                state: state.clone(),
-                            },
-                        ]
-                    }
-                    Column (grow: 1.0, min_height: 0, justify: JustifyContent::Center) {
-                        match ${ state.devices() } {
-                            rows => {
-                                network_devices (&rows, metrics)
-                            }
+                            live_label (state, Headline, TITLE_SIZE, FOREGROUND, Start)
                         }
                     }
+                    View (
+                        height: if metrics.compact { 48 } else { 84 },
+                        min_height: i32::from(metrics.small) + 4,
+                        shrink: 1.0,
+                        grow: 1.0,
+                        width: Dimension::percent(100),
+                        clip_children: true
+                    ) [
+                        pixel::SessionSprite {
+                            state: state.clone(),
+                        },
+                    ]
+                    network_devices (state, metrics)
                     guidance (state, metrics)
                 }
                 shadow (metrics)
@@ -126,7 +122,7 @@ pub(super) fn network_panel(state: model!(DisplayState), metrics: Metrics) -> En
                     Section::FocusHost,
                     FocusTarget::fixed(0),
                 ] {
-                    action_label (state, metrics.title)
+                    action_label (state, TITLE_SIZE)
                 }
                 shadow (metrics)
             }
@@ -135,10 +131,22 @@ pub(super) fn network_panel(state: model!(DisplayState), metrics: Metrics) -> En
 }
 
 #[compose]
-fn network_devices(rows: &[crate::model::NetworkPeer], metrics: Metrics) -> Entity {
+fn network_devices(state: model!(DisplayState), metrics: Metrics) -> Entity {
     ui! {
-        Column (grow: 1.0, min_height: 0, justify: JustifyContent::Center, row_gap: metrics.gap) {
-            walk rows.iter() with device {
+        Column (
+            height: ${
+                if state.network_connected() {
+                    metrics.device_list_height(state.devices().len())
+                } else {
+                    0
+                }
+            },
+            visible: ${ state.network_connected() },
+            shrink: 0.0,
+            justify: JustifyContent::Center,
+            row_gap: metrics.device_row_gap()
+        ) {
+            walk ${ state.devices() } with device {
                 Row (
                     height: metrics.device_row_height(),
                     shrink: 1.0,
@@ -237,7 +245,7 @@ pub(super) fn joined(state: model!(DisplayState), metrics: Metrics) -> Entity {
                 live_label (
                     state,
                     Headline,
-                    metrics.title,
+                    TITLE_SIZE,
                     FOREGROUND,
                     Center
                 )
@@ -268,7 +276,7 @@ pub(super) fn leaving(state: model!(DisplayState), metrics: Metrics) -> Entity {
                 live_label (
                     state,
                     Headline,
-                    metrics.title,
+                    TITLE_SIZE,
                     FOREGROUND,
                     Center
                 )
@@ -300,8 +308,8 @@ pub(super) fn unavailable(metrics: Metrics) -> Entity {
                     width: 44,
                     height: 40,
                     bg_color: WARNING_PANEL,
-                    font: font(metrics.title),
-                    font_size: metrics.title,
+                    font: font(TITLE_SIZE),
+                    font_size: TITLE_SIZE,
                     text_color: WARNING,
                     paragraph: paragraph(Center, 1)
                 ) [
@@ -309,7 +317,7 @@ pub(super) fn unavailable(metrics: Metrics) -> Entity {
                 ]
                 label (
                     "暂时无法进行联机",
-                    metrics.title,
+                    TITLE_SIZE,
                     FOREGROUND,
                     Center
                 )

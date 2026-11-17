@@ -12,7 +12,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "scripts"))
-import build_nearby_gui as gui  # noqa: E402
+import build_howff_gui as gui  # noqa: E402
 
 
 def num(value):
@@ -394,7 +394,7 @@ class Svg:
             '<svg xmlns="http://www.w3.org/2000/svg" '
             f'viewBox="0 0 {self.capture["width"]} {self.capture["height"]}" '
             'width="840" height="585" role="img" aria-labelledby="title">'
-            '<title id="title">附近联机 · 双机演示</title>'
+            '<title id="title">Howff · 双机演示</title>'
             f"<style>{css}</style><defs>{''.join(self.defs)}"
             f'<g id="screen-0">{host}</g><g id="screen-1">{guest}</g>'
             f"</defs>{stage}</svg>"
@@ -406,7 +406,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frames", type=Path, default=Path("/tmp/arkos-nearby-svg"))
     parser.add_argument("--reuse-scenes", action="store_true")
-    parser.add_argument("--toolchain", default="1.92")
+    parser.add_argument("--toolchain", default="1.97.0")
     args = parser.parse_args()
     if args.output.suffix.lower() != ".svg":
         parser.error("--output must use the .svg extension")

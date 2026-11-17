@@ -276,7 +276,7 @@ fn live() -> Result<(), String> {
             SdlGpuConfig, SdlGpuDriver, SdlGpuFactory, SdlGpuSurface, SdlWindowMode,
         };
         let surface = SdlGpuSurface::with_config(
-            "Nearby Multiplayer",
+            howff_menu::brand::NAME,
             640,
             480,
             SdlGpuConfig {
@@ -608,7 +608,7 @@ fn gpu_probe(output: &Path, input: Option<&Path>) -> Result<(), String> {
         SdlGpuConfig, SdlGpuDriver, SdlGpuFactory, SdlGpuSurface, SdlWindowMode,
     };
     let surface = SdlGpuSurface::with_config(
-        "Nearby Multiplayer",
+        howff_menu::brand::NAME,
         640,
         480,
         SdlGpuConfig {

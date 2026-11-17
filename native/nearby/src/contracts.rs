@@ -73,7 +73,7 @@ fn lobby_keeps_explicit_selection_and_recovers_before_returning() {
     use crate::flow::{Flow, Operation, Page};
     use serde_json::json;
     let now = || crate::system::monotonic() + 1.0;
-    let mut flow = Flow::lobby(Some(context()), true);
+    let mut flow = Flow::lobby(Some(context()));
     assert_eq!(flow.page, Page::Lobby);
     flow.scan(flow.generation, json!({"rooms":[{"id":"first","ssid":"DIRECT-NW-aaaaaaaaaaaaa","token":"aaaaaaaaaaaaa","signal":70},{"id":"second","ssid":"DIRECT-NP-bbbbbb-bbbbbbbbbbbbb","token":"bbbbbbbbbbbbb","signal":60}]}));
     flow.dispatch("down", now());
@@ -115,7 +115,7 @@ fn candidates_require_available_local_key_and_do_not_imply_readiness() {
     use crate::flow::{Flow, Operation, Page};
     use serde_json::json;
     let now = || crate::system::monotonic() + 1.0;
-    let mut flow = Flow::lobby(None, true);
+    let mut flow = Flow::lobby(None);
     flow.scan(
         flow.generation,
         json!({"rooms":[{"id":"selected","signal":80}]}),
@@ -179,17 +179,15 @@ fn only_game_loading_entries_can_resume_single_player_on_cancel() {
             assert!(flow.request.is_none());
         }
     }
-    for connected in [false, true] {
-        let mut flow = Flow::lobby(None, connected);
+    for context in [None, Some(context())] {
+        let has_game = context.is_some();
+        let mut flow = Flow::lobby(context);
         flow.manual();
-        assert_eq!(flow.view()["current_game"], false);
+        assert_eq!(flow.page, Page::Lobby);
+        assert_eq!(flow.view()["current_game"], has_game);
+        assert!(flow.scans());
         assert_eq!(flow.view()["network_only"], false);
         flow.dispatch("back", crate::system::monotonic() + 1.0);
-        if !connected {
-            assert_eq!(flow.page, Page::Lobby);
-            assert!(flow.exit_code.is_none());
-            flow.dispatch("back", crate::system::monotonic() + 1.0);
-        }
         assert_eq!(flow.exit_code, Some(0));
         assert!(flow.request.is_none());
     }
@@ -326,7 +324,7 @@ fn direct_lobby_resumes_network_ownership_and_waits_for_recovery() {
     let now = || crate::system::monotonic() + 1.0;
     for role in ["host", "client"] {
         let id = "a".repeat(32);
-        let mut flow = Flow::lobby(None, true);
+        let mut flow = Flow::lobby(None);
         flow.status(flow.generation, json!({"id":id,"role":role,"phase":"network_connected","step":"network_connected","network_only":true,"connected":true,"ready":false,"context_matches":true}));
         assert_eq!(flow.view()["network_only"], true);
         assert_eq!(flow.view()["ready"], false);
@@ -338,7 +336,7 @@ fn direct_lobby_resumes_network_ownership_and_waits_for_recovery() {
     }
     for matches in [true, false] {
         let id = "b".repeat(32);
-        let mut flow = Flow::lobby(None, true);
+        let mut flow = Flow::lobby(None);
         flow.status(flow.generation, json!({"id":id,"role":"host","phase":"restoring","step":"leaving","context_matches":matches,"network_restored":false}));
         assert_eq!(flow.page, Page::Leaving);
         flow.dispatch("back", now());
@@ -727,7 +725,7 @@ fn discovery_actions_preserve_room_selection_and_keep_scanning() {
     use crate::flow::{Flow, Page};
     use serde_json::json;
     let now = || crate::system::monotonic() + 1.0;
-    let mut flow = Flow::lobby(None, true);
+    let mut flow = Flow::lobby(None);
     let rooms = json!({"rooms":[{"id":"first","signal":80},{"id":"second","signal":60}]});
     flow.scan(flow.generation, rooms.clone());
     flow.dispatch("down", now());
@@ -741,4 +739,24 @@ fn discovery_actions_preserve_room_selection_and_keep_scanning() {
     assert_eq!(flow.page, Page::Lobby);
     assert_eq!(flow.view()["selected"], 1);
     assert!(flow.request.is_none());
+}
+
+#[test]
+fn discovery_entry_always_starts_with_rooms_and_expands_actions_on_input() {
+    use crate::flow::{Flow, Page};
+    for context in [None, Some(context())] {
+        let has_game = context.is_some();
+        let mut flow = Flow::lobby(context);
+        assert_eq!(flow.page, Page::Lobby);
+        assert_eq!(flow.view()["current_game"], has_game);
+        assert!(flow.scans());
+        flow.scan(flow.generation, serde_json::json!({"rooms":[]}));
+        assert_eq!(flow.page, Page::Lobby);
+        flow.dispatch("down", crate::system::monotonic() + 1.0);
+        assert_eq!(flow.page, Page::Mode);
+        assert!(flow.scans());
+        flow.dispatch("up", crate::system::monotonic() + 1.0);
+        assert_eq!(flow.page, Page::Lobby);
+        assert!(flow.request.is_none());
+    }
 }

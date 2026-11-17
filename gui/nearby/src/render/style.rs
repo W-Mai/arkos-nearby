@@ -68,13 +68,10 @@ impl Metrics {
     }
 
     pub fn header_height(self) -> i32 {
-        self.sized(44, 52, 72)
-    }
-    pub fn launcher_header_height(self) -> i32 {
-        self.sized(44, 60, 64)
+        self.sized(40, 44, 52)
     }
     pub fn logo_size(self) -> i32 {
-        self.sized(30, 30, 48)
+        self.sized(28, 30, 36)
     }
     pub fn keycap_size(self) -> i32 {
         i32::from(self.small) + 6
@@ -122,13 +119,24 @@ impl Metrics {
         Padding::all(self.sized(3, 4, 6))
     }
     pub fn preview_title_height(self) -> i32 {
-        i32::from(self.title) * 2 + LABEL_LEADING * 2
+        i32::from(TITLE_SIZE) * 2 + LABEL_LEADING * 2
     }
     pub fn action_height(self) -> i32 {
         self.sized(32, 37, 54)
     }
     pub fn device_row_height(self) -> i32 {
-        self.sized(22, 28, 40)
+        if self.compact {
+            i32::from(self.body) + LABEL_LEADING
+        } else {
+            40
+        }
+    }
+    pub fn device_row_gap(self) -> i32 {
+        if self.compact { self.gap / 2 } else { self.gap }
+    }
+    pub fn device_list_height(self, count: usize) -> i32 {
+        let rows = count as i32;
+        rows * self.device_row_height() + (rows - 1).max(0) * self.device_row_gap()
     }
     pub fn rail_width(self) -> i32 {
         self.sized(2, 2, 3)
@@ -162,16 +170,8 @@ impl Metrics {
         }
     }
     pub fn modal_padding(self) -> Padding {
-        let horizontal = Dimension::Percent(if self.compact {
-            Fixed::from_ratio(5, 2)
-        } else {
-            Fixed::from_ratio(15, 4)
-        });
-        let vertical = Dimension::Percent(if self.compact {
-            Fixed::from_ratio(5, 2)
-        } else {
-            Fixed::from_ratio(20, 3)
-        });
+        let horizontal = Dimension::Percent(Fixed::from_ratio(7, 2));
+        let vertical = Dimension::Percent(Fixed::from_ratio(9, 2));
         Padding {
             top: vertical,
             bottom: vertical,

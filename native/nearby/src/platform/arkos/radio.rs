@@ -16,39 +16,6 @@ pub const DRIVER_SHA: &str = "e099dcd8f6df0e02749d08c4af201bb1d26ca460a369247630
 pub const WPA_SHA: &str = "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e";
 pub const SERVICES: [&str; 2] = ["NetworkManager.service", "wpa_supplicant.service"];
 
-pub(crate) fn has_ipv4() -> bool {
-    interface_has_ipv4(c"wlan0")
-}
-
-fn interface_has_ipv4(name: &std::ffi::CStr) -> bool {
-    let mut list = std::ptr::null_mut();
-    // SAFETY: getifaddrs initializes list; its entries remain valid until freeifaddrs.
-    if unsafe { libc::getifaddrs(&mut list) } != 0 {
-        return false;
-    }
-    let mut entry = list;
-    let mut found = false;
-    while !entry.is_null() {
-        // SAFETY: entry belongs to the live list returned by getifaddrs.
-        let interface = unsafe { &*entry };
-        if !interface.ifa_name.is_null() && !interface.ifa_addr.is_null() {
-            // SAFETY: non-null names and addresses are initialized getifaddrs entries.
-            let matches = unsafe {
-                std::ffi::CStr::from_ptr(interface.ifa_name) == name
-                    && i32::from((*interface.ifa_addr).sa_family) == libc::AF_INET
-            };
-            if matches {
-                found = true;
-                break;
-            }
-        }
-        entry = interface.ifa_next;
-    }
-    // SAFETY: list is the unmodified allocation returned by getifaddrs.
-    unsafe { libc::freeifaddrs(list) };
-    found
-}
-
 pub struct Control {
     socket: UnixDatagram,
     path: PathBuf,
@@ -497,9 +464,10 @@ fn private_supplicant(state: &State, config: &str) -> Result<Control> {
 
 fn supplicant_config(state: &State) -> String {
     format!(
-        "ctrl_interface={}\nupdate_config={}\np2p_no_group_iface=1\np2p_group_idle=-1\nmax_num_sta=2\ndevice_name=ArkOS-Nearby\nconfig_methods=push_button\ndevice_type=1-0050F204-1\n",
+        "ctrl_interface={}\nupdate_config={}\np2p_no_group_iface=1\np2p_group_idle=-1\nmax_num_sta=2\ndevice_name={}\nconfig_methods=push_button\ndevice_type=1-0050F204-1\n",
         state.root().join("ctrl").display(),
-        if state.role == "client" { 1 } else { 0 }
+        if state.role == "client" { 1 } else { 0 },
+        howff_menu::brand::NAME,
     )
 }
 
@@ -705,17 +673,6 @@ pub fn restore(state: &State) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn an_address_on_another_interface_does_not_connect_the_wireless_interface() {
-        let loopback = if cfg!(target_os = "macos") {
-            c"lo0"
-        } else {
-            c"lo"
-        };
-        assert!(interface_has_ipv4(loopback));
-        assert!(!interface_has_ipv4(c"howff-no-if"));
-    }
 
     #[test]
     fn provisioning_events_and_identity_approval_have_distinct_authority() {

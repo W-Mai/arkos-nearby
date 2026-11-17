@@ -5,7 +5,7 @@ use super::{
     style::*,
     widgets::{control_key, control_label, shadow, text_block},
 };
-use crate::launcher::management::{Manager, Page};
+use crate::launcher::management::{Manager, ManagerHandle, Page};
 use crate::launcher::text_entry::{Mode, TextEntry};
 use mirui::prelude::*;
 use mirui::ui::widgets::TextAlign::{Center, Start};
@@ -90,27 +90,32 @@ fn regular_panel(state: model!(Manager), metrics: Metrics) -> Entity {
                                 ),
                                 color: ACCENT
                             )
-                            Column (
+                            Text (
+                                text: ${ summary.summary() },
                                 grow: 1.0,
                                 min_width: 0,
                                 height: Dimension::Content,
-                                row_gap: metrics.gap / 2
-                            ) {
-                                walk ${ summary.summary().lines().map(str::to_owned).collect::<Vec<_>>() } with line by line.clone() {
-                                    text_block (
-                                        ${ line.clone() },
-                                        FOREGROUND,
-                                        if metrics.compact { BODY_SIZE } else { TITLE_SIZE },
-                                        Start,
-                                        0,
-                                        2
-                                    )
-                                }
-                            }
+                                min_height: i32::from(if metrics.compact { BODY_SIZE } else { TITLE_SIZE }),
+                                font: font(if metrics.compact { BODY_SIZE } else { TITLE_SIZE }),
+                                font_size: if metrics.compact { BODY_SIZE } else { TITLE_SIZE },
+                                text_color: FOREGROUND,
+                                paragraph: super::widgets::paragraph(Start, 3),
+                                clip_children: true
+                            ) [
+                                FONT_PAINT,
+                            ]
                         }
                     }
                     if ${ state.page() == Page::Friend } {
-                        Column (shrink: 0.0, min_width: 0, row_gap: metrics.gap / 2) {
+                        Column (
+                            height: ${
+                                friend_row_height(&state, 0) + friend_row_height(&state, 1)
+                                    + Fixed::from_int(metrics.gap / 2)
+                            },
+                            shrink: 0.0,
+                            min_width: 0,
+                            row_gap: metrics.gap / 2
+                        ) {
                             walk 0_usize..2 with index {
                                 friend_fact (state, index)
                             }
@@ -328,42 +333,53 @@ fn name_editor_contents(
                     FONT_PAINT,
                 ]
             } on TextEditing::Submitted { manager.submit_name(); }
-            Row (height: 16, shrink: 0.0, min_width: 0, column_gap: metrics.gap) {
-                text_block (
-                    ${
-                        {
-                            match mode.mode() {
-                                Mode::Pinyin => "拼音",
-                                Mode::Latin => "英文",
-                                Mode::Symbols => "符号",
-                            }
-                                .to_owned()
+            Row (
+                height: 16,
+                shrink: 0.0,
+                min_width: 0,
+                column_gap: metrics.gap,
+                align: AlignItems::Center
+            ) {
+                Text (
+                    text: ${
+                        match mode.mode() {
+                            Mode::Pinyin => "拼音",
+                            Mode::Latin => "英文",
+                            Mode::Symbols => "符号",
+                        }
+                            .to_owned()
+                    },
+                    width: Dimension::Content,
+                    height: Dimension::Content,
+                    shrink: 0.0,
+                    font: font(BODY_SIZE),
+                    font_size: BODY_SIZE,
+                    text_color: ACCENT,
+                    paragraph: super::widgets::paragraph(Start, 1)
+                ) [
+                    FONT_PAINT,
+                ]
+                Text (
+                    text: ${
+                        if !feedback.error().is_empty() {
+                            feedback.error()
+                        } else if composing.preedit().is_empty() {
+                            "↑ 选词 · L/R 翻页".into()
+                        } else {
+                            composing.preedit()
                         }
                     },
-                    ACCENT,
-                    BODY_SIZE,
-                    Start,
-                    0,
-                    1
-                )
-                text_block (
-                    ${
-                        {
-                            if !feedback.error().is_empty() {
-                                feedback.error()
-                            } else if composing.preedit().is_empty() {
-                                "↑ 选词 · L/R 翻页".into()
-                            } else {
-                                composing.preedit()
-                            }
-                        }
-                    },
-                    ${ if error_color.error().is_empty() { SECONDARY } else { WARNING } },
-                    BODY_SIZE,
-                    Start,
-                    0,
-                    1
-                )
+                    grow: 1.0,
+                    min_width: 0,
+                    height: Dimension::Content,
+                    font: font(BODY_SIZE),
+                    font_size: BODY_SIZE,
+                    text_color: ${ if error_color.error().is_empty() { SECONDARY } else { WARNING } },
+                    paragraph: super::widgets::paragraph(Start, 1),
+                    clip_children: true
+                ) [
+                    FONT_PAINT,
+                ]
             }
             Row (height: 30, shrink: 0.0, column_gap: metrics.gap / 2, min_width: 0) {
                 walk ${ 0..entry.page_size().min(entry.candidate_count()) } with index by index {
@@ -455,23 +471,17 @@ fn candidate(
 pub(super) fn hints(state: model!(Manager), metrics: Metrics) -> Entity {
     ui! {
         Row (grow: 1.0, min_width: 0, column_gap: metrics.gap, align: AlignItems::Center) {
+            if ${ !state.busy() } {
+                control_key ("A", metrics, true)
+                control_label ("确认", metrics)
+            }
             if ${ !(state.page() == Page::Progress && state.busy()) } {
-                Row (column_gap: metrics.gap, align: AlignItems::Center) {
-                    if ${ !state.busy() } {
-                        Row (column_gap: metrics.gap, align: AlignItems::Center) {
-                            control_key ("A", metrics, true)
-                            control_label ("确认", metrics)
-                        }
-                    }
-                    control_key ("B", metrics, false)
-                    control_label ("返回", metrics)
-                    if ${ state.page() == Page::Rename } {
-                        Row (column_gap: metrics.gap, align: AlignItems::Center) {
-                            control_key ("Y", metrics, false)
-                            control_label ("删除", metrics)
-                        }
-                    }
-                }
+                control_key ("B", metrics, false)
+                control_label ("返回", metrics)
+            }
+            if ${ state.page() == Page::Rename && !state.busy() } {
+                control_key ("Y", metrics, false)
+                control_label ("删除", metrics)
             }
         }
     }
@@ -503,32 +513,52 @@ fn icon_kind(state: &crate::launcher::management::ManagerHandle, index: usize) -
         _ => Icon::People,
     }
 }
+fn friend_row_height(state: &ManagerHandle, index: usize) -> Fixed {
+    state
+        .friend_height(index)
+        .max(Fixed::from_int(i32::from(BODY_SIZE)))
+}
+
 #[compose]
 fn friend_fact(state: model!(Manager), index: usize) -> Entity {
     let label = state.clone();
     let value = state.clone();
     ui! {
-        Row (shrink: 0.0, min_width: 0, column_gap: 8, align: AlignItems::FlexStart) {
-            Column (width: 60, shrink: 0.0) {
-                text_block (
-                    ${ label.friend_field(index).map(|f| f.label).unwrap_or_default() },
-                    SECONDARY,
-                    BODY_SIZE,
-                    Start,
-                    0,
-                    1
-                )
-            }
-            Column (grow: 1.0, min_width: 0) {
-                text_block (
-                    ${ value.friend_field(index).map(|f| f.value).unwrap_or_default() },
-                    FOREGROUND,
-                    BODY_SIZE,
-                    Start,
-                    0,
-                    3
-                )
-            }
+        Row (
+            height: ${ friend_row_height(&state, index) },
+            shrink: 0.0,
+            min_width: 0,
+            column_gap: 8,
+            align: AlignItems::FlexStart
+        ) {
+            Text (
+                text: ${ label.friend_field(index).map(|f| f.label).unwrap_or_default() },
+                width: 60,
+                height: Dimension::Content,
+                shrink: 0.0,
+                font: font(BODY_SIZE),
+                font_size: BODY_SIZE,
+                text_color: SECONDARY,
+                paragraph: super::widgets::paragraph(Start, 1)
+            ) [
+                FONT_PAINT,
+            ]
+            Text (
+                text: ${ value.friend_field(index).map(|f| f.value).unwrap_or_default() },
+                grow: 1.0,
+                min_width: 0,
+                height: Dimension::Content,
+                font: font(BODY_SIZE),
+                font_size: BODY_SIZE,
+                text_color: FOREGROUND,
+                paragraph: mirui::ui::widgets::ParagraphStyle {
+                    wrap: mirui::ui::widgets::TextWrap::Grapheme,
+                    max_lines: None,
+                    ..Default::default()
+                }
+            ) [
+                FONT_PAINT,
+            ] on SizeChanged { state.measure_friend(index, event.new.height); }
         }
     }
 }

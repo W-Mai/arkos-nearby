@@ -1,105 +1,171 @@
 use super::state::PageKey;
 use super::{
-    Section, StaticCache,
+    Section,
+    branding::{logo as brand_logo, wordmark as brand_wordmark},
     cache::GpuLayerCache,
-    pixel::{Scenery, Scenery::Header, backdrop},
+    pixel::{Scenery::Header, backdrop},
     state::DisplayState,
     style::*,
-    widgets::{control_key, control_label, label, paragraph},
+    widgets::{control_key, control_label, paragraph},
 };
 use crate::model::Page;
 use mirui::prelude::*;
-use mirui::ui::OffscreenRender;
-use mirui::ui::widgets::Text;
-use mirui::ui::widgets::TextAlign::{Center, End, Start};
+use mirui::ui::widgets::TextAlign::{End, Start};
+use mirui::ui::widgets::{Image, Text};
 
 #[compose]
 pub(super) fn header(view: PageKey, state: model!(DisplayState), metrics: Metrics) -> Entity {
-    let step = if view.page == Page::Lobby {
-        "附近房间".into()
-    } else if view.page == Page::Mode {
-        "选择模式".into()
-    } else if matches!(view.page, Page::Games | Page::Candidates) {
-        "选择游戏".into()
-    } else {
-        format!("步骤 {} / 2", if view.page == Page::Choice { 1 } else { 2 })
-    };
     ui! {
-        Row (
-            height: ${
-                if state.launcher().enabled() || view.page == Page::Games {
-                    metrics.launcher_header_height()
-                } else {
-                    metrics.header_height()
-                }
-            },
+        Column (
+            height: metrics.header_height(),
             shrink: 0.0,
-            column_gap: metrics.gap + 4,
             padding: metrics.header_padding(),
-            bg_color: DEEP,
-            align: AlignItems::Center
+            bg_color: ${ if state.embedded() { PANEL } else { DEEP } }
         ) [
             Section::Header,
         ] {
-            backdrop (Header)
             View (
-                width: metrics.logo_size(),
-                height: metrics.logo_size(),
-                shrink: 0.0
-            ) [
-                Scenery::Logo,
-                StaticCache,
-                OffscreenRender::default(),
-            ]
-            Column (
-                grow: 1.0,
-                min_width: 0,
-                justify: JustifyContent::Center,
-                clip_children: true
-            ) [
-                StaticCache,
-                OffscreenRender::default(),
-            ] {
-                label (
-                    "附近联机",
-                    metrics.title,
-                    HEADER_TEXT,
-                    Start
-                )
-                Text (
-                    text: ${ state.subtitle() },
-                    font: font(metrics.small),
-                    font_size: metrics.small,
-                    text_color: HEADER_DETAIL,
-                    height: Dimension::Content,
-                    paragraph: paragraph(Start, 1)
-                ) [
-                    FONT_PAINT,
-                ]
+                position: Position::Absolute,
+                left: 0,
+                top: 0,
+                width: Dimension::percent(100),
+                height: Dimension::percent(100),
+                visible: ${ !state.embedded() }
+            ) {
+                backdrop (Header)
             }
-            Text (
-                text: ${
-                    if view.page == Page::Games {
-                        state
-                            .library_counter()
-                            .map(|(position, total)| format!("{position} / {total}"))
-                            .unwrap_or_default()
-                    } else {
-                        step.clone()
-                    }
-                },
-                width: if metrics.compact { 76 } else { 96 },
-                height: if metrics.compact { 26 } else { 34 },
-                shrink: 0.0,
-                bg_color: DEEP,
-                font: font(metrics.small),
-                font_size: metrics.small,
-                text_color: HEADER_DETAIL,
-                paragraph: paragraph(Center, 1)
-            ) [
-                FONT_PAINT,
-            ]
+            if ${ state.embedded() } {
+                embedded_header (view, state, metrics)
+            } else {
+                product_header (view, state, metrics)
+            }
         }
+    }
+}
+
+#[compose]
+fn product_header(view: PageKey, state: model!(DisplayState), metrics: Metrics) -> Entity {
+    ui! {
+        Row (
+            width: Dimension::percent(100),
+            grow: 1.0,
+            min_width: 0,
+            column_gap: metrics.gap + 4,
+            align: AlignItems::Center
+        ) {
+            brand_logo (metrics.logo_size())
+            brand_wordmark (HEADER_TEXT)
+            header_context (state, metrics, false)
+            if ${ state.network_connected() } {
+                Image (
+                    width: 20,
+                    height: 20,
+                    shrink: 0.0,
+                    viewbox: 32,
+                    color: HEADER_DETAIL,
+                    src: path!(
+                        M 12 5 H 4 V 27 H 12 V 23 H 8 V 9 H 12 Z M 20 5 H 28 V 27 H 20 V 23 H 24 V 9 H 20
+                        Z M 10 14 H 22 V 18 H 10 Z
+                    )
+                )
+            }
+            header_badge (view, state, metrics, HEADER_DETAIL)
+        }
+    }
+}
+
+#[compose]
+fn embedded_header(view: PageKey, state: model!(DisplayState), metrics: Metrics) -> Entity {
+    ui! {
+        Row (
+            width: Dimension::percent(100),
+            grow: 1.0,
+            min_width: 0,
+            column_gap: metrics.gap + 4,
+            align: AlignItems::Center
+        ) {
+            Image (
+                width: 24,
+                height: 24,
+                shrink: 0.0,
+                viewbox: 32,
+                color: ACCENT,
+                src: if view.network_only {
+                    path!(
+                        M 12 5 H 4 V 27 H 12 V 23 H 8 V 9 H 12 Z M 20 5 H 28 V 27 H 20 V 23 H 24 V 9
+                        H 20 Z M 10 14 H 22 V 18 H 10 Z
+                    )
+                } else if matches!(view.page, Page::Lobby | Page::Mode) {
+                    path!(
+                        M 5 3 H 13 V 13 H 5 Z M 3 17 H 15 V 29 H 3 Z M 20 3 H 28 V 13 H 20 Z M 18 17
+                        H 30 V 29 H 18 Z
+                    )
+                } else {
+                    path!(
+                        M 5 9 H 27 V 13 H 30 V 27 H 20 V 22 H 12 V 27 H 2 V 13 H 5 Z M 7 14 H 10 V 17
+                        H 13 V 20 H 10 V 23 H 7 V 20 H 4 V 17 H 7 Z M 22 14 H 25 V 17 H 22 Z M 25 19
+                        H 28 V 22 H 25 Z
+                    )
+                }
+            )
+            header_context (state, metrics, true)
+            header_badge (view, state, metrics, SECONDARY)
+        }
+    }
+}
+
+#[compose]
+fn header_context(state: model!(DisplayState), metrics: Metrics, embedded: bool) -> Entity {
+    let size = if embedded { TITLE_SIZE } else { metrics.small };
+    ui! {
+        Text (
+            text: ${ state.subtitle() },
+            grow: 1.0,
+            min_width: 0,
+            height: Dimension::Content,
+            font: font(size),
+            font_size: size,
+            text_color: if embedded { FOREGROUND } else { HEADER_DETAIL },
+            paragraph: paragraph(if embedded { Start } else { End }, 1),
+            clip_children: true
+        ) [
+            FONT_PAINT,
+        ]
+    }
+}
+
+#[compose]
+fn header_badge(
+    view: PageKey,
+    state: model!(DisplayState),
+    metrics: Metrics,
+    color: ColorToken,
+) -> Entity {
+    ui! {
+        Text (
+            text: ${
+                if matches!(view.page, Page::Host | Page::Joined) {
+                    state.room_name()
+                } else if view.page == Page::Games {
+                    state
+                        .library_counter()
+                        .map(|(position, total)| format!("{position} / {total}"))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            },
+            width: Dimension::Content,
+            height: Dimension::Content,
+            shrink: 0.0,
+            font: font(metrics.small),
+            font_size: metrics.small,
+            text_color: color,
+            paragraph: paragraph(End, 1),
+            clip_children: true
+        ) [
+            FONT_PAINT,
+        ]
     }
 }
 
@@ -125,23 +191,7 @@ pub(super) fn footer(view: PageKey, state: model!(DisplayState), metrics: Metric
                     bg_color: ACCENT
                 )
             }
-            if ${ state.launcher().progress() > 0 } {
-                Row (
-                    height: metrics.footer_height(),
-                    shrink: 0.0,
-                    align: AlignItems::Center,
-                    justify: JustifyContent::Center
-                ) {
-                    label (
-                        "继续按住 X，打开附近联机",
-                        metrics.small,
-                        FOREGROUND,
-                        Center
-                    )
-                }
-            } else {
-                footer_controls (view, state, metrics)
-            }
+            footer_controls (view, state, metrics)
         }
     }
 }
@@ -161,9 +211,18 @@ fn footer_controls(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                 control_key ("A", metrics, true)
                 control_label (${ confirm.confirm() }, metrics)
             }
-            if ${ !state.launcher().enabled() || (state.launcher().tab() != 0 && !state.busy()) } {
+            if ${ !state.launcher().enabled() || !state.busy() } {
                 control_key ("B", metrics, false)
-                control_label (${ back.back() }, metrics)
+                control_label (
+                    ${
+                        if state.launcher().enabled() && state.launcher().tab() == 0 {
+                            "首页".into()
+                        } else {
+                            back.back()
+                        }
+                    },
+                    metrics
+                )
             }
             if matches!(view.page, Page::Rooms | Page::Lobby) {
                 control_key ("X", metrics, false)

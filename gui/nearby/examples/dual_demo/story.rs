@@ -179,7 +179,7 @@ pub fn at(t: f32) -> Shot {
         },
     ];
     let captions = [
-        ("和好友一起玩", "ARKOS NEARBY  /  PICK. CONNECT. PLAY."),
+        ("和好友一起玩", howff_menu::brand::NAME),
         ("创建房间", "01   OPEN A ROOM"),
         ("发现附近的好友", "02   NEARBY ROOMS"),
         ("确认加入", "03   YOU'RE INVITED"),

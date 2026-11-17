@@ -4,6 +4,7 @@ use super::{
     style::*,
     widgets::{control_key, control_label, shadow, text_block},
 };
+use crate::launcher::saves::FactContext as Facts;
 use crate::launcher::saves::{Manager, Page};
 use howff_menu::saves::Tab;
 use mirui::prelude::*;
@@ -12,13 +13,6 @@ use mirui::ui::widgets::{
     Image, Text,
     TextAlign::{Center, Start},
 };
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Facts {
-    Preview,
-    Panel,
-    Reading,
-}
 
 fn fact_values(
     state: &crate::launcher::saves::ManagerHandle,
@@ -352,12 +346,29 @@ fn row(
         }
     }
 }
+fn fact_row_height(
+    state: &crate::launcher::saves::ManagerHandle,
+    context: Facts,
+    index: usize,
+) -> Fixed {
+    state
+        .fact_height(context, index)
+        .max(Fixed::from_int(i32::from(BODY_SIZE)))
+        + Fixed::from_int(ROW_LEADING * 2)
+}
+
 #[compose]
-fn facts(state: model!(Manager), metrics: Metrics, context: Facts) -> Entity {
+pub(super) fn facts(state: model!(Manager), metrics: Metrics, context: Facts) -> Entity {
     ui! {
         Column (
             min_width: 0,
-            height: Dimension::Content,
+            height: ${
+                let count = fact_values(&state, context).len();
+                let rows = (0..count)
+                    .map(|index| fact_row_height(&state, context, index))
+                    .fold(Fixed::ZERO, |total, height| total + height);
+                rows + Fixed::from_int(count.saturating_sub(1) as i32 * metrics.gap)
+            },
             shrink: 0.0,
             row_gap: metrics.gap
         ) {
@@ -374,49 +385,42 @@ fn fact(state: model!(Manager), index: usize, context: Facts) -> Entity {
     ui! {
         Row (
             min_width: 0,
-            height: Dimension::Content,
+            height: ${ fact_row_height(&state, context, index) },
+            min_height: i32::from(BODY_SIZE) + ROW_LEADING * 2,
             shrink: 0.0,
             column_gap: 4,
+            align: AlignItems::FlexStart,
             padding: Padding {
-                bottom: 4.into(),
+                bottom: (ROW_LEADING * 2).into(),
                 ..Default::default()
             }
         ) {
-            Column (
+            Text (
+                text: ${ fact_values(&label, context).get(index).map(|f| f.label.clone()).unwrap_or_default() },
                 width: 60,
                 height: Dimension::Content,
                 min_height: i32::from(BODY_SIZE),
-                shrink: 0.0
-            ) {
-                text_block (
-                    ${ fact_values(&label, context).get(index).map(|f| f.label.clone()).unwrap_or_default() },
-                    SECONDARY,
-                    BODY_SIZE,
-                    Start,
-                    0,
-                    1
-                )
-            }
-            Column (
+                shrink: 0.0,
+                font: font(BODY_SIZE),
+                font_size: BODY_SIZE,
+                text_color: SECONDARY,
+                paragraph: super::widgets::paragraph(Start, 1)
+            ) [
+                FONT_PAINT,
+            ]
+            Text (
+                text: ${ fact_values(&value, context).get(index).map(|f| f.value.clone()).unwrap_or_default() },
                 grow: 1.0,
-                height: Dimension::Content,
                 min_width: 0,
-                min_height: i32::from(BODY_SIZE)
-            ) {
-                Text (
-                    text: ${ fact_values(&value, context).get(index).map(|f| f.value.clone()).unwrap_or_default() },
-                    height: Dimension::Content,
-                    width: Dimension::percent(100),
-                    min_width: 0,
-                    min_height: i32::from(BODY_SIZE),
-                    font: font(BODY_SIZE),
-                    font_size: BODY_SIZE,
-                    text_color: FOREGROUND,
-                    paragraph: super::widgets::paragraph(Start, if context == Facts::Reading { 0 } else { 6 })
-                ) [
-                    FONT_PAINT,
-                ]
-            }
+                height: Dimension::Content,
+                min_height: i32::from(BODY_SIZE),
+                font: font(BODY_SIZE),
+                font_size: BODY_SIZE,
+                text_color: FOREGROUND,
+                paragraph: super::widgets::paragraph(Start, if context == Facts::Reading { 0 } else { 6 })
+            ) [
+                FONT_PAINT,
+            ] on SizeChanged { state.measure_fact(context, index, event.new.height); }
         }
     }
 }

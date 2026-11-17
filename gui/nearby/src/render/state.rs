@@ -152,6 +152,10 @@ pub(super) struct DisplayState {
     pub(super) list_layout: model!(owned super::list_layout::ListLayout),
     #[observe]
     pub(super) deck_height: Fixed,
+    #[observe]
+    pub(super) network_connected: bool,
+    #[observe]
+    pub(super) embedded: bool,
     view: View,
     library: LibraryPresentation,
     platform_preview: PlatformPresentation,
@@ -200,6 +204,8 @@ impl DisplayState {
     pub(super) fn present(&mut self, view: &View) -> Changes {
         let bind_rows = renders_rows(self.role, view);
         let binding_activated = bind_rows && !renders_rows(self.role, &self.view);
+        self.network_connected = view.connected || view.launcher.retained;
+        self.embedded = view.return_to_launcher;
         self.launcher.present(view);
         self.shelf.present(view);
         self.list_layout.present(view);
@@ -409,12 +415,7 @@ impl DisplayState {
         );
         changes.update(
             &mut self.subtitle,
-            match view.page {
-                Page::Mode | Page::Lobby if !view.current_game => "连接附近的掌机".into(),
-                _ if view.network_only => "仅组网 · 局域网连接".into(),
-                Page::Games => view.core.clone(),
-                _ => format!("当前游戏  {}", view.title),
-            },
+            header_context(view).into(),
             Changes::SUBTITLE,
         );
         self.view.clone_from(view);
@@ -888,6 +889,8 @@ fn register<B: Surface, F: RendererFactory<B>>(
         shelf: super::shelf::Shelf::new(role == DisplayRole::Shelf).into(),
         list_layout: super::list_layout::ListLayout::new(role == DisplayRole::Catalog).into(),
         deck_height: Fixed::ZERO,
+        network_connected: false,
+        embedded: false,
         view: View::default(),
         library: LibraryPresentation::default(),
         platform_preview: PlatformPresentation::default(),

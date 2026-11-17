@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/wordmark.svg" alt="Howff" width="420" />
+<img src="docs/assets/wordmark.svg" alt="Howff" width="320" />
 
-**R36S 游戏启动器与附近联机**
+**R36S 的游戏首页与好友联机**
 
 [![Release](https://img.shields.io/github/v/release/W-Mai/arkos-nearby?color=a33d2e&style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
 
@@ -20,8 +20,8 @@ Howff 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄操作�
 
 - **当前游戏直接联机** — 在游戏列表选好游戏，启动时按住 X，搜索附近房间或创建当前游戏的房间。
 - **从游戏库挑选** — 在 Options → Howff Nearby → 选择游戏 中选择平台和游戏。
-- **个人启动器** — 从 Options → Howff Launcher 打开收藏，短按 X 启动单机，长按 X 打开当前游戏的联机面板。
-- **收藏与搜索** — 在启动器游戏库按 Y 收藏游戏，收藏页按 Y 切换名称／最近使用排序。在平台列表按 Y 搜索游戏名、文件名或中文名拼音。
+- **收藏首页** — 从 Options → Howff Launcher 打开收藏，短按 X 启动单机，长按 X 打开当前游戏的联机面板。
+- **收藏与搜索** — 在游戏库按 Y 收藏游戏，收藏页按 Y 切换名称／最近使用排序。在平台列表按 Y 搜索游戏名、文件名或中文名拼音。
 - **设置与存档** — 查看游戏的核心和 BIOS 信息，编辑游戏设置，载入即时存档、备份与恢复游戏进度。
 - **系统控制** — 调节音量和亮度，连接 Wi-Fi，查看存储空间，关机或重启。
 - **仅组网** — 连接后返回系统，打开 Ports 中的局域网游戏。
@@ -53,7 +53,7 @@ Howff 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄操作�
 | :---: | :---: | :---: | :---: | :---: | :---: |
 | 移动焦点 | 确认 | 返回／离开 | 刷新房间列表 | 入口页切换主题 | 游戏列表翻页 |
 
-在选择模式或创建／加入房间的入口页按 **Y**，可依次切换松林、落日和夜营主题，重新打开时保留所选配色。
+在选择模式或创建／加入房间的入口页按 **Y**，可依次切换森林、落日和夜色主题，重新打开时保留所选配色。
 
 ## 启动器
 
@@ -75,7 +75,7 @@ Howff 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄操作�
 
 ## 仅组网
 
-进入 **Options → Howff Nearby → 仅组网**，一台创建房间，另一台选中房间加入。连接完成后，两台按 **A「保持连接，返回系统」**，再启动支持局域网联机的游戏，在游戏内创建或查找房间。
+进入 **Options → Howff Nearby → 仅组网**，一台创建房间，另一台选中房间加入。连接完成后，两台按 **A「返回系统」**，再启动支持局域网联机的游戏，在游戏内创建或查找房间。
 
 再次打开 Howff Nearby 可以查看连接和设备地址，按 **B「断开并恢复 Wi-Fi」** 结束组网。
 

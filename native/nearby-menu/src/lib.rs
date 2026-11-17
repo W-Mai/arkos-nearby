@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+pub mod brand;
 pub mod configuration;
 pub mod details;
 pub mod input;

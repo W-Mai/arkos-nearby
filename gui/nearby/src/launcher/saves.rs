@@ -15,6 +15,13 @@ pub enum Page {
     Room,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FactContext {
+    Preview,
+    Panel,
+    Reading,
+}
+
 #[model]
 pub struct Manager {
     input_generation: Generation,
@@ -43,6 +50,9 @@ pub struct Manager {
     pub preview_size: LayoutSize,
     #[observe]
     pub reading_offset: Fixed,
+    #[observe]
+    fact_layout_revision: u64,
+    fact_measurements: [Vec<Option<(Fact, Fixed)>>; 3],
     reading_limit: Fixed,
     chosen: String,
     return_index: usize,
@@ -72,6 +82,8 @@ impl Default for Manager {
                 height: Fixed::ZERO,
             },
             reading_offset: Fixed::ZERO,
+            fact_layout_revision: 0,
+            fact_measurements: std::array::from_fn(|_| Vec::new()),
             reading_limit: Fixed::ZERO,
             chosen: String::new(),
             return_index: 0,
@@ -85,6 +97,38 @@ impl Default for Manager {
 }
 #[model]
 impl Manager {
+    pub fn measure_fact(&mut self, context: FactContext, index: usize, height: Fixed) {
+        let facts = self.layout_facts(context);
+        let Some(fact) = facts.get(index) else {
+            return;
+        };
+        let rows = &mut self.fact_measurements[context as usize];
+        rows.resize_with(facts.len(), || None);
+        let measurement = (fact.clone(), height);
+        if rows[index].as_ref() != Some(&measurement) {
+            rows[index] = Some(measurement);
+            self.fact_layout_revision += 1;
+        }
+    }
+
+    fn layout_facts(&self, context: FactContext) -> Vec<Fact> {
+        if context == FactContext::Preview {
+            self.snapshot_preview_facts()
+        } else {
+            self.snapshot_facts()
+        }
+    }
+
+    fn snapshot_fact_height(&self, context: FactContext, index: usize) -> Fixed {
+        let facts = self.layout_facts(context);
+        self.fact_measurements[context as usize]
+            .get(index)
+            .and_then(|entry| entry.as_ref())
+            .filter(|(fact, _)| facts.get(index) == Some(fact))
+            .map(|(_, height)| *height)
+            .unwrap_or_default()
+    }
+
     pub fn bind_input(&mut self, generation: Generation) {
         if self.input_generation != generation {
             self.request = None;
@@ -674,6 +718,15 @@ impl ManagerHandle {
         self.selected();
         self.snapshot_preview_facts()
     }
+    pub fn fact_height(&self, context: FactContext, index: usize) -> Fixed {
+        self.fact_layout_revision();
+        self.revision();
+        self.selected();
+        self.tab();
+        self.page();
+        self.snapshot_fact_height(context, index)
+    }
+
     pub fn facts(&self) -> Vec<Fact> {
         self.revision();
         self.selected();

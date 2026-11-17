@@ -162,7 +162,7 @@ pub(super) fn deck(
                     grow: 1.0,
                     min_height: 0,
                     border_width: 2,
-                    border_color: DIVIDER,
+                    border_color: ACCENT,
                     bg_color: BACKGROUND,
                     transform: ${
                         mirui::types::Transform::translate(
@@ -280,7 +280,7 @@ fn overlay_contents(
                 row_gap: metrics.gap,
                 bg_color: BACKGROUND,
                 border_width: 2,
-                border_color: DIVIDER
+                border_color: ACCENT
             ) [
                 ActorScope::Layer(Layer::Actions),
                 super::actions_damage::ActionsPanel,
@@ -893,15 +893,7 @@ fn action_tile(
                     Column (width: 32, height: 32, shrink: 0.0) {
                         action_icon (state, index)
                     }
-                    Column (
-                        grow: 1.0,
-                        min_width: 0,
-                        row_gap: metrics.gap / 2,
-                        justify: JustifyContent::Center
-                    ) {
-                        overlay_label (state, Some(index))
-                        action_value (settings, state, index, metrics)
-                    }
+                    action_caption (state, settings, index, metrics)
                 }
             }
             shadow (metrics)
@@ -910,43 +902,96 @@ fn action_tile(
 }
 
 #[compose]
+fn action_caption(
+    state: model!(Launcher),
+    settings: model!(crate::settings::Settings),
+    index: usize,
+    metrics: Metrics,
+) -> Entity {
+    if metrics.compact {
+        ui! {
+            Row (
+                grow: 1.0,
+                min_width: 0,
+                height: Dimension::percent(100),
+                column_gap: metrics.gap,
+                align: AlignItems::Center
+            ) {
+                Text (
+                    text: ${ state.item(index).map(|item| item.name).unwrap_or_default() },
+                    grow: 1.0,
+                    min_width: 0,
+                    height: Dimension::Content,
+                    min_height: i32::from(TITLE_SIZE) + ROW_LEADING,
+                    font: font(TITLE_SIZE),
+                    font_size: TITLE_SIZE,
+                    text_color: ${ action_foreground(&state, index) },
+                    paragraph: super::widgets::paragraph(Center, 1),
+                    clip_children: true
+                ) [
+                    FONT_PAINT,
+                ]
+                action_value (settings, state, index, metrics, true)
+            }
+        }
+    } else {
+        ui! {
+            Column (
+                grow: 1.0,
+                min_width: 0,
+                row_gap: metrics.gap / 2,
+                justify: JustifyContent::Center
+            ) {
+                overlay_label (state, Some(index))
+                action_value (settings, state, index, metrics, false)
+            }
+        }
+    }
+}
+
+fn action_value_text(
+    settings: &crate::settings::SettingsHandle,
+    state: &crate::launcher::LauncherHandle,
+    index: usize,
+) -> String {
+    state
+        .item(index)
+        .map(|item| {
+            let local = settings.menu_value(item.action);
+            if local.is_empty() {
+                item.value
+            } else {
+                local.into()
+            }
+        })
+        .unwrap_or_default()
+}
+
+#[compose]
 fn action_value(
     settings: model!(crate::settings::Settings),
     state: model!(Launcher),
     index: usize,
     metrics: Metrics,
+    inline: bool,
 ) -> Entity {
-    let foreground = state.clone();
     ui! {
-        Column (
-            visible: ${
-                state
-                    .item(index)
-                    .is_some_and(|item| {
-                        !settings.menu_value(item.action).is_empty() || !item.value.is_empty()
-                    })
-            },
-            shrink: 0.0
-        ) {
-            text_block (
-                ${
-                    {
-                        state
-                            .item(index)
-                            .map(|item| {
-                                let local = settings.menu_value(item.action);
-                                if local.is_empty() { item.value } else { local.into() }
-                            })
-                            .unwrap_or_default()
-                    }
-                },
-                ${ action_foreground(&foreground, index) },
-                metrics.small,
-                Center,
-                LABEL_LEADING,
-                1
-            )
-        }
+        Text (
+            text: ${ action_value_text(&settings, &state, index) },
+            visible: ${ !action_value_text(&settings, &state, index).is_empty() },
+            width: if inline { Dimension::Content } else { Dimension::percent(100) },
+            height: Dimension::Content,
+            min_width: 0,
+            min_height: i32::from(metrics.small) + ROW_LEADING,
+            shrink: 0.0,
+            font: font(metrics.small),
+            font_size: metrics.small,
+            text_color: ${ action_foreground(&state, index) },
+            paragraph: super::widgets::paragraph(Center, 1),
+            clip_children: true
+        ) [
+            FONT_PAINT,
+        ]
     }
 }
 

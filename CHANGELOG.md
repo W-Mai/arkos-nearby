@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-17
+
+- Show Howff branding and object-specific titles throughout the interface.
+- Open nearby room discovery from Select, FN+X and Options without requiring an IPv4 address.
+- Keep menu labels, Chinese input, friend details and save summaries within their panels on compact screens.
+- Improve Chinese, Japanese and punctuation coverage in the pixel fonts.
+- Preserve Favorites layout and footer actions while holding X.
+- Refresh the logo, wordmark, interface screenshots and dual-handheld demonstration.
+
 ## [0.14.0] - 2026-11-16
 
 - Improve responsiveness when browsing the game library and nearby rooms.

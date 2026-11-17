@@ -154,21 +154,21 @@ impl Controller {
             Some(Overlay::Game) => vec![
                 MenuItem::available(Play, "开始游戏"),
                 if self.entry.as_ref().is_some_and(Entry::netplay) {
-                    MenuItem::available(Multiplayer, "附近联机")
+                    MenuItem::available(Multiplayer, "和朋友玩")
                 } else {
-                    MenuItem::unavailable(Multiplayer, "附近联机", "此游戏暂未接入联机")
+                    MenuItem::unavailable(Multiplayer, "和朋友玩", "此游戏暂未接入联机")
                 },
                 MenuItem::available(
                     ToggleFavorite,
                     if self.browsers[self.tab].is_favorite() {
-                        "移出收藏"
+                        "取消收藏"
                     } else {
-                        "收藏游戏"
+                        "加入收藏"
                     },
                 ),
                 MenuItem::available(ShowGameDetails, "游戏详情"),
                 MenuItem::available(ShowGameSettings, "游戏设置"),
-                MenuItem::available(ShowSaveManager, "存档管理"),
+                MenuItem::available(ShowSaveManager, "存档"),
                 MenuItem::available(Back, "返回"),
             ],
             Some(Overlay::Details(Section::Overview)) => vec![
@@ -189,15 +189,15 @@ impl Controller {
                 _ => vec![],
             },
             Some(Overlay::System) => vec![
-                MenuItem::available(CycleTheme, "切换主题"),
-                MenuItem::available(ToggleSound, "音效开关"),
-                MenuItem::available(ShowControls, "系统控制"),
+                MenuItem::available(CycleTheme, "主题"),
+                MenuItem::available(ToggleSound, "音效"),
+                MenuItem::available(ShowControls, "亮度与音量"),
                 MenuItem::available(ShowDevice, "设备与好友"),
-                MenuItem::available(ShowApplication, "应用管理"),
+                MenuItem::available(ShowApplication, "应用"),
                 if Self::retained() {
-                    MenuItem::available(ManageNetwork, "管理直连网络")
+                    MenuItem::available(ManageNetwork, "直连网络")
                 } else {
-                    MenuItem::unavailable(ManageNetwork, "管理直连网络", "尚未保留直连网络")
+                    MenuItem::unavailable(ManageNetwork, "直连网络", "尚未保留直连网络")
                 },
                 MenuItem::available(ShowExit, "返回原系统"),
                 MenuItem::available(ShowPower, "电源"),
@@ -276,8 +276,8 @@ impl Controller {
         let options = self.options();
         let title = match self.overlay {
             Some(Overlay::Game) => self.entry.as_ref().map(|e| e.name()).unwrap_or("游戏操作"),
-            Some(Overlay::System) => "启动器设置",
-            Some(Overlay::Controls) => "系统控制",
+            Some(Overlay::System) => "设置",
+            Some(Overlay::Controls) => "亮度与音量",
             Some(Overlay::Tools) => "系统工具",
             Some(Overlay::Wifi) => self.wifi.title(),
             Some(Overlay::Management) => "设备与好友",
@@ -1025,7 +1025,11 @@ fn wait_game() -> Result<()> {
             break;
         }
         if s.phase == "restore_failed" {
-            return Err("Network restoration failed; reopen Nearby to retry".into());
+            return Err(format!(
+                "Network restoration failed; reopen {} to retry",
+                howff_menu::brand::NAME
+            )
+            .into());
         }
         thread::sleep(Duration::from_millis(250));
     }

@@ -10,6 +10,7 @@ use style::{ACCENT_DIM, BACKGROUND, Metrics};
 mod actions_damage;
 mod actor;
 mod artwork;
+pub(crate) mod branding;
 mod cache;
 mod choices;
 mod chrome;

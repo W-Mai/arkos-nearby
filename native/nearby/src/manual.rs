@@ -46,7 +46,7 @@ impl Picker {
             "--no-shadow".into(),
             "--clear".into(),
             "--title".into(),
-            "Nearby Multiplayer".into(),
+            howff_menu::brand::NAME.into(),
             "--cancel-label".into(),
             "Back".into(),
             "--menu".into(),
@@ -83,8 +83,13 @@ impl Drop for Picker {
 
 pub fn install_result(result: &serde_json::Value) -> Result<()> {
     let mut picker = Picker::new()?;
+    let entry = Path::new(arkos::firmware::MULTIPLAYER_ENTRY.as_str())
+        .file_stem()
+        .expect("The multiplayer entry has a filename")
+        .to_string_lossy();
     let title = format!(
-        "Installed {}\nOpen Nearby Multiplayer in Options.\nChoose a room; the owner confirms first pairing.",
+        "{} {} installed.\nOptions > {entry}\nChoose a room; the owner confirms first pairing.",
+        howff_menu::brand::NAME,
         result["version"].as_str().unwrap_or("")
     );
     let _ = picker.choose(&title, &[("ok".into(), "Back".into())])?;

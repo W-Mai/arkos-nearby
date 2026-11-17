@@ -4,6 +4,27 @@ pub(super) fn host_action_enabled(view: &View) -> bool {
     view.host_action_enabled()
 }
 
+pub(super) fn header_context(view: &View) -> &str {
+    if view.page == Page::Games {
+        return match view.library.kind {
+            crate::model::LibraryKind::Favorites | crate::model::LibraryKind::Platforms => "",
+            _ => &view.core,
+        };
+    }
+    if matches!(view.page, Page::Mode | Page::Lobby) && !view.current_game {
+        return if view.return_to_launcher {
+            "好友房间"
+        } else {
+            ""
+        };
+    }
+    if view.network_only {
+        "仅组网"
+    } else {
+        &view.title
+    }
+}
+
 pub(super) fn page_heading(view: &View) -> &str {
     match view.page {
         Page::Lobby => "附近正在玩的伙伴",
@@ -18,11 +39,11 @@ pub(super) fn page_heading(view: &View) -> &str {
                 &view.room_name
             }
         }
-        Page::Rooms => "选择好友的房间",
+        Page::Rooms => "附近的好友",
         Page::Games => &view.title,
         Page::Joined => "加入房间",
         Page::Leaving => "退出联机",
-        Page::Unavailable => "附近联机",
+        Page::Unavailable => "无法联机",
     }
 }
 
@@ -159,9 +180,9 @@ pub(super) fn next_step(view: &View) -> &str {
 pub(super) fn button_text(view: &View) -> &str {
     if view.network_only && view.connected && view.phase == Phase::NetworkConnected {
         return if view.return_to_launcher {
-            "保持连接，返回收藏"
+            "返回首页"
         } else {
-            "保持连接，返回系统"
+            "返回系统"
         };
     }
     match phase(view) {
@@ -199,10 +220,10 @@ pub(super) fn status_text(view: &View) -> &str {
     match view.page {
         Page::Lobby => "选择房间，向下展开创建与游戏库",
         Page::Candidates => "只切换本次联机使用的游戏",
-        Page::Mode => "请选择仅组网或选择游戏",
-        Page::Choice if view.network_only => "创建房间，或加入附近掌机的房间",
+        Page::Mode => "",
+        Page::Choice if view.network_only => "",
         Page::Host if view.network_only => next_step(view),
-        Page::Choice => "两台掌机选择同一款游戏，再创建或加入房间",
+        Page::Choice => "",
         Page::Host => "请好友选择同一款游戏，加入这个房间",
         Page::Rooms => "选择房间后确认加入，列表会自动刷新",
         Page::Joined => next_step(view),
