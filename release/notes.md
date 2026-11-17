@@ -7,7 +7,7 @@
 - 长按 X 时保持收藏布局和底部操作提示稳定。
 - 更新 Logo、字标、界面截图与双机演示。
 
-![双机联机演示](https://raw.githubusercontent.com/W-Mai/arkos-nearby/v0.15.0/docs/assets/nearby-dual-demo.svg)
+![双机联机演示](https://raw.githubusercontent.com/W-Mai/howff/v0.15.0/docs/assets/nearby-dual-demo.svg)
 
 ## 安装与更新
 
@@ -15,7 +15,7 @@
 
 已安装 Howff 时，将安装包归档放到游戏卡，结束游戏与房间，在 **START → 应用管理 → 安装更新** 中选择归档并确认。安装后在应用管理中查看版本，两台掌机使用同一版本联机。
 
-[安装与更新](https://github.com/W-Mai/arkos-nearby/blob/v0.15.0/docs/installation.md) · [使用说明](https://github.com/W-Mai/arkos-nearby/blob/v0.15.0/docs/usage.md) · [游戏兼容性](https://github.com/W-Mai/arkos-nearby/blob/v0.15.0/docs/compatibility.md)
+[安装与更新](https://github.com/W-Mai/howff/blob/v0.15.0/docs/installation.md) · [使用说明](https://github.com/W-Mai/howff/blob/v0.15.0/docs/usage.md) · [游戏兼容性](https://github.com/W-Mai/howff/blob/v0.15.0/docs/compatibility.md)
 
 ## 源码与校验
 

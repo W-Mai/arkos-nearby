@@ -30,4 +30,4 @@
 
 ## 报告问题
 
-在 [GitHub Issues](https://github.com/W-Mai/arkos-nearby/issues) 中提供可重复步骤与两端状态。日志发送前删除配对代码、无线密码、私钥和个人游戏路径。画面流畅度问题应附同设备、同核心、同场景的单机与联机对照。
+在 [GitHub Issues](https://github.com/W-Mai/howff/issues) 中提供可重复步骤与两端状态。日志发送前删除配对代码、无线密码、私钥和个人游戏路径。画面流畅度问题应附同设备、同核心、同场景的单机与联机对照。

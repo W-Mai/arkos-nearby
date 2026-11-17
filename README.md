@@ -4,11 +4,11 @@
 
 **R36S 的游戏首页与好友联机**
 
-[![Release](https://img.shields.io/github/v/release/W-Mai/arkos-nearby?color=a33d2e&style=flat-square)](https://github.com/W-Mai/arkos-nearby/releases) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/W-Mai/howff?color=a33d2e&style=flat-square)](https://github.com/W-Mai/howff/releases) [![Platform](https://img.shields.io/badge/platform-ArkOS4Clone-504a40?style=flat-square)](docs/compatibility.md) [![License](https://img.shields.io/badge/license-MIT-504a40?style=flat-square)](LICENSE)
 
 选好游戏，创建房间，和身边的朋友一起玩。
 
-[下载安装](https://github.com/W-Mai/arkos-nearby/releases) · [使用说明](docs/usage.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
+[下载安装](https://github.com/W-Mai/howff/releases) · [使用说明](docs/usage.md) · [游戏兼容性](docs/compatibility.md) · [源码构建](docs/building.md)
 
 <img src="docs/assets/nearby-dual-demo.svg" alt="双机联机界面演示：创建房间、搜索加入、确认就绪与主题切换" width="840" />
 
@@ -35,7 +35,7 @@ Howff 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄操作�
 
 适用配置：**ArkOS4Clone 08262026 · Linux 4.4.189 · RTL8188EU 无线芯片 · 640×480 屏幕**。详细要求见 [设备兼容性](docs/compatibility.md#设备配置)。在两台掌机上安装同一版本：
 
-1. 下载 [ARM64 安装包](https://github.com/W-Mai/arkos-nearby/releases)（`howff-VERSION-arm64.tar.gz`）。
+1. 下载 [ARM64 安装包](https://github.com/W-Mai/howff/releases)（`howff-VERSION-arm64.tar.gz`）。
 2. 解压，将 `howff` 文件夹放入游戏卡的 `ports` 目录。
 3. 在掌机文件管理器中打开这个文件夹，运行 **Install Howff.sh**，按提示完成安装。
 

@@ -4,7 +4,7 @@ Howff 适用于 R36S 的 ArkOS4Clone 配置，具体内核、无线芯片和系�
 
 ## 下载安装包
 
-打开 [GitHub Releases](https://github.com/W-Mai/arkos-nearby/releases)，选择要安装的版本，下载该版本的 `howff-VERSION-arm64.tar.gz` 和 `SHA256SUMS`。`VERSION` 是版本号。
+打开 [GitHub Releases](https://github.com/W-Mai/howff/releases)，选择要安装的版本，下载该版本的 `howff-VERSION-arm64.tar.gz` 和 `SHA256SUMS`。`VERSION` 是版本号。
 
 在下载目录核对安装包的 SHA-256 与 `SHA256SUMS` 中同名文件的记录：
 

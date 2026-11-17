@@ -2,7 +2,7 @@
 
 ## 工具与资产
 
-源码包含运行程序、GUI、ArkOS 平台插件、核心查询器、联机压缩辅助库和 Nestopia 状态恢复补丁。构建资产与源码版本配套，归档文件名和 SHA-256 见 [assets.json](../release/assets.json)，嵌入文件清单见 [manifest.json](../release/manifest.json)。发行标签对应的构建资产和上游源码可从 [GitHub Releases](https://github.com/W-Mai/arkos-nearby/releases) 获取，组件来源见 [第三方组件](third-party.md)。
+源码包含运行程序、GUI、ArkOS 平台插件、核心查询器、联机压缩辅助库和 Nestopia 状态恢复补丁。构建资产与源码版本配套，归档文件名和 SHA-256 见 [assets.json](../release/assets.json)，嵌入文件清单见 [manifest.json](../release/manifest.json)。发行标签对应的构建资产和上游源码可从 [GitHub Releases](https://github.com/W-Mai/howff/releases) 获取，组件来源见 [第三方组件](third-party.md)。
 
 需要 Python 3.11+、Rust 1.97.0（界面）和 1.92.0（运行程序）、ARM64 musl 标准库、rustfmt、clippy、clang、llvm-ar 和 Ruff。宿主可以是 Linux 或 macOS；交叉构建使用 Rust 自带的 rust-lld。先准备这些工具，再执行下面的构建命令。
 
