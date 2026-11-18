@@ -6,6 +6,7 @@ use mirui::ui::{text_input::TextInputSession, widgets::TextDocument};
 
 pub(crate) mod configuration;
 pub(crate) mod management;
+pub(crate) mod popup;
 pub(crate) mod saves;
 pub(crate) mod text_entry;
 pub(crate) mod text_input;
@@ -55,6 +56,8 @@ enum Gesture {
 pub struct Launcher {
     input_generation: Generation,
     view: LauncherView,
+    closing: Option<LauncherView>,
+    pub(crate) popup: model!(owned popup::Presence),
     menu: MenuContent,
     pub(crate) configuration: model!(owned configuration::Editor),
     pub(crate) saves: model!(owned saves::Manager),
@@ -73,6 +76,9 @@ pub struct Launcher {
     items_revision: u64,
     #[observe]
     pub progress: u16,
+    #[observe]
+    pub opening_room: bool,
+    launch_busy: bool,
     #[observe]
     pub selection_age: u16,
     #[observe]
@@ -97,9 +103,9 @@ pub struct Launcher {
     #[observe]
     pub wifi_pulse: u16,
     #[observe]
-    pub wifi_loading_start: Fixed,
+    pub loading_start: Fixed,
     #[observe]
-    pub wifi_loading_end: Fixed,
+    pub loading_end: Fixed,
     #[observe]
     pub wifi_track: Fixed,
     #[observe]
@@ -118,6 +124,8 @@ impl Default for Launcher {
         Self {
             input_generation: Generation::default(),
             view: Default::default(),
+            closing: None,
+            popup: popup::Presence::default().into(),
             menu: Default::default(),
             configuration: configuration::Editor::default().into(),
             saves: saves::Manager::default().into(),
@@ -129,6 +137,8 @@ impl Default for Launcher {
             wifi_view_revision: Default::default(),
             items_revision: Default::default(),
             progress: Default::default(),
+            opening_room: false,
+            launch_busy: false,
             selection_age: Default::default(),
             level_positions: Default::default(),
             detail_offset: Default::default(),
@@ -146,8 +156,8 @@ impl Default for Launcher {
             wifi_revision: Default::default(),
             wifi_visible_rows: Default::default(),
             wifi_pulse: Default::default(),
-            wifi_loading_start: Default::default(),
-            wifi_loading_end: Default::default(),
+            loading_start: Default::default(),
+            loading_end: Default::default(),
             wifi_track: Default::default(),
             detail_geometry: Default::default(),
             level_targets: Default::default(),
@@ -176,10 +186,10 @@ impl Launcher {
         self.view.enabled && !self.view.overlay.is_empty()
     }
     fn snapshot_overlay_title(&self) -> String {
-        if self.view.overlay.is_empty() {
+        if self.presentation().overlay.is_empty() {
             self.menu.title.clone()
         } else {
-            self.view.overlay.clone()
+            self.presentation().overlay.clone()
         }
     }
     fn snapshot_overlay_kind(&self) -> String {
@@ -187,14 +197,14 @@ impl Launcher {
     }
     #[observe]
     pub fn selected(&self) -> usize {
-        self.view.selected
+        self.presentation().selected
     }
     #[observe]
     pub fn item_count(&self) -> usize {
         self.menu.items.len()
     }
     fn snapshot_confirm_label(&self) -> String {
-        match self.view.details.as_ref() {
+        match self.presentation().details.as_ref() {
             Some(details) if details.expanded => "收起",
             Some(details) if details.section == howff_menu::details::Section::Storage => "查看详情",
             Some(details) if details.section != howff_menu::details::Section::Overview => {
@@ -205,10 +215,13 @@ impl Launcher {
         .into()
     }
     fn snapshot_notice(&self) -> String {
-        self.view.notice.clone()
+        self.presentation().notice.clone()
     }
     #[observe]
     pub fn menu_selection(&self) -> Option<usize> {
+        if !self.overlay_visible() {
+            return None;
+        }
         if self.management.active() {
             return Some(self.management.focus());
         }
@@ -219,39 +232,55 @@ impl Launcher {
             return Some(self.configuration.selected());
         }
         let _ = self.wifi_revision;
-        if let Some(view) = self.view.wifi.as_ref() {
+        if let Some(view) = self.presentation().wifi.as_ref() {
             return Some(if view.page.keyboard() {
                 self.wifi_editor.selected
             } else {
                 view.selected
             });
         }
-        (self.view.enabled && !self.view.overlay.is_empty()).then_some(self.view.selected)
+        (self.presentation().enabled && !self.presentation().overlay.is_empty())
+            .then_some(self.presentation().selected)
     }
     #[observe]
     pub fn wifi_active(&self) -> bool {
-        self.view.wifi.is_some()
+        self.presentation().wifi.is_some()
     }
     #[observe]
     pub fn wifi_page(&self) -> howff_menu::wifi::Page {
-        self.view.wifi.as_ref().map(|v| v.page).unwrap_or_default()
+        self.presentation()
+            .wifi
+            .as_ref()
+            .map(|v| v.page)
+            .unwrap_or_default()
     }
 
     #[observe]
     pub fn wifi_retained(&self) -> bool {
-        self.view.retained
+        self.presentation().retained
     }
     #[observe]
     pub fn wifi_keyboard(&self) -> bool {
-        self.view.wifi.as_ref().is_some_and(|v| v.page.keyboard())
+        self.presentation()
+            .wifi
+            .as_ref()
+            .is_some_and(|v| v.page.keyboard())
     }
     #[observe]
     pub fn wifi_stage(&self) -> u8 {
-        self.view.wifi.as_ref().map(|v| v.stage).unwrap_or(0).min(2)
+        self.presentation()
+            .wifi
+            .as_ref()
+            .map(|v| v.stage)
+            .unwrap_or(0)
+            .min(2)
     }
     #[observe]
     pub fn wifi_scanning(&self) -> bool {
-        self.view.wifi.as_ref().is_some_and(|v| v.scanning)
+        self.presentation()
+            .wifi
+            .as_ref()
+            .is_some_and(|v| v.scanning)
     }
     #[observe]
     pub fn wifi_length(&self) -> usize {
@@ -278,7 +307,7 @@ impl Launcher {
             ((height.to_int() + gap).max(0) as usize / extent.max(1) as usize).clamp(1, 8);
     }
     fn snapshot_wifi_window(&self) -> std::ops::Range<usize> {
-        let Some(view) = self.view.wifi.as_ref() else {
+        let Some(view) = self.presentation().wifi.as_ref() else {
             return 0..0;
         };
         let count = view.networks.len() + 1;
@@ -287,7 +316,7 @@ impl Launcher {
         first..(first + rows)
     }
     fn snapshot_wifi_text(&self, index: usize) -> String {
-        let Some(view) = self.view.wifi.as_ref() else {
+        let Some(view) = self.presentation().wifi.as_ref() else {
             return String::new();
         };
         match index {
@@ -305,12 +334,12 @@ impl Launcher {
 
     #[observe]
     pub fn detail_active(&self) -> bool {
-        self.view.overlay_kind == "details"
+        self.presentation().overlay_kind == "details"
     }
 
     #[observe]
     pub fn detail_expanded(&self) -> bool {
-        self.view
+        self.presentation()
             .details
             .as_ref()
             .is_some_and(|details| details.expanded)
@@ -318,22 +347,27 @@ impl Launcher {
 
     #[observe]
     pub fn detail_count(&self) -> usize {
-        if self.view.overlay_kind == "details" {
-            self.view.items.len()
+        if self.presentation().overlay_kind == "details" {
+            self.presentation().items.len()
         } else {
             0
         }
     }
 
     fn snapshot_detail_heading(&self) -> String {
-        match self.view.details.as_ref().map(|details| &details.load) {
+        match self
+            .presentation()
+            .details
+            .as_ref()
+            .map(|details| &details.load)
+        {
             Some(howff_menu::details::Load::Ready { document }) => document.title.clone(),
             Some(howff_menu::details::Load::Failed { message }) => {
                 format!("读取未完成：{message}")
             }
             _ => {
                 if self
-                    .view
+                    .presentation()
                     .details
                     .as_ref()
                     .is_some_and(|details| details.section == howff_menu::details::Section::Storage)
@@ -347,7 +381,12 @@ impl Launcher {
     }
 
     fn snapshot_detail_platform(&self) -> String {
-        match self.view.details.as_ref().map(|details| &details.load) {
+        match self
+            .presentation()
+            .details
+            .as_ref()
+            .map(|details| &details.load)
+        {
             Some(howff_menu::details::Load::Ready { document }) => document.platform.clone(),
             _ => String::new(),
         }
@@ -374,23 +413,40 @@ impl Launcher {
         self.menu.items.get(index).and_then(|item| item.level)
     }
     pub fn present(&mut self, view: &View) {
+        self.opening_room = false;
+        self.launch_busy = view.launcher.enabled && view.busy;
+        let opening = view.launcher.enabled && !view.launcher.overlay.is_empty();
+        if opening {
+            self.closing = None;
+        } else if self.view.enabled && !self.view.overlay.is_empty() {
+            self.closing = Some(self.view.clone());
+        }
+
         if self.input_generation != view.input_generation {
             self.cancel();
             self.pending = None;
             self.input_edits.clear();
             self.input_generation = view.input_generation;
         }
-        self.management.bind_input(view.input_generation);
-        self.configuration.bind_input(view.input_generation);
-        self.saves.bind_input(view.input_generation);
-        self.management.sync(view.launcher.management.as_ref());
-        self.configuration
-            .sync(view.launcher.configuration.as_ref());
-        self.saves.sync(view.launcher.saves.as_ref());
+        let display_active = self.closing.is_none();
+        let generation = if display_active {
+            view.input_generation
+        } else {
+            Generation::default()
+        };
+        self.management.bind_input(generation);
+        self.configuration.bind_input(generation);
+        self.saves.bind_input(generation);
+        if display_active {
+            self.management.sync(view.launcher.management.as_ref());
+            self.configuration
+                .sync(view.launcher.configuration.as_ref());
+            self.saves.sync(view.launcher.saves.as_ref());
+        }
         if self.wifi_document.capacity() != 64 {
             let _ = self.wifi_document.set_capacity(64);
         }
-        if self.wifi_editor.sync(view.launcher.wifi.as_ref()) {
+        if display_active && self.wifi_editor.sync(view.launcher.wifi.as_ref()) {
             let _ = self.wifi_document.set_text("");
             self.input_edits.clear();
         }
@@ -402,12 +458,13 @@ impl Launcher {
         {
             self.input_edits.clear();
         }
-        if self.view.details.as_ref().map(|details| details.section)
-            != view
-                .launcher
-                .details
-                .as_ref()
-                .map(|details| details.section)
+        if display_active
+            && self.view.details.as_ref().map(|details| details.section)
+                != view
+                    .launcher
+                    .details
+                    .as_ref()
+                    .map(|details| details.section)
         {
             self.detail_rows.clear();
             self.detail_text_sizes.clear();
@@ -484,6 +541,7 @@ impl Launcher {
             }
             self.update_detail_offset();
         }
+        self.refresh_popup();
     }
 
     pub fn detail_viewport(&mut self, height: Fixed) {
@@ -492,20 +550,21 @@ impl Launcher {
     }
 
     pub fn detail_measure(&mut self, index: usize, height: Fixed) {
-        if index >= self.view.items.len() {
+        if index >= self.presentation().items.len() {
             return;
         }
-        self.detail_rows.resize(self.view.items.len(), Fixed::ZERO);
+        self.detail_rows
+            .resize(self.presentation().items.len(), Fixed::ZERO);
         self.detail_rows[index] = height;
         self.update_detail_offset();
     }
 
     pub fn detail_text_size(&mut self, index: usize, part: usize, height: Fixed) {
-        if index >= self.view.items.len() || part >= 2 {
+        if index >= self.presentation().items.len() || part >= 2 {
             return;
         }
         self.detail_text_sizes
-            .resize(self.view.items.len(), [Fixed::ZERO; 2]);
+            .resize(self.presentation().items.len(), [Fixed::ZERO; 2]);
         if self.detail_text_sizes[index][part] != height {
             self.detail_text_sizes[index][part] = height;
             self.detail_geometry += 1;
@@ -514,11 +573,11 @@ impl Launcher {
 
     pub fn detail_fact_measure(&mut self, index: usize, field: usize, value: bool, height: Fixed) {
         let count = self.snapshot_detail_fact_count(index);
-        if index >= self.view.items.len() || field >= count {
+        if index >= self.presentation().items.len() || field >= count {
             return;
         }
         self.detail_fact_sizes
-            .resize_with(self.view.items.len(), Vec::new);
+            .resize_with(self.presentation().items.len(), Vec::new);
         self.detail_fact_sizes[index].resize(count, [Fixed::ZERO; 2]);
         let part = usize::from(value);
         if self.detail_fact_sizes[index][field][part] != height {
@@ -549,9 +608,9 @@ impl Launcher {
             .get(index)
             .copied()
             .unwrap_or_default();
-        let expanded = self.view.selected == index
+        let expanded = self.presentation().selected == index
             && self
-                .view
+                .presentation()
                 .details
                 .as_ref()
                 .is_some_and(|details| details.expanded);
@@ -566,6 +625,9 @@ impl Launcher {
     }
 
     fn update_detail_offset(&mut self) {
+        if self.closing.is_some() {
+            return;
+        }
         let Some(details) = self.view.details.as_ref() else {
             self.detail_reading = None;
             self.detail_scroll_input = 0;
@@ -613,6 +675,7 @@ impl Launcher {
     }
 
     pub fn cancel(&mut self) {
+        self.opening_room = false;
         if !matches!(self.gesture, Gesture::Idle) {
             self.gesture = Gesture::Consumed;
         }
@@ -623,12 +686,12 @@ impl Launcher {
         if !matches!(self.gesture, Gesture::Idle) {
             return;
         }
-        if self.management.active() {
+        if self.view.management.is_some() {
             self.pending = Some(Intent::Action(Action::Refresh));
             self.gesture = Gesture::Consumed;
             return;
         }
-        if self.saves.active() {
+        if self.view.saves.is_some() {
             self.saves.input(Action::Refresh);
             self.gesture = Gesture::Consumed;
             return;
@@ -670,13 +733,20 @@ impl Launcher {
 
     pub fn tick(&mut self, now: u64) {
         self.now = now;
+        self.refresh_popup();
+        self.popup.tick(now);
+        if !self.popup.mounted() && self.closing.take().is_some() {
+            self.management.sync(None);
+            self.configuration.sync(None);
+            self.saves.sync(None);
+        }
         self.configuration.tick(now);
         self.saves.tick(now);
         self.management.tick(now);
-        if self.wifi_page().pending() {
+        if self.wifi_page().pending() || self.launch_busy || self.opening_room {
             let (start, end) = wifi::loading_span(now);
-            self.wifi_loading_start = start;
-            self.wifi_loading_end = end;
+            self.loading_start = start;
+            self.loading_end = end;
         }
         self.wifi_pulse = if self.wifi_scanning() {
             ((now / 125) % 4) as u16
@@ -705,6 +775,7 @@ impl Launcher {
                 key: key.clone(),
                 multiplayer: true,
             });
+            self.opening_room = true;
             self.gesture = Gesture::Consumed;
             self.progress = 0;
         } else if elapsed >= FEEDBACK_MS {
@@ -720,14 +791,20 @@ impl Launcher {
 
     #[cfg(any(target_os = "linux", test))]
     pub fn saves_input(&mut self, action: Action) {
-        self.saves.input(action);
+        if self.view.saves.is_some() {
+            self.saves.input(action);
+        }
     }
     pub fn management_input(&mut self, action: Action) {
-        self.management.input(action);
+        if self.view.management.is_some() {
+            self.management.input(action);
+        }
         self.selected_at = self.now;
     }
     pub fn configuration_input(&mut self, action: Action) {
-        self.configuration.input(action);
+        if self.view.configuration.is_some() {
+            self.configuration.input(action);
+        }
     }
     pub fn wifi_input(&mut self, action: Action) {
         let Some(view) = self.view.wifi.as_ref() else {
@@ -768,7 +845,7 @@ impl Launcher {
     }
     fn snapshot_wifi_editor(&self, index: usize) -> String {
         let hidden = self
-            .view
+            .presentation()
             .wifi
             .as_ref()
             .is_some_and(|v| v.page == howff_menu::wifi::Page::Hidden);
@@ -783,10 +860,15 @@ impl Launcher {
         }
     }
     fn snapshot_wifi_row(&self, index: usize) -> Option<howff_menu::wifi::Network> {
-        self.view.wifi.as_ref()?.networks.get(index).cloned()
+        self.presentation()
+            .wifi
+            .as_ref()?
+            .networks
+            .get(index)
+            .cloned()
     }
     fn snapshot_wifi_info(&self) -> Option<howff_menu::wifi::Info> {
-        self.view.wifi.as_ref()?.info.clone()
+        self.presentation().wifi.as_ref()?.info.clone()
     }
     fn snapshot_wifi_echo(&self) -> String {
         self.wifi_editor.echo_label().into()
@@ -802,6 +884,30 @@ impl Launcher {
             );
             tween.value()
         })
+    }
+}
+
+impl Launcher {
+    fn presentation(&self) -> &LauncherView {
+        self.closing.as_ref().unwrap_or(&self.view)
+    }
+
+    fn refresh_popup(&mut self) {
+        let route = self.overlay_visible().then(|| popup::Route {
+            wifi: self.view.wifi.as_ref().map(|view| view.page),
+            management: self.management.active().then(|| self.management.page()),
+            saves: self.saves.active().then(|| self.saves.page()),
+            configuration: self
+                .configuration
+                .active()
+                .then(|| self.configuration.section()),
+            details: self
+                .view
+                .details
+                .as_ref()
+                .map(|view| (view.section, view.expanded)),
+        });
+        self.popup.present(&self.view.overlay_kind, route);
     }
 }
 
@@ -900,7 +1006,7 @@ impl LauncherHandle {
 
 impl Launcher {
     fn detail_row_data(&self, index: usize) -> Option<&howff_menu::details::Row> {
-        self.view
+        self.presentation()
             .details
             .as_ref()
             .and_then(|details| match &details.load {
@@ -1270,5 +1376,74 @@ mod management_contracts {
 impl Launcher {
     fn take_intent(&mut self) -> Option<Intent> {
         self.pending.take()
+    }
+}
+
+#[cfg(test)]
+mod popup_presentation_contract {
+    use super::*;
+
+    #[test]
+    fn closing_every_editor_keeps_pixels_but_retires_input_and_reopens_current_data() {
+        for kind in 0..6 {
+            let mut model = Launcher::default();
+            let mut current = View::default();
+            current.launcher.enabled = true;
+            current.launcher.overlay = "Panel".into();
+            current.launcher.overlay_kind = "system".into();
+            match kind {
+                1 => current.launcher.wifi = Some(Default::default()),
+                2 => current.launcher.management = Some(Default::default()),
+                3 => current.launcher.saves = Some(Default::default()),
+                4 => current.launcher.configuration = Some(Default::default()),
+                5 => current.launcher.details = Some(Default::default()),
+                _ => {}
+            }
+            model.present(&current);
+            model.tick(0);
+            model.tick(600);
+            assert!(model.popup.mounted());
+            assert_eq!(model.popup.progress(), Fixed::ONE);
+            let shown = model.presentation().clone();
+            current.launcher = LauncherView {
+                enabled: true,
+                ..Default::default()
+            };
+            current.input_generation.advance();
+            model.present(&current);
+            assert_eq!(model.snapshot(), current.launcher);
+            assert_eq!(model.presentation(), &shown);
+            assert!(!model.overlay_visible());
+            assert_eq!(model.menu_selection(), None);
+            model.management_input(Action::Confirm);
+            model.saves_input(Action::Confirm);
+            model.configuration_input(Action::Confirm);
+            model.wifi_input(Action::Confirm);
+            assert!(model.take_intent().is_none());
+            model.tick(650);
+            assert!(model.popup.mounted());
+            assert_eq!(model.presentation(), &shown);
+            current.launcher = shown.clone();
+            current.launcher.overlay = "Updated panel".into();
+            current.input_generation.advance();
+            let position = model.popup.progress();
+            model.present(&current);
+            model.tick(650);
+            assert_eq!(model.popup.progress(), position);
+            assert_eq!(model.snapshot_overlay_title(), "Updated panel");
+            current.launcher = LauncherView {
+                enabled: true,
+                ..Default::default()
+            };
+            current.input_generation.advance();
+            model.present(&current);
+            model.tick(650);
+            model.tick(1200);
+            assert!(!model.popup.mounted());
+            assert!(model.closing.is_none());
+            assert!(!model.management.active());
+            assert!(!model.saves.active());
+            assert!(!model.configuration.active());
+        }
     }
 }

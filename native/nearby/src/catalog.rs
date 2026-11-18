@@ -374,6 +374,9 @@ impl Entry {
     pub fn core(&self) -> &str {
         &self.core
     }
+    pub(crate) fn image(&self) -> Option<&Path> {
+        self.image.as_deref()
+    }
     pub fn platform_name(&self) -> &str {
         PLATFORMS
             .iter()

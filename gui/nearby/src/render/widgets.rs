@@ -19,6 +19,49 @@ pub(super) fn paragraph(align: TextAlign, lines: u16) -> ParagraphStyle {
 }
 
 #[compose]
+pub(super) fn hold_badge() -> Entity {
+    ui! {
+        Row (
+            width: Dimension::Content,
+            height: 20,
+            shrink: 0.0,
+            column_gap: 4,
+            padding: Padding {
+                left: 4.into(),
+                right: 4.into(),
+                ..Default::default()
+            },
+            align: AlignItems::Center,
+            bg_color: SHELL
+        ) {
+            Text (
+                "X",
+                width: 15,
+                height: 15,
+                font: font(BODY_SIZE),
+                font_size: BODY_SIZE,
+                text_color: SHELL,
+                bg_color: SHELL_TEXT,
+                paragraph: paragraph(Center, 1)
+            ) [
+                FONT_PAINT,
+            ]
+            Text (
+                "长按联机",
+                width: Dimension::Content,
+                height: 18,
+                font: font(BODY_SIZE),
+                font_size: BODY_SIZE,
+                text_color: SHELL_TEXT,
+                paragraph: paragraph(Center, 1)
+            ) [
+                FONT_PAINT,
+            ]
+        }
+    }
+}
+
+#[compose]
 pub(super) fn caption(
     content: prop!(String),
     color: prop!(ColorToken),

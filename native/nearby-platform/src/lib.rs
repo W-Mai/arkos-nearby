@@ -4,6 +4,7 @@ pub mod arkos;
 pub mod backend;
 pub mod content;
 pub mod core;
+pub mod device;
 pub mod ipc;
 pub mod plugin;
 

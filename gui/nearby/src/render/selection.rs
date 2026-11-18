@@ -87,18 +87,31 @@ enum FocusChange {
     Hide,
 }
 
+pub(super) fn track(
+    target: Entity,
+    current: Option<&FollowBounds>,
+    direct: bool,
+) -> Option<FollowBounds> {
+    if current.is_some_and(|old| old.target == target && (!direct || old.transition.is_none())) {
+        return None;
+    }
+    let mut next = current
+        .copied()
+        .unwrap_or_else(|| FollowBounds::new(target));
+    next.target = target;
+    next.transition = (!direct).then(|| mirui::anim::SNAPPY.into());
+    Some(next)
+}
+
 fn follow(
     node: Option<Entity>,
     current: Option<&FollowBounds>,
     hidden: bool,
+    direct: bool,
     mut apply: impl FnMut(FocusChange),
 ) {
     if let Some(target) = node {
-        if current.is_none_or(|bounds| bounds.target != target) {
-            let mut next = current
-                .copied()
-                .unwrap_or_else(|| FollowBounds::new(target).with_transition(mirui::anim::SNAPPY));
-            next.target = target;
+        if let Some(next) = track(target, current, direct) {
             apply(FocusChange::Bounds(next));
         }
         if hidden {
@@ -121,14 +134,20 @@ fn initialize(
         return;
     };
     let target = resolve(frame, targets, |e| parents.get(e).map(|p| p.0));
-    follow(target, None, false, |change| match change {
-        FocusChange::Bounds(bounds) => commands.insert(node, bounds),
-        FocusChange::Show => commands.remove::<Hidden>(node),
-        FocusChange::Hide => {
-            commands.insert(node, Hidden);
-            commands.remove::<FollowBounds>(node);
-        }
-    });
+    follow(
+        target,
+        None,
+        false,
+        frame.state.shelf().sliding(),
+        |change| match change {
+            FocusChange::Bounds(bounds) => commands.insert(node, bounds),
+            FocusChange::Show => commands.remove::<Hidden>(node),
+            FocusChange::Hide => {
+                commands.insert(node, Hidden);
+                commands.remove::<FollowBounds>(node);
+            }
+        },
+    );
 }
 
 #[view(component = SelectionFrame, attach = initialize::callback())]
@@ -155,6 +174,7 @@ fn initialize_target(
                 Some(node),
                 followers.get(entity),
                 hidden.is_some(),
+                frame.state.shelf().sliding(),
                 |change| match change {
                     FocusChange::Bounds(bounds) => commands.insert(entity, bounds),
                     FocusChange::Show => commands.remove::<Hidden>(entity),
@@ -203,6 +223,7 @@ pub(super) fn update(
             target,
             followers.get(entity),
             hidden.is_some(),
+            frame.state.shelf().sliding(),
             |change| match change {
                 FocusChange::Bounds(bounds) => commands.insert(entity, bounds),
                 FocusChange::Show => commands.remove::<Hidden>(entity),

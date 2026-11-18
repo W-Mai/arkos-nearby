@@ -6,7 +6,7 @@ use super::{
     library::library,
     lists::{game_rows, lobby, rooms},
     pixel::{Scenery::Margins, backdrop},
-    sessions::{host, joined, leaving, network_panel, unavailable},
+    sessions::{game_room, leaving, network_panel, unavailable},
     state::DisplayState,
     style::*,
     widgets::paragraph,
@@ -50,7 +50,7 @@ pub(super) fn page(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                 ) [
                     Section::Content,
                 ] {
-                    if matches!(view.page, Page::Rooms | Page::Candidates | Page::Unavailable) {
+                    if matches!(view.page, Page::Candidates | Page::Unavailable) {
                         Text (
                             text: ${ state.heading() },
                             width: Dimension::percent(100),
@@ -97,14 +97,11 @@ pub(super) fn page(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                             Page :: Choice | Page :: Mode => {
                                 choice (view, state, metrics)
                             }
-                            Page :: Host => {
-                                host (state, metrics)
+                            Page :: Host | Page :: Joined => {
+                                game_room (state, metrics, view.page == Page::Host)
                             }
                             Page :: Rooms => {
                                 rooms (state, metrics)
-                            }
-                            Page :: Joined => {
-                                joined (state, metrics)
                             }
                             Page :: Leaving => {
                                 leaving (state, metrics)

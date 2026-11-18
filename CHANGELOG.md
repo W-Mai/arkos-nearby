@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-19
+
+- Show the host name, game title and matching game artwork in nearby rooms. The discovery title moves between the beacon and room list as rooms appear and disappear.
+- Keep both players in matching seats on both screens. Host approval, guest arrival, departure and readiness each have distinct cues.
+- Slide favorite cartridges between pages and show hold-to-connect progress over the selected game. Long library titles scroll once.
+- Add light, warm and dark palettes, device status in the main header and reversible dialog transitions.
+
 ## [0.15.0] - 2026-11-17
 
 - Show Howff branding and object-specific titles throughout the interface.

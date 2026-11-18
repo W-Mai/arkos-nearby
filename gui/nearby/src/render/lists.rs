@@ -1,27 +1,29 @@
-use super::artwork::preview;
+use super::artwork::{preview, room_preview};
 use super::choices::choice;
 use super::consoles::console;
+use super::discovery::{self, caption as discovery_caption};
 use super::library::search_icon;
 use super::pixel::Stage::Search;
+use super::reading::title_strip;
 use super::selection::FocusTarget;
+use super::widgets::hold_badge;
 use super::{
     Section,
     pixel::{self, Scenery, art},
     rows::Row,
     state::DisplayState,
     style::*,
-    widgets::{caption, label, paragraph, shadow},
+    widgets::{caption, shadow, text_block},
 };
 use mirui::prelude::*;
+use mirui::ui::widgets::Image;
 use mirui::ui::widgets::TextAlign::{Center, Start};
-use mirui::ui::widgets::{Image, Text};
 
 // Sheet contents keep their layout coordinates while the viewports move and clip.
 const DECK_PEEK: Fixed = Fixed::from_ratio(14, 100);
 const DECK_FULL: Fixed = Fixed::from_ratio(86, 100);
 const DECK_MIN_SCALE: Fixed = Fixed::from_ratio(44, 100);
 const ROW_ACTOR_SHARE: i32 = 18;
-const ROW_ACTOR_MIN_WIDTH: i32 = 32;
 
 fn sheet_scale(expansion: Fixed) -> Fixed {
     DECK_MIN_SCALE + (Fixed::ONE - DECK_MIN_SCALE) * expansion
@@ -72,7 +74,6 @@ pub(super) fn lobby(state: model!(DisplayState), metrics: Metrics) -> Entity {
                         if actions {
                             choice (super::state::PageKey { page: crate::model::Page::Mode, network_only: false, library: crate::model::LibraryKind::Directory }, state, metrics)
                         } else {
-                            label ("附近正在玩的伙伴", metrics.title, FOREGROUND, Start)
                             discovery_status (state, metrics)
                             rooms (state, metrics)
                         }
@@ -99,62 +100,96 @@ fn row_signal(state: model!(DisplayState), row: model!(Row), metrics: Metrics) -
 
 #[compose]
 pub(super) fn rooms(state: model!(DisplayState), metrics: Metrics) -> Entity {
+    let slots = Signal::new(super::state::ROOM_WINDOW);
+    let measured_slots = slots.clone();
     ui! {
-        Column (grow: 1.0, min_height: 0) [
+        Column (grow: 1.0, min_width: 0, min_height: 0, container: true, clip_children: true) [
             Scenery::Ridge,
         ] {
-            room_rows (state, metrics)
-        }
-    }
-}
-
-#[compose]
-pub(super) fn room_rows(state: model!(DisplayState), metrics: Metrics) -> Entity {
-    ui! {
-        Column (
-            grow: 1.0,
-            min_height: 0,
-            row_gap: metrics.gap
-        ) [
-            Section::FocusList,
-        ] {
-            if ${ state.rooms().is_empty() } {
-                Column (grow: 1.0, min_height: 0) {
-                    Column (
-                        grow: 1.0,
-                        bg_color: PANEL,
-                        padding: Padding::all(metrics.inset),
-                        justify: JustifyContent::Center,
-                        row_gap: metrics.gap
-                    ) {
-                        art (state, Search, if metrics.compact { 48 } else { 88 })
-                        label (
-                            "正在搜索附近的房间",
-                            metrics.title,
-                            FOREGROUND,
-                            Center
-                        )
-                        Text (
-                            "请好友先创建房间，并把两台掌机放近一些",
-                            width: Dimension::percent(100),
-                            height: Dimension::Content,
-                            font: font(metrics.small),
-                            font_size: metrics.small,
-                            text_color: SECONDARY,
-                            paragraph: paragraph(Center, 2)
-                        ) [
-                            FONT_PAINT,
-                        ]
-                    }
-                    shadow (metrics)
+            Column (
+                position: Position::Absolute,
+                top: 0,
+                left: 0,
+                height: Dimension::percent(100),
+                width: Dimension::percent(100),
+                min_height: 0,
+                bg_color: PANEL
+            ) [
+                discovery::Layer::Beacon,
+            ] {
+                View (height: Dimension::percent(50), shrink: 0.0)
+                Column (
+                    grow: 1.0,
+                    min_height: 0,
+                    padding: Padding {
+                        left: metrics.inset.into(),
+                        right: metrics.inset.into(),
+                        ..Default::default()
+                    },
+                    row_gap: metrics.gap
+                ) {
+                    art (state, Search, if metrics.compact { 40 } else { 72 })
+                    caption (
+                        "请好友在另一台掌机上创建房间",
+                        SECONDARY,
+                        metrics.small,
+                        Center,
+                        LABEL_LEADING
+                    )
+                    View (grow: 1.0, min_height: 0)
                 }
-            } else {
-                Column (grow: 1.0, min_height: 0, row_gap: metrics.gap) {
-                    walk ${ state.rooms().entries() } with item by item.0 {
-                        list_row (state, item.1, metrics, true)
+                shadow (metrics)
+            }
+            Column (
+                grow: 1.0,
+                min_width: 0,
+                min_height: 0
+            ) [
+                discovery::Layer::Results,
+            ] {
+                View (height: discovery::HEADER_HEIGHT, shrink: 0.0)
+                Row (grow: 1.0, min_height: 0, column_gap: metrics.gap) {
+                    Column (grow: 3.0, min_width: 0, min_height: 0, row_gap: metrics.gap) [
+                        Section::FocusList,
+                    ] {
+                        walk ${
+                            let rooms = state.rooms();
+                            let limit = slots.get();
+                            let first = rooms.get(0).map_or(0, |row| row.index());
+                            let cursor = state.room_cursor().saturating_sub(first);
+                            let offset = cursor
+                                .saturating_add(1)
+                                .saturating_sub(limit)
+                                .min(rooms.len().saturating_sub(limit));
+                            rooms.entries().skip(offset).take(limit)
+                        } with item by item.0 {
+                            list_row (state, item.1, metrics, true)
+                        }
+                    } on SizeChanged {
+                        let capacity = ((event.new.height.to_int() + metrics.gap)
+                            / (metrics.row_min_height() + metrics.gap))
+                            .clamp(1, super::state::ROOM_WINDOW as i32) as usize;
+                        if measured_slots.get_untracked() != capacity {
+                            measured_slots.set(capacity);
+                        }
+                    }
+                    if ${ state.room_art() } {
+                        Column (grow: 2.0, min_width: 0, min_height: 0) {
+                            room_preview (state)
+                            text_block (
+                                ${ state.room_game() },
+                                FOREGROUND,
+                                metrics.title,
+                                Center,
+                                LABEL_LEADING,
+                                2
+                            )
+                            shadow (metrics)
+                        }
                     }
                 }
             }
+            discovery_caption (state, metrics)
         }
     }
 }
@@ -162,34 +197,48 @@ pub(super) fn room_rows(state: model!(DisplayState), metrics: Metrics) -> Entity
 #[compose]
 pub(super) fn games(state: model!(DisplayState), metrics: Metrics, platforms: bool) -> Entity {
     ui! {
-        Row (grow: 1.0, min_height: 0, column_gap: metrics.gap) [
-            Scenery::Ridge,
-        ] {
-            Column (grow: 46.0, min_width: 0, min_height: 0) {
-                game_rows (state, metrics)
-            }
-            Column (
-                grow: 54.0,
-                min_width: 0,
-                min_height: 0,
-                row_gap: metrics.gap
-            ) {
-                if platforms {
-                    Column (
-                        id: "platform_previews",
-                        grow: 1.0,
-                        min_height: 0,
-                        bg_color: PANEL,
-                        container: true
-                    ) {
-                        walk ${ state.platform_previews() } with item by item {
-                            platform_preview_layer (state, item.0, item.1)
-                        }
-                    }
-                } else {
-                    preview (state, metrics)
+        Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: metrics.gap) {
+            Row (grow: 1.0, min_height: 0, column_gap: metrics.gap) [
+                Scenery::Ridge,
+            ] {
+                Column (grow: 59.0, min_width: 0, min_height: 0) {
+                    game_rows (state, metrics)
                 }
-                preview_label (state, metrics, platforms)
+                Column (
+                    grow: 41.0,
+                    min_width: 0,
+                    min_height: 0,
+                    row_gap: metrics.gap
+                ) {
+                    if platforms {
+                        Column (
+                            id: "platform_previews",
+                            grow: 1.0,
+                            min_height: 0,
+                            bg_color: PANEL,
+                            container: true
+                        ) {
+                            walk ${ state.platform_previews() } with item by item {
+                                platform_preview_layer (state, item.0, item.1)
+                            }
+                        }
+                    } else {
+                        preview (state, metrics)
+                    }
+                }
+            }
+            Row (
+                height: metrics.preview_title_height(),
+                align: AlignItems::Center,
+                shrink: 0.0,
+                column_gap: metrics.gap,
+                bg_color: BACKGROUND
+            ) {
+                View (width: 4, height: 18, shrink: 0.0, bg_color: ACCENT)
+                title_strip (state, platforms)
+                if ${ state.playable_selection() && !platforms } {
+                    hold_badge ()
+                }
             }
         }
     }
@@ -212,43 +261,6 @@ fn platform_preview_layer(
         ) {
             console (platform)
         }
-    }
-}
-
-#[compose]
-fn preview_label(state: model!(DisplayState), metrics: Metrics, platforms: bool) -> Entity {
-    let title = move || {
-        if platforms {
-            return state.platform_preview_title();
-        }
-        let selected = state.library_selection();
-        let entries = state.entries();
-        if let Some(row) = entries.get(selected).filter(|row| row.index() == selected) {
-            row.label(true)
-        } else {
-            entries
-                .entries()
-                .into_iter()
-                .find(|(_, row)| row.index() == selected)
-                .map(|(_, row)| row.label(true))
-                .unwrap_or_default()
-        }
-    };
-    ui! {
-        Text (
-            text: ${ title() },
-            width: Dimension::percent(100),
-            height: metrics.preview_title_height(),
-            min_width: 0,
-            shrink: 0.0,
-            font: font(TITLE_SIZE),
-            font_size: TITLE_SIZE,
-            text_color: FOREGROUND,
-            bg_color: BACKGROUND,
-            paragraph: paragraph(Center, 2)
-        ) [
-            FONT_PAINT,
-        ]
     }
 }
 
@@ -456,11 +468,7 @@ fn list_row(
                         color: WARNING
                     )
                 }
-                View (
-                    width: Dimension::percent(ROW_ACTOR_SHARE),
-                    min_width: ROW_ACTOR_MIN_WIDTH,
-                    shrink: 0.0
-                )
+                View (width: Dimension::percent(ROW_ACTOR_SHARE), min_width: 32, shrink: 0.0)
                 if has_signal {
                     row_signal (state, item, metrics)
                 }

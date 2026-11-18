@@ -185,6 +185,12 @@ impl<B: Surface, F: RendererFactory<B>> Plugin<B, F> for Response {
     fn build(&mut self, _app: &mut App<B, F>) {}
 
     fn on_timing(&mut self, world: &mut World, sample: &TimingSample<'_>) {
+        if sample.outcome == TimingOutcome::Failed && interactions() {
+            record(
+                "frame_failed",
+                json!({"wall_ns": sample.wall_nanos, "accepted": sample.accepted_submissions}),
+            );
+        }
         if sample.accepted_submissions == 0 || sample.outcome != TimingOutcome::Completed {
             return;
         }
@@ -247,6 +253,8 @@ impl<B: Surface, F: RendererFactory<B>> Plugin<B, F> for Response {
                         else if launcher.saves().active() { launcher.saves().reading_offset().to_f32() }
                         else { 0.0 },
                     "layer":format!("{:?}",frame.layer),"panel":frame.panel.to_f32(),
+                    "popup":launcher.popup().progress().to_f32(),
+                    "arrival":launcher.popup().arrival().to_f32(),
                     "focus":focus,"wall_ns":sample.wall_nanos,"cpu_ns":sample.thread_cpu_nanos,
                     "accepted":sample.accepted_submissions,"instrumented":sample.instrumented,
                     "phases_ns":{

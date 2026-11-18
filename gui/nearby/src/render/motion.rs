@@ -22,6 +22,7 @@ pub(crate) mod timing {
     pub const CHOICE_WAVE_MS: u16 = 600;
     pub const DUST_MS: u16 = 260;
     pub const STARS_MS: u16 = 420;
+    pub const GUEST_TURN_MS: u16 = 56;
     pub const HOST_HOP_DELAY_MS: u16 = 70;
     pub const SIGNAL_STAGGER_MS: u16 = 55;
     pub const ACTIVITY_MS: u16 = 450;
@@ -37,15 +38,16 @@ pub(super) mod anchors {
 
     pub const CHOICE_LEFT: Fixed = Fixed::from_ratio(1, 4);
     pub const CHOICE_RIGHT: Fixed = Fixed::from_ratio(3, 4);
-    pub const HOST_HOME: Fixed = Fixed::from_ratio(1, 5);
+    pub const SEAT_WIDTH_PERCENT: i32 = 50;
+    pub const HOST_HOME: Fixed = Fixed::from_ratio(SEAT_WIDTH_PERCENT, 200);
+    pub const HOST_WELCOME: Fixed = Fixed::from_ratio(3, 10);
     pub const HOST_EXIT: Fixed = Fixed::from_ratio(1, 10);
     pub const HOST_START: Fixed = Fixed::from_ratio(73, 100);
-    pub const GUEST_HOME: Fixed = Fixed::from_ratio(4, 5);
+    pub const GUEST_HOME: Fixed = Fixed::from_ratio(100 + SEAT_WIDTH_PERCENT, 200);
     pub const GUEST_GATE: Fixed = Fixed::from_ratio(98, 100);
     pub const GUEST_APPROACH: Fixed = Fixed::from_ratio(94, 100);
     pub const GUEST_CHECK: Fixed = Fixed::from_ratio(88, 100);
     pub const GUEST_EXIT: Fixed = Fixed::from_ratio(3, 10);
-    pub const GATE: Fixed = Fixed::from_ratio(9, 10);
 }
 
 use timing::SETTLED_MS;
@@ -70,8 +72,13 @@ pub(super) struct Frame {
     pub guest: Fixed,
     pub walking: bool,
     pub host_walking: bool,
+    pub host_presence: Fixed,
+    pub host_facing_left: bool,
+    pub host_ack_age: u16,
     pub guest_walking: bool,
     pub visitor: bool,
+    pub guest_presence: Fixed,
+    pub guest_facing_left: bool,
 }
 
 impl Default for Frame {
@@ -95,8 +102,13 @@ impl Default for Frame {
             guest: anchors::GUEST_HOME,
             walking: false,
             host_walking: false,
+            host_presence: Fixed::ONE,
+            host_facing_left: false,
+            host_ack_age: SETTLED_MS,
             guest_walking: false,
             visitor: false,
+            guest_presence: Fixed::ZERO,
+            guest_facing_left: true,
         }
     }
 }
@@ -108,14 +120,10 @@ struct SceneKey {
     ready: bool,
     connected: bool,
     network_only: bool,
-    room: String,
+    room: Option<String>,
 }
 
 impl SceneKey {
-    fn same_page(&self, other: &Self) -> bool {
-        self.page == other.page && self.room == other.room
-    }
-
     fn is_session(&self) -> bool {
         matches!(self.page, Page::Host | Page::Joined | Page::Leaving)
     }
@@ -134,8 +142,12 @@ pub(super) struct Timeline {
     walker: Travel,
     deck: Travel,
     host: Travel,
+    host_presence: Travel,
+    host_ack_at: Option<u64>,
     guest: Travel,
-    visitor: bool,
+    guest_presence: Travel,
+    guest_present: bool,
+    guest_turnaround: Option<Fixed>,
 }
 
 struct Travel {
@@ -168,13 +180,17 @@ impl Travel {
         self.sample(now).value()
     }
     fn target(&mut self, target: Fixed, now: u64, snap: bool) {
+        self.target_after(target, now, snap, 0);
+    }
+
+    fn target_after(&mut self, target: Fixed, now: u64, snap: bool, delay_ms: u16) {
         if snap {
             self.tween = Tween::preset(target, target, timing::TRAVEL);
             self.at = now;
         } else if self.tween.to != target {
             self.tween = self.sample(now);
             self.tween.retarget(target, timing::TRAVEL);
-            self.at = now;
+            self.at = now.saturating_add(u64::from(delay_ms));
         }
     }
 }
@@ -193,15 +209,33 @@ impl Timeline {
         now: u64,
         press: u64,
     ) -> Frame {
-        let key = SceneKey {
+        let mut key = SceneKey {
             page: view.scene_page(),
             phase: copy::phase(view),
             ready: view.ready,
             connected: view.connected,
             network_only: view.network_only,
-            room: view.room_name.clone(),
+            // The backend supplies either an empty label, the unnamed room,
+            // or a label containing the advertised room code.
+            room: match view.room_name.as_str() {
+                "" | "房间" => None,
+                label => Some(label.to_owned()),
+            },
         };
-        let page_changed = self.key.as_ref().is_none_or(|old| !old.same_page(&key));
+        if let Some(previous) = self.key.as_mut()
+            && previous.page == key.page
+            && previous.network_only == key.network_only
+        {
+            match (&previous.room, &key.room) {
+                (None, Some(_)) => previous.room.clone_from(&key.room),
+                (Some(_), None) => key.room.clone_from(&previous.room),
+                _ => {}
+            }
+        }
+        let page_changed = self
+            .key
+            .as_ref()
+            .is_none_or(|old| old.page != key.page || old.room != key.room);
         let catalog_changed = if matches!(view.page, Page::Games | Page::Candidates) {
             self.catalog
                 .as_ref()
@@ -228,30 +262,82 @@ impl Timeline {
                 .then(|| (view.core.clone(), view.entries.clone()));
         }
         let continues_session = self.key.as_ref().is_some_and(|old| {
+            // Room labels can arrive after the pairing route is already visible.
             old.is_session()
                 && key.is_session()
-                && (old.room == key.room || key.page == Page::Leaving)
+                && (key.page == Page::Leaving
+                    || old.page == key.page
+                        && old.network_only == key.network_only
+                        && old.room == key.room)
         });
+        let was_present = self.guest_present;
         if !matches!(
             key.phase,
             Phase::Leaving | Phase::Failed | Phase::RestoreFailed | Phase::NetworkReconnecting
         ) || !continues_session
         {
-            self.visitor = view.ready
+            self.guest_present = view.ready
                 || view.connected
                 || view.page == Page::Joined
-                || matches!(key.phase, Phase::ApprovalPending | Phase::PeerPreparing);
+                || matches!(key.phase, Phase::ApprovalPending | Phase::PeerPreparing)
+                || !view.network_only
+                    && matches!(
+                        key.phase,
+                        Phase::Checking
+                            | Phase::Notifying
+                            | Phase::HostReady
+                            | Phase::WaitingStart
+                            | Phase::Starting
+                    );
+        }
+        if !continues_session || !self.guest_present {
+            self.guest_turnaround = None;
+        } else if !was_present && self.guest_presence.value(now) > Fixed::ZERO {
+            // A returning guest is still visible on the way out of this room.
+            self.guest_turnaround = Some(self.guest.value(now));
         }
         let entering = self.key.is_some()
             && !continues_session
             && matches!(key.phase, Phase::Creating | Phase::Connecting);
+        let creating_host = entering && key.page == Page::Host && key.phase == Phase::Creating;
+        if !continues_session
+            || !self.guest_present
+            || matches!(
+                key.phase,
+                Phase::Leaving | Phase::Closed | Phase::Failed | Phase::RestoreFailed
+            )
+        {
+            self.host_ack_at = None;
+        } else if self.key.as_ref().is_some_and(|old| {
+            use Phase::*;
+            matches!(
+                (key.page, old.phase, key.phase),
+                (
+                    Page::Host,
+                    ApprovalPending,
+                    PeerPreparing | HostReady | NetworkConnected
+                ) | (
+                    Page::Joined,
+                    ApprovalPendingClient,
+                    Connecting
+                        | Checking
+                        | Notifying
+                        | WaitingStart
+                        | NetworkConfirming
+                        | NetworkConnected
+                )
+            )
+        }) {
+            // Both peers observe approval at their own confirmed transition.
+            self.host_ack_at = Some(now);
+        }
         if self.key.as_ref() != Some(&key) {
             // Opening an existing state does not replay its readiness celebration.
             self.phase_at = self
                 .key
                 .as_ref()
                 .filter(|old| {
-                    old.same_page(&key)
+                    old.page == key.page
                         || matches!(
                             key.phase,
                             Phase::Creating | Phase::Connecting | Phase::Leaving
@@ -280,31 +366,102 @@ impl Timeline {
             now,
             page_changed,
         );
-        let guest = match copy::phase(view) {
-            Phase::ApprovalPending | Phase::ApprovalPendingClient => anchors::GUEST_GATE,
-            Phase::Connecting
+        let phase = copy::phase(view);
+        let guest = match phase {
+            _ if !self.guest_present => anchors::GUEST_GATE,
+            Phase::Connecting if self.host_ack_at.is_some() => anchors::GUEST_CHECK,
+            Phase::Connecting | Phase::ApprovalPending | Phase::ApprovalPendingClient => {
+                anchors::GUEST_GATE
+            }
+            Phase::NetworkReconnecting => anchors::GUEST_APPROACH,
+            Phase::Checking
+            | Phase::Notifying
             | Phase::PeerPreparing
-            | Phase::NetworkConfirming
-            | Phase::NetworkReconnecting => anchors::GUEST_APPROACH,
-            Phase::Checking | Phase::Notifying => anchors::GUEST_CHECK,
+            | Phase::NetworkConfirming => anchors::GUEST_CHECK,
             Phase::Starting => anchors::GUEST_APPROACH,
             Phase::Leaving | Phase::Closed => anchors::GUEST_EXIT,
             Phase::Failed | Phase::RestoreFailed if continues_session => self.guest.value(now),
             _ => anchors::GUEST_HOME,
         };
-        let host = match copy::phase(view) {
-            Phase::Starting => anchors::HOST_START,
-            Phase::Leaving | Phase::Closed => anchors::HOST_EXIT,
-            Phase::Failed | Phase::RestoreFailed if continues_session => self.host.value(now),
-            _ => anchors::HOST_HOME,
+        let guest = match (self.guest_turnaround, phase) {
+            (
+                Some(turn),
+                Phase::ApprovalPending | Phase::ApprovalPendingClient | Phase::PeerPreparing,
+            ) => guest.min(turn),
+            _ => {
+                self.guest_turnaround = None;
+                guest
+            }
+        };
+        let (host, host_presence) = match phase {
+            Phase::Starting => (anchors::HOST_START, Fixed::ONE),
+            Phase::Leaving | Phase::Closed => (anchors::HOST_EXIT, Fixed::ZERO),
+            Phase::Failed | Phase::RestoreFailed if continues_session => {
+                (self.host.value(now), self.host_presence.value(now))
+            }
+            Phase::HostReady | Phase::WaitingStart | Phase::NetworkConnected => {
+                (anchors::HOST_HOME, Fixed::ONE)
+            }
+            _ if self.guest_present => (anchors::HOST_WELCOME, Fixed::ONE),
+            _ => (anchors::HOST_HOME, Fixed::ONE),
+        };
+        if creating_host {
+            self.host.target(anchors::HOST_EXIT, now, true);
+            self.host_presence.target(Fixed::ZERO, now, true);
+        }
+        let snap_host = !continues_session && !creating_host;
+        self.host.target(host, now, snap_host);
+        self.host_presence.target(host_presence, now, snap_host);
+        let host_pose = self.host.sample(now);
+        let host_gate = self.host_presence.sample(now);
+        let elapsed = age(now, self.host_ack_at);
+        let host_ack_age = if elapsed < timing::HOP_MS {
+            elapsed
+        } else {
+            SETTLED_MS
+        };
+        let host_facing_left = if host_ack_age < timing::HOP_MS {
+            // Step back to the seat without turning the greeting away from the guest.
+            false
+        } else if !host_gate.is_finished() {
+            host_gate.to < host_gate.from
+        } else if !host_pose.is_finished() {
+            host_pose.to < host_pose.from
+        } else {
+            matches!(phase, Phase::Leaving | Phase::Closed)
         };
         if entering {
-            self.host.target(anchors::HOST_EXIT, now, true);
             self.guest.target(anchors::GUEST_GATE, now, true);
+            self.guest_presence.target(Fixed::ZERO, now, true);
         }
-        self.host.target(host, now, !continues_session && !entering);
-        self.guest
-            .target(guest, now, !continues_session && !entering);
+        let snap = !continues_session && !entering;
+        // Turn on the spot before walking out. A new arrival redirects both
+        // tracks from their current positions, even during the turn.
+        let turn_ms = if continues_session && was_present && !self.guest_present {
+            timing::GUEST_TURN_MS
+        } else {
+            0
+        };
+        let presence_target = if self.guest_present {
+            Fixed::ONE
+        } else {
+            Fixed::ZERO
+        };
+        self.guest_presence
+            .target_after(presence_target, now, snap, turn_ms);
+        self.guest.target_after(guest, now, snap, turn_ms);
+        let presence = self.guest_presence.sample(now);
+        let guest_pose = self.guest.sample(now);
+        let walking_to_seat = !guest_pose.is_finished() && now >= self.guest.at;
+        let crossing_gate = !presence.is_finished() && now >= self.guest_presence.at;
+        let guest_facing_left = self.guest_present
+            && if crossing_gate {
+                presence.to > presence.from
+            } else if walking_to_seat {
+                guest_pose.to < guest_pose.from
+            } else {
+                phase != Phase::Starting
+            };
         Frame {
             external_actor: false,
             page: view.page,
@@ -323,12 +480,17 @@ impl Timeline {
             ),
             walker: self.walker.value(now),
             deck: self.deck.value(now),
-            host: self.host.value(now),
-            guest: self.guest.value(now),
+            host: host_pose.value(),
+            guest: guest_pose.value(),
             walking: self.walker.moving(now),
-            host_walking: self.host.moving(now),
-            guest_walking: self.guest.moving(now),
-            visitor: self.visitor,
+            host_walking: !host_pose.is_finished() || !host_gate.is_finished(),
+            host_presence: host_gate.value(),
+            host_facing_left,
+            host_ack_age,
+            guest_walking: walking_to_seat || crossing_gate,
+            visitor: self.guest_present || presence.value() > Fixed::ZERO,
+            guest_presence: presence.value(),
+            guest_facing_left,
         }
     }
 }
@@ -354,6 +516,7 @@ impl Frame {
             && self.press >= timing::PRESS_FADE_MS
             && self.wave.is_none()
             && !self.walking
+            && self.host_ack_age >= timing::HOP_MS
             && !self.host_walking
             && !self.guest_walking
     }
@@ -378,6 +541,17 @@ impl Frame {
             self.selection
         };
         Transform::translate(recoil(age).into(), (hop(age, 3.0) + pressed).into())
+    }
+
+    pub(super) fn cartridge_transform(self, index: usize) -> Transform {
+        if self.selected != Some(index) {
+            return Transform::IDENTITY;
+        }
+        let press = if self.press < timing::PRESS_MS { 2 } else { 0 };
+        Transform::translate(
+            recoil(self.selection).into(),
+            Fixed::from_int(-3 + press + hop(self.selection, 3.0)),
+        )
     }
 
     pub(super) fn card_color(self, index: usize) -> ColorToken {
@@ -435,8 +609,13 @@ impl Frame {
             host: self.host,
             guest: self.guest,
             host_walking: self.host_walking,
+            host_presence: self.host_presence,
+            host_facing_left: self.host_facing_left,
+            host_ack_age: self.host_ack_age,
             guest_walking: self.guest_walking,
             visitor: self.visitor,
+            guest_presence: self.guest_presence,
+            guest_facing_left: self.guest_facing_left,
             wave: self.wave,
             ..Self::default()
         }
@@ -606,6 +785,367 @@ mod tests {
     }
 
     #[test]
+    fn only_creating_a_room_brings_the_host_through_the_left_gate() {
+        let mut timeline = Timeline::default();
+        let choice = View::default();
+        timeline.sample(&choice, Some(0), 0, 0);
+        let mut room = View {
+            page: Page::Host,
+            phase: Phase::Creating,
+            ..View::default()
+        };
+        let entrance = timeline.sample(&room, Some(0), 100, 0);
+        assert_eq!(
+            (entrance.host, entrance.host_presence),
+            (anchors::HOST_EXIT, Fixed::ZERO)
+        );
+        assert!(entrance.host_walking && !entrance.host_facing_left && !entrance.visitor);
+        let step = timeline.sample(&room, Some(0), 160, 0);
+        assert!(step.host_presence > Fixed::ZERO && step.host_presence < Fixed::ONE);
+        room.phase = Phase::WaitingPeer;
+        room.room_name = "房间 A216".into();
+        let named = timeline.sample(&room, None, 160, 0);
+        assert_eq!(
+            (named.host, named.host_presence),
+            (step.host, step.host_presence)
+        );
+        let seated = timeline.sample(&room, None, 500, 0);
+        assert_eq!(
+            (seated.host, seated.host_presence),
+            (anchors::HOST_HOME, Fixed::ONE)
+        );
+        assert!(!seated.host_walking);
+
+        timeline.sample(&choice, Some(1), 600, 0);
+        room.page = Page::Joined;
+        room.phase = Phase::Connecting;
+        let joining = timeline.sample(&room, None, 700, 0);
+        assert_eq!(joining.host_presence, Fixed::ONE);
+        assert!(!joining.host_walking && joining.guest_walking);
+        assert_eq!(joining.host_ack_age, SETTLED_MS);
+        for page in [Page::Host, Page::Joined] {
+            room.page = page;
+            room.phase = if page == Page::Host {
+                Phase::HostReady
+            } else {
+                Phase::WaitingStart
+            };
+            room.ready = true;
+            let recovered = Timeline::default().sample(&room, None, 900, 0);
+            assert_eq!(
+                (recovered.host, recovered.host_presence),
+                (anchors::HOST_HOME, Fixed::ONE)
+            );
+            assert!(!recovered.host_walking && !recovered.host_facing_left);
+            assert_eq!(recovered.host_ack_age, SETTLED_MS);
+        }
+    }
+
+    #[test]
+    fn host_welcomes_approves_and_turns_back_without_restarting_a_stride() {
+        let mut timeline = Timeline::default();
+        let mut room = View {
+            page: Page::Host,
+            phase: Phase::WaitingPeer,
+            ..View::default()
+        };
+        timeline.sample(&room, None, 0, 0);
+        room.phase = Phase::ApprovalPending;
+        let invitation = timeline.sample(&room, Some(0), 1000, 0);
+        assert_eq!(invitation.host, anchors::HOST_HOME);
+        assert!(!invitation.ready && invitation.host_walking && !invitation.host_facing_left);
+        let welcome = timeline.sample(&room, Some(0), 1080, 1);
+        assert!(welcome.host > anchors::HOST_HOME && welcome.host < anchors::HOST_WELCOME);
+        assert_eq!(welcome.host_ack_age, SETTLED_MS);
+        room.phase = Phase::PeerPreparing;
+        let approved = timeline.sample(&room, Some(0), 1080, 1);
+        assert_eq!((approved.host, approved.host_ack_age), (welcome.host, 0));
+        assert!(!approved.ready);
+        room.phase = Phase::HostReady;
+        room.ready = true;
+        let ready = timeline.sample(&room, Some(0), 1110, 1);
+        assert_eq!(ready.host_ack_age, 30);
+        assert!(ready.ready);
+        let seated = timeline.sample(&room, Some(0), 1500, 1);
+        assert_eq!(
+            (seated.host, seated.guest),
+            (anchors::HOST_HOME, anchors::GUEST_HOME)
+        );
+        assert_eq!(seated.host_ack_age, SETTLED_MS);
+        room.ready = false;
+        room.phase = Phase::ApprovalPending;
+        timeline.sample(&room, None, 1500, 1);
+        let greeting = timeline.sample(&room, None, 1560, 1);
+        room.phase = Phase::WaitingPeer;
+        let turn = timeline.sample(&room, None, 1560, 1);
+        assert_eq!(turn.host, greeting.host);
+        assert!(turn.host_walking && turn.host_facing_left);
+        let retreat = timeline.sample(&room, None, 1600, 1);
+        assert!(retreat.host < turn.host && retreat.host > anchors::HOST_HOME);
+        room.phase = Phase::ApprovalPending;
+        let redirect = timeline.sample(&room, None, 1600, 1);
+        assert_eq!(redirect.host, retreat.host);
+        assert!(redirect.host_walking && !redirect.host_facing_left);
+        let next = timeline.sample(&room, None, 1640, 1);
+        assert!(next.host > redirect.host && next.host < anchors::HOST_WELCOME);
+        room.phase = Phase::WaitingPeer;
+        timeline.sample(&room, None, 1640, 1);
+        let alone = timeline.sample(&room, None, 2000, 1);
+        assert_eq!(
+            (alone.host, alone.host_presence),
+            (anchors::HOST_HOME, Fixed::ONE)
+        );
+        assert!(!alone.host_walking && !alone.host_facing_left);
+    }
+
+    #[test]
+    fn approval_and_seat_positions_follow_each_roles_observed_phase() {
+        use Phase::*;
+        for (page, pending, approved, ready, network_only) in [
+            (Page::Host, ApprovalPending, PeerPreparing, HostReady, false),
+            (
+                Page::Joined,
+                ApprovalPendingClient,
+                Checking,
+                WaitingStart,
+                false,
+            ),
+            (
+                Page::Joined,
+                ApprovalPendingClient,
+                Connecting,
+                WaitingStart,
+                false,
+            ),
+            (
+                Page::Joined,
+                ApprovalPendingClient,
+                WaitingStart,
+                WaitingStart,
+                false,
+            ),
+            (
+                Page::Host,
+                ApprovalPending,
+                PeerPreparing,
+                NetworkConnected,
+                true,
+            ),
+            (
+                Page::Joined,
+                ApprovalPendingClient,
+                NetworkConfirming,
+                NetworkConnected,
+                true,
+            ),
+        ] {
+            let mut room = View {
+                page,
+                phase: pending,
+                network_only,
+                ..View::default()
+            };
+            let mut timeline = Timeline::default();
+            timeline.sample(&room, None, 0, 0);
+            room.phase = approved;
+            assert_eq!(timeline.sample(&room, None, 100, 0).host_ack_age, 0);
+            assert_eq!(timeline.sample(&room, None, 130, 0).host_ack_age, 30);
+            room.phase = ready;
+            room.ready = !network_only;
+            room.connected = network_only;
+            let greeting = timeline.sample(&room, None, 160, 0);
+            assert_eq!(greeting.host_ack_age, 60);
+            assert!(!greeting.host_facing_left);
+            let seated = timeline.sample(&room, None, 960, 0);
+            assert_eq!(
+                (seated.host, seated.guest),
+                (anchors::HOST_HOME, anchors::GUEST_HOME)
+            );
+            assert_eq!(seated.host_ack_age, SETTLED_MS);
+        }
+        for outcome in [
+            Leaving,
+            Closed,
+            Failed,
+            RestoreFailed,
+            NetworkReconnecting,
+            Starting,
+        ] {
+            let mut room = View {
+                page: Page::Joined,
+                phase: ApprovalPendingClient,
+                ..View::default()
+            };
+            let mut timeline = Timeline::default();
+            timeline.sample(&room, None, 0, 0);
+            room.phase = outcome;
+            assert_eq!(
+                timeline.sample(&room, None, 100, 0).host_ack_age,
+                SETTLED_MS
+            );
+        }
+    }
+
+    #[test]
+    fn first_join_approval_settles_at_the_same_door_on_either_screen() {
+        use Phase::*;
+        for (page, before, pending) in [
+            (Page::Host, WaitingPeer, ApprovalPending),
+            (Page::Joined, Connecting, ApprovalPendingClient),
+            (Page::Joined, Checking, ApprovalPendingClient),
+        ] {
+            let mut room = View {
+                page,
+                phase: before,
+                ..View::default()
+            };
+            let mut timeline = Timeline::default();
+            timeline.sample(&View::default(), None, 0, 0);
+            timeline.sample(&room, None, 100, 0);
+            let arrived = timeline.sample(&room, None, 800, 0);
+            room.phase = pending;
+            let invite = timeline.sample(&room, None, 800, 0);
+            assert_eq!(invite.guest, arrived.guest);
+            let settled = timeline.sample(&room, None, 1400, 0);
+            assert_eq!(
+                (settled.guest, settled.guest_presence),
+                (anchors::GUEST_GATE, Fixed::ONE)
+            );
+            assert_eq!(settled.host, anchors::HOST_WELCOME);
+            assert!(settled.guest_facing_left && !settled.guest_walking);
+        }
+    }
+
+    #[test]
+    fn guest_approaches_from_the_gate_and_can_rejoin_during_departure() {
+        let mut host = View {
+            page: Page::Host,
+            phase: Phase::WaitingPeer,
+            room_name: "Room".into(),
+            ..View::default()
+        };
+        let mut timeline = Timeline::default();
+        let empty = timeline.sample(&host, None, 0, 0);
+        assert!(!empty.visitor);
+        assert_eq!(empty.guest, anchors::GUEST_GATE);
+        host.phase = Phase::ApprovalPending;
+        let arrival = timeline.sample(&host, None, 1000, 0);
+        assert!(arrival.visitor && arrival.guest_facing_left && !arrival.ready);
+        assert_eq!(
+            (arrival.guest, arrival.guest_presence),
+            (empty.guest, Fixed::ZERO)
+        );
+        let entry = timeline.sample(&host, None, 1080, 0);
+        assert!(entry.guest_presence > Fixed::ZERO && entry.guest_presence < Fixed::ONE);
+        host.phase = Phase::HostReady;
+        host.ready = true;
+        let confirming = timeline.sample(&host, None, 1080, 0);
+        assert!(confirming.ready);
+        assert_eq!(confirming.guest_presence, entry.guest_presence);
+        let seated = timeline.sample(&host, None, 1500, 0);
+        assert_eq!(
+            (seated.guest, seated.guest_presence),
+            (anchors::GUEST_HOME, Fixed::ONE)
+        );
+        host.phase = Phase::WaitingPeer;
+        host.ready = false;
+        let turn = timeline.sample(&host, None, 1500, 0);
+        assert!(turn.visitor && !turn.ready && !turn.guest_facing_left && !turn.guest_walking);
+        assert_eq!(turn.guest, seated.guest);
+        let pause = timeline.sample(&host, None, 1540, 0);
+        assert_eq!(
+            (pause.guest, pause.guest_presence),
+            (turn.guest, turn.guest_presence)
+        );
+        let exit = timeline.sample(&host, None, 1640, 0);
+        assert!(exit.guest > seated.guest && exit.guest_presence < Fixed::ONE);
+        host.phase = Phase::ApprovalPending;
+        let rejoin = timeline.sample(&host, None, 1640, 0);
+        assert!(rejoin.guest_facing_left);
+        assert_eq!(
+            (rejoin.guest, rejoin.guest_presence),
+            (exit.guest, exit.guest_presence)
+        );
+        let next = timeline.sample(&host, None, 1700, 0);
+        assert!(next.guest <= rejoin.guest && next.guest_presence > rejoin.guest_presence);
+        host.phase = Phase::WaitingPeer;
+        timeline.sample(&host, None, 1710, 0);
+        let empty = timeline.sample(&host, None, 2100, 0);
+        assert!(!empty.visitor && !empty.guest_walking);
+        assert_eq!(
+            (empty.guest, empty.guest_presence),
+            (anchors::GUEST_GATE, Fixed::ZERO)
+        );
+    }
+
+    #[test]
+    fn advertised_room_label_does_not_restart_an_arrival() {
+        let mut timeline = Timeline::default();
+        timeline.sample(&View::default(), None, 0, 0);
+        let mut joined = View {
+            page: Page::Joined,
+            phase: Phase::Connecting,
+            ..View::default()
+        };
+        timeline.sample(&joined, None, 100, 0);
+        let moving = timeline.sample(&joined, None, 180, 0);
+        assert!(moving.guest_presence > Fixed::ZERO && moving.guest_presence < Fixed::ONE);
+        joined.room_name = "房间".into();
+        assert_eq!(timeline.sample(&joined, None, 180, 0), moving);
+        joined.room_name = "房间 A216".into();
+        assert_eq!(timeline.sample(&joined, None, 180, 0), moving);
+        joined.room_name.clear();
+        assert_eq!(timeline.sample(&joined, None, 180, 0), moving);
+        joined.room_name = "房间 B001".into();
+        assert_eq!(
+            timeline.sample(&joined, None, 180, 0).guest_presence,
+            Fixed::ZERO
+        );
+    }
+
+    #[test]
+    fn joined_and_network_only_rooms_reopen_at_their_current_occupancy() {
+        for (page, network_only, phase, ready, connected, occupied) in [
+            (Page::Host, false, Phase::HostReady, true, false, true),
+            (Page::Joined, false, Phase::Checking, false, false, true),
+            (
+                Page::Host,
+                true,
+                Phase::NetworkConfirming,
+                false,
+                false,
+                false,
+            ),
+            (Page::Host, true, Phase::NetworkConnected, false, true, true),
+            (
+                Page::Joined,
+                true,
+                Phase::NetworkConfirming,
+                false,
+                false,
+                true,
+            ),
+        ] {
+            let view = View {
+                page,
+                network_only,
+                phase,
+                ready,
+                connected,
+                ..View::default()
+            };
+            let frame = Timeline::default().sample(&view, None, 5000, 0);
+            assert_eq!(frame.visitor, occupied);
+            assert_eq!(
+                frame.guest_presence,
+                if occupied { Fixed::ONE } else { Fixed::ZERO }
+            );
+            assert_eq!(frame.ready, ready);
+            assert!(!frame.guest_walking);
+        }
+    }
+
+    #[test]
     fn session_routes_continue_from_current_positions_and_preserve_membership() {
         let mut timeline = Timeline::default();
         let mut view = View {
@@ -630,6 +1170,9 @@ mod tests {
         assert!(leaving.visitor);
         let settled = timeline.sample(&view, None, 1000, 0);
         assert!(settled.host < leaving.host && settled.guest < leaving.guest);
+        assert!(moving.host_walking && !moving.host_facing_left);
+        assert!(leaving.host_walking && leaving.host_facing_left);
+        assert_eq!(settled.host_presence, Fixed::ZERO);
         assert!(!settled.host_walking && !settled.guest_walking);
 
         let mut alone = Timeline::default();

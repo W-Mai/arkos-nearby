@@ -7,6 +7,7 @@ pub mod content;
 pub mod context;
 pub mod core_choice;
 pub mod core_runtime;
+mod discovery;
 pub mod flow;
 pub mod game;
 pub mod handheld_link;

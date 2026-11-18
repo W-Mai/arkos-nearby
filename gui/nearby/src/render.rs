@@ -20,6 +20,8 @@ mod consoles;
 mod copy;
 mod deck;
 mod deferred;
+pub(crate) mod device_status;
+mod discovery;
 mod font;
 mod keyboard;
 mod launcher;
@@ -27,10 +29,12 @@ mod library;
 mod list_layout;
 mod lists;
 mod management;
+mod material;
 mod modal;
 pub(crate) mod motion;
 mod pages;
 mod pixel;
+mod reading;
 #[cfg(any(target_os = "linux", test))]
 pub(crate) mod response;
 mod rows;
@@ -71,6 +75,8 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     app.with_widget(selection::target::view());
     app.with_widget(selection::frame::view());
     app.with_widget(launcher::details_scroll::view());
+    app.with_widget(material::panel_motion::view());
+    app.with_widget(reading::marquee::view());
     app.with_widget(configuration::config_scroll::view());
     app.with_widget(management::management_scroll::view());
     app.with_widget(saves::save_reading::view());
@@ -83,10 +89,15 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     app.with_widget(pixel::scenery::view());
     app.with_widget(cache::gpu_layer::view());
     font::install(app)?;
+    discovery::install(app);
     modal::install(app);
     static_snapshot::install(app);
     suspension::install(app);
     state::install(app);
+    let device_status = app
+        .add_model(device_status::DeviceStatus::default())
+        .finish();
+    app.add_resource(device_status::Runtime(device_status));
     let input_launcher = app
         .world
         .resource::<state::DisplayRuntime>()

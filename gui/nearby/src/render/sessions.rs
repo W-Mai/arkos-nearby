@@ -1,20 +1,23 @@
+use super::motion::anchors::SEAT_WIDTH_PERCENT;
 use super::pixel::Stage::Session;
 use super::selection::FocusTarget;
 use super::{
     Section, StaticCache,
-    pixel::{self, Scenery, art},
+    pixel::{self, art},
     state::{DisplayState, TextField},
     style::*,
-    widgets::{action_label, guidance, label, live_label, paragraph, shadow},
+    widgets::{
+        action_label, control_key, guidance, label, live_label, paragraph, shadow, text_block,
+    },
 };
-use TextField::{Headline, Peer, RoomName};
+use TextField::Headline;
 use mirui::prelude::*;
 use mirui::ui::OffscreenRender;
 use mirui::ui::widgets::Text;
 use mirui::ui::widgets::TextAlign::{Center, End, Start};
 
 #[compose]
-pub(super) fn host(state: model!(DisplayState), metrics: Metrics) -> Entity {
+pub(super) fn game_room(state: model!(DisplayState), metrics: Metrics, host: bool) -> Entity {
     ui! {
         Column (
             grow: 1.0,
@@ -29,20 +32,7 @@ pub(super) fn host(state: model!(DisplayState), metrics: Metrics) -> Entity {
                     bg_color: PANEL,
                     row_gap: metrics.gap
                 ) {
-                    View (grow: 1.0, min_height: 56, clip_children: true) [
-                        Scenery::Landscape,
-                        pixel::SessionSprite {
-                            state: state.clone(),
-                        },
-                    ]
-                    Row (height: 22, shrink: 0.0, column_gap: metrics.gap) {
-                        Column (grow: 1.0, min_width: 0) {
-                            label ("你 · 房主", metrics.body, FOREGROUND, Center)
-                        }
-                        Column (grow: 1.0, min_width: 0) {
-                            live_label (state, Peer, metrics.body, FOREGROUND, Center)
-                        }
-                    }
+                    player_cards (state, metrics, host)
                 }
                 shadow (metrics)
             }
@@ -51,20 +41,155 @@ pub(super) fn host(state: model!(DisplayState), metrics: Metrics) -> Entity {
                 shrink: 0.0,
                 transform: ${ state.card_motion().card_transform(0) }
             ) {
-                Column (
-                    grow: 1.0,
-                    bg_color: ${ if state.enabled() { ACCENT } else { PANEL } },
-                    border_color: ACCENT,
-                    border_width: ${ if state.enabled() { 2 } else { 0 } },
-                    justify: JustifyContent::Center
-                ) [
-                    Section::FocusHost,
-                    FocusTarget::fixed(0),
-                ] {
-                    action_label (state, TITLE_SIZE)
+                if host {
+                    Column (
+                        grow: 1.0,
+                        bg_color: ${ if state.enabled() { ACCENT } else { PANEL } },
+                        border_color: ACCENT,
+                        border_width: ${ if state.enabled() { 2 } else { 0 } },
+                        justify: JustifyContent::Center
+                    ) [
+                        Section::FocusHost,
+                        FocusTarget::fixed(0),
+                    ] {
+                        Row (
+                            width: Dimension::percent(100),
+                            align: AlignItems::Center,
+                            justify: JustifyContent::Center,
+                            column_gap: metrics.gap
+                        ) {
+                            if ${ state.enabled() } {
+                                control_key ("A", metrics, false)
+                            }
+                            Text (
+                                text: ${ state.host_button() },
+                                width: Dimension::Content,
+                                min_width: 0,
+                                font: font(TITLE_SIZE),
+                                font_size: TITLE_SIZE,
+                                text_color: ${ if state.enabled() { ON_ACCENT } else { FOREGROUND } },
+                                paragraph: paragraph(Center, 1)
+                            ) [
+                                FONT_PAINT,
+                            ]
+                        }
+                    }
+                } else {
+                    Column (grow: 1.0, bg_color: PANEL, justify: JustifyContent::Center) {
+                        live_label (state, Headline, TITLE_SIZE, FOREGROUND, Center)
+                    }
                 }
                 shadow (metrics)
             }
+        }
+    }
+}
+
+#[compose]
+fn player_cards(state: model!(DisplayState), metrics: Metrics, host: bool) -> Entity {
+    let plate_height = 2 * (metrics.gap + 2)
+        + i32::from(BODY_SIZE)
+        + LABEL_LEADING
+        + 2
+        + i32::from(TITLE_SIZE) * 2
+        + LABEL_LEADING;
+    ui! {
+        Column (grow: 1.0, min_height: 0, min_width: 0, row_gap: metrics.gap) {
+            View (grow: 1.0, min_height: 0, min_width: 0, container: true, clip_children: true) [
+                pixel::Scenery::Landscape,
+                pixel::SessionSprite {
+                    state: state.clone(),
+                },
+            ]
+            Row (
+                height: plate_height,
+                shrink: 0.0,
+                min_width: 0
+            ) {
+                player_plate (state, metrics, false, host)
+                player_plate (state, metrics, true, false)
+            }
+        }
+    }
+}
+
+#[compose]
+fn player_plate(
+    state: model!(DisplayState),
+    metrics: Metrics,
+    guest: bool,
+    local_host: bool,
+) -> Entity {
+    let inset = metrics.gap + 2;
+    ui! {
+        Column (
+            width: Dimension::percent(SEAT_WIDTH_PERCENT),
+            height: Dimension::percent(100),
+            padding: Padding {
+                left: (metrics.gap / 2).into(),
+                right: (metrics.gap / 2).into(),
+                ..Default::default()
+            }
+        ) {
+            Column (
+                grow: 1.0,
+                min_width: 0,
+                padding: Padding::all(inset),
+                row_gap: 2,
+                justify: JustifyContent::Center,
+                container: true,
+                clip_children: true,
+                bg_color: BACKGROUND
+            ) {
+                Row (
+                    height: i32::from(BODY_SIZE) + LABEL_LEADING,
+                    align: AlignItems::Center,
+                    column_gap: inset,
+                    justify: JustifyContent::Center
+                ) {
+                    seat_rule (state, guest, local_host)
+                    Text (
+                        if guest { "2P 玩家" } else { "1P 房主" },
+                        width: Dimension::Content,
+                        font: font(BODY_SIZE),
+                        font_size: BODY_SIZE,
+                        text_color: SECONDARY,
+                        paragraph: paragraph(Center, 1)
+                    ) [
+                        FONT_PAINT,
+                    ]
+                    seat_rule (state, guest, local_host)
+                }
+                text_block (
+                    ${ state.player(usize::from(guest)) },
+                    FOREGROUND,
+                    TITLE_SIZE,
+                    Center,
+                    LABEL_LEADING,
+                    2
+                )
+            }
+        }
+    }
+}
+
+fn arrival_mark(age: u16, guest: bool) -> i32 {
+    // The second seat answers the first. Only the ink inside the fixed slot expands.
+    let stagger = if guest { 72 } else { 0 };
+    let t = Fixed::from_ratio(i32::from(age.saturating_sub(stagger).min(300)), 300);
+    let pulse = Fixed::from_int(4) * t * (Fixed::ONE - t);
+    12 + (Fixed::from_int(8) * pulse).to_int()
+}
+
+#[compose]
+fn seat_rule(state: model!(DisplayState), guest: bool, local_host: bool) -> Entity {
+    ui! {
+        Row (width: 20, height: 12, align: AlignItems::Center, justify: JustifyContent::Center) {
+            View (
+                width: ${ arrival_mark(state.session_motion().phase_age, guest) },
+                height: 2,
+                bg_color: ${ if local_host && state.enabled() { crate::theme::actor::HOST } else { DIVIDER } }
+            )
         }
     }
 }
@@ -183,78 +308,6 @@ fn network_devices(state: model!(DisplayState), metrics: Metrics) -> Entity {
                     ]
                 }
             }
-        }
-    }
-}
-
-#[compose]
-pub(super) fn joined(state: model!(DisplayState), metrics: Metrics) -> Entity {
-    ui! {
-        Column (grow: 1.0, min_height: 0) {
-            Column (
-                grow: 1.0,
-                min_height: 0,
-                bg_color: PANEL,
-                padding: Padding::all(metrics.inset),
-                row_gap: metrics.gap,
-                justify: JustifyContent::Center,
-                clip_children: true
-            ) {
-                Row (
-                    height: if metrics.compact { 44 } else { 60 },
-                    shrink: 0.0,
-                    column_gap: metrics.gap
-                ) {
-                    walk [(0, "连接房间"), (1, "核对游戏"), (2, "等待开局")].into_iter() with step {
-                        Column (
-                            grow: 1.0,
-                            min_width: 0,
-                            align: AlignItems::Center,
-                            row_gap: metrics.gap
-                        ) {
-                            Text (
-                                (step.0 + 1).to_string(),
-                                width: if metrics.compact { 22 } else { 28 },
-                                height: if metrics.compact { 22 } else { 28 },
-                                bg_color: ${ state.steps()[step.0].background },
-                                font: font(metrics.small),
-                                font_size: metrics.small,
-                                text_color: ${ state.steps()[step.0].foreground },
-                                paragraph: paragraph(Center, 1)
-                            ) [
-                                FONT_PAINT,
-                            ]
-                            label (
-                                step.1,
-                                metrics.small,
-                                SECONDARY,
-                                Center
-                            )
-                        }
-                    }
-                }
-                View (
-                    grow: 1.0,
-                    min_height: if metrics.compact { 32 } else { 64 },
-                    clip_children: true
-                ) [
-                    pixel::SessionSprite {
-                        state: state.clone(),
-                    },
-                ]
-                live_label (
-                    state,
-                    Headline,
-                    TITLE_SIZE,
-                    FOREGROUND,
-                    Center
-                )
-                guidance (state, metrics)
-                if ${ !state.room_name().is_empty() } {
-                    live_label (state, RoomName, metrics.small, SECONDARY, Center)
-                }
-            }
-            shadow (metrics)
         }
     }
 }

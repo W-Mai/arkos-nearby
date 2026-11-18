@@ -155,10 +155,10 @@ pub(super) fn next_step(view: &View) -> &str {
     match phase(view) {
         Phase::ResolvingGame => "核对本地游戏内容与房间使用的核心",
         Phase::SelectingGame => "选择匹配的游戏后继续加入",
-        Phase::NetworkConnected
-        | Phase::NetworkConfirming
-        | Phase::NetworkReconnecting
-        | Phase::ApprovalPendingClient => "正在确认连接",
+        Phase::NetworkConnected | Phase::NetworkConfirming | Phase::NetworkReconnecting => {
+            "正在确认连接"
+        }
+        Phase::ApprovalPendingClient => "等待房主按 A 确认加入",
         Phase::Creating => "房间准备好后，好友才能加入",
         Phase::WaitingPeer => "请好友选择这个房间加入",
         Phase::PeerPreparing => "准备完成后，可以开始游戏",
@@ -195,6 +195,9 @@ pub(super) fn button_text(view: &View) -> &str {
         }
         Phase::Creating => "房间准备中",
         Phase::PeerPreparing => "等待好友准备",
+        Phase::Connecting | Phase::NetworkReconnecting => "正在连接",
+        Phase::Checking => "正在核对游戏",
+        Phase::Notifying | Phase::NetworkConfirming => "正在确认连接",
         Phase::ApprovalPending => "确认加入",
         Phase::Starting => "正在开局",
         Phase::Closed | Phase::Failed => "按 B 返回",
@@ -203,30 +206,48 @@ pub(super) fn button_text(view: &View) -> &str {
     }
 }
 
-pub(super) fn peer_text(view: &View) -> &str {
-    match phase(view) {
-        Phase::HostReady | Phase::Starting => "好友已就绪",
-        Phase::PeerPreparing => "正在核对",
-        Phase::ApprovalPending => "等待确认",
-        Phase::Closed | Phase::Failed | Phase::Leaving => "联机已结束",
-        _ => "等待好友",
-    }
+pub(super) fn player_labels(view: &View) -> [String; 2] {
+    let local = usize::from(view.page == Page::Joined);
+    std::array::from_fn(|seat| {
+        let name = &view.player_names[seat];
+        match (seat == local, name.is_empty()) {
+            (true, true) => "本机".into(),
+            (true, false) => format!("{name}（你）"),
+            (false, false) => name.clone(),
+            (false, true) if seat == 0 => "房主".into(),
+            (false, true)
+                if phase(view) == Phase::WaitingPeer || phase(view) == Phase::Creating =>
+            {
+                "空位".into()
+            }
+            (false, true) => "好友".into(),
+        }
+    })
 }
 
 pub(super) fn status_text(view: &View) -> &str {
+    if view.routine_stage {
+        return "";
+    }
     if !view.status.is_empty() || view.launcher.enabled || view.page == Page::Games {
         return &view.status;
     }
     match view.page {
+        Page::Host | Page::Joined
+            if matches!(
+                phase(view),
+                Phase::Failed | Phase::RestoreFailed | Phase::Closed | Phase::RoomActive
+            ) =>
+        {
+            next_step(view)
+        }
+        Page::Host | Page::Joined => "",
         Page::Lobby => "选择房间，向下展开创建与游戏库",
         Page::Candidates => "只切换本次联机使用的游戏",
         Page::Mode => "",
         Page::Choice if view.network_only => "",
-        Page::Host if view.network_only => next_step(view),
         Page::Choice => "",
-        Page::Host => "请好友选择同一款游戏，加入这个房间",
         Page::Rooms => "选择房间后确认加入，列表会自动刷新",
-        Page::Joined => next_step(view),
         Page::Leaving => "正在结束本次联机...",
         Page::Unavailable => "这款游戏暂时不支持附近联机",
         Page::Games => "选择游戏后创建或加入房间",
@@ -234,6 +255,14 @@ pub(super) fn status_text(view: &View) -> &str {
 }
 
 pub(super) fn hint_text(view: &View) -> &str {
+    if matches!(view.page, Page::Host | Page::Joined)
+        && !matches!(
+            phase(view),
+            Phase::Failed | Phase::RestoreFailed | Phase::RoomActive | Phase::Closed
+        )
+    {
+        return "";
+    }
     if view.launcher.enabled && !view.status.is_empty() {
         return &view.status;
     }
@@ -249,10 +278,10 @@ pub(super) fn hint_text(view: &View) -> &str {
             if view.launcher.key.is_empty() {
                 "Y 排序"
             } else {
-                "X 游玩 / 长按联机 · Y 排序"
+                "X 游玩 · Y 排序"
             }
         } else if !view.launcher.key.is_empty() {
-            "X 游玩 / 长按联机 · Y 收藏"
+            "X 游玩 · Y 收藏"
         } else {
             "Y 搜索"
         };
@@ -346,8 +375,8 @@ pub(super) fn confirm_text(view: &View) -> &str {
         Phase::RestoreFailed => "重试",
         Phase::RoomActive => "关闭",
         Phase::Closed | Phase::Failed => "返回",
-        Phase::HostReady if !view.busy => "开始",
-        Phase::ApprovalPending if !view.busy => "确认",
+        Phase::HostReady if view.host_action_enabled() => "开始",
+        Phase::ApprovalPending if view.host_action_enabled() => "确认",
         Phase::Idle => match view.page {
             Page::Choice | Page::Mode => "确认",
             Page::Rooms | Page::Lobby

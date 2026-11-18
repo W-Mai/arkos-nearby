@@ -272,9 +272,7 @@ fn live() -> Result<(), String> {
     };
     #[cfg(feature = "gpu")]
     let mut app = {
-        use mirui::surface::sdl_gpu::{
-            SdlGpuConfig, SdlGpuDriver, SdlGpuFactory, SdlGpuSurface, SdlWindowMode,
-        };
+        use mirui::surface::sdl_gpu::{SdlGpuConfig, SdlGpuDriver, SdlGpuSurface, SdlWindowMode};
         let surface = SdlGpuSurface::with_config(
             howff_menu::brand::NAME,
             640,
@@ -290,13 +288,20 @@ fn live() -> Result<(), String> {
             "{}",
             serde_json::json!({"renderer":surface.renderer_name(),"backend":"sdl-gpu","video":std::env::var("SDL_VIDEODRIVER").ok()})
         );
-        App::with_factory(surface, SdlGpuFactory::new())
+        App::with_factory(surface, gpu_factory()?)
     };
     app.with_default_widgets().with_default_systems();
     platform::record_init("before_fonts", serde_json::json!({}))
         .map_err(|error| error.to_string())?;
     render::install(&mut app)?;
     app.add_plugin(mirui::app::plugins::StdInstantClockPlugin);
+    let device_status = app
+        .world
+        .resource::<render::device_status::Runtime>()
+        .unwrap()
+        .0
+        .clone();
+    let status_monitor = platform::status::Monitor::start().map_err(|error| error.to_string())?;
     let preferences = sound::install(&mut app);
     let sound = sound::register(&mut app)?;
     let launcher = render::launcher(&mut app);
@@ -373,6 +378,7 @@ fn live() -> Result<(), String> {
     let mut presented_generation = None;
     let mut metrics = FrameMetrics::default();
     while !quit.load(Ordering::Relaxed) {
+        status_monitor.present(&device_status);
         let mut rendered = false;
         let mut latest = None;
         loop {
@@ -489,7 +495,7 @@ fn live() -> Result<(), String> {
             }
         }
         for mut action in actions {
-            if launcher.management().active() {
+            if launcher.overlay_visible() && launcher.management().active() {
                 if action == model::Action::Theme {
                     action = model::Action::Auxiliary;
                 }
@@ -499,7 +505,7 @@ fn live() -> Result<(), String> {
                 sound.focus_changed(previous, launcher.menu_selection(), render::now(&app));
                 continue;
             }
-            if launcher.saves().active() {
+            if launcher.overlay_visible() && launcher.saves().active() {
                 if action == model::Action::Theme {
                     action = model::Action::Auxiliary;
                 }
@@ -509,7 +515,7 @@ fn live() -> Result<(), String> {
                 sound.focus_changed(previous, launcher.menu_selection(), render::now(&app));
                 continue;
             }
-            if launcher.configuration().active() {
+            if launcher.overlay_visible() && launcher.configuration().active() {
                 if action == model::Action::Theme {
                     action = model::Action::Auxiliary;
                 }
@@ -603,10 +609,17 @@ fn live() -> Result<(), String> {
 }
 
 #[cfg(all(target_os = "linux", feature = "gpu"))]
+fn gpu_factory() -> Result<mirui::surface::sdl_gpu::SdlGpuFactory, String> {
+    use mirui::render::{PlaneLayout, ProjectiveFallback};
+    let layout = PlaneLayout::packed(640, 480, ColorFormat::RGBA8888)
+        .map_err(|error| format!("GPU workspace: {error:?}"))?;
+    Ok(mirui::surface::sdl_gpu::SdlGpuFactory::new()
+        .with_projective_fallback(ProjectiveFallback::new(vec![0; layout.required_bytes()])))
+}
+
+#[cfg(all(target_os = "linux", feature = "gpu"))]
 fn gpu_probe(output: &Path, input: Option<&Path>) -> Result<(), String> {
-    use mirui::surface::sdl_gpu::{
-        SdlGpuConfig, SdlGpuDriver, SdlGpuFactory, SdlGpuSurface, SdlWindowMode,
-    };
+    use mirui::surface::sdl_gpu::{SdlGpuConfig, SdlGpuDriver, SdlGpuSurface, SdlWindowMode};
     let surface = SdlGpuSurface::with_config(
         howff_menu::brand::NAME,
         640,
@@ -622,7 +635,7 @@ fn gpu_probe(output: &Path, input: Option<&Path>) -> Result<(), String> {
     if renderer != "opengles2" {
         return Err(format!("Expected GLES acceleration, found {renderer}"));
     }
-    let mut app = App::with_factory(surface, SdlGpuFactory::new());
+    let mut app = App::with_factory(surface, gpu_factory()?);
     app.with_default_widgets().with_default_systems();
     render::install(&mut app)?;
     let view = if let Some(input) = input {

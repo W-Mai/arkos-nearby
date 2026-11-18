@@ -1,3 +1,5 @@
+pub mod status;
+
 use crate::model::Action;
 #[cfg(not(feature = "gpu"))]
 use mirui::render::texture::ColorFormat;

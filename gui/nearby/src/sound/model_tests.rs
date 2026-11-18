@@ -306,3 +306,70 @@ fn settings_effects_preserve_confirmation_and_existing_preference_files() {
     );
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn room_sounds_follow_confirmed_availability_across_repeated_reports() {
+    for (page, ready, missing) in [
+        (Page::Host, Phase::HostReady, Phase::WaitingPeer),
+        (
+            Page::Joined,
+            Phase::NetworkConnected,
+            Phase::NetworkReconnecting,
+        ),
+    ] {
+        let (mut app, state, sink) = setup();
+        let network = page == Page::Joined;
+        let start = if network {
+            Phase::Connecting
+        } else {
+            Phase::Creating
+        };
+        let mut room = view(page, start);
+        room.room_name = "A216".into();
+        room.network_only = network;
+        let mut at = 0;
+        let mut report = |phase: Phase, confirmed: bool| {
+            at += 100;
+            room.phase = phase;
+            room.ready = !network && confirmed;
+            room.connected = network && confirmed;
+            room.status = at.to_string();
+            state.present(&room, at);
+            app.render().unwrap();
+        };
+        let preparing = if network {
+            Phase::NetworkConfirming
+        } else {
+            Phase::PeerPreparing
+        };
+        report(start, false);
+        report(missing, false);
+        report(missing, false);
+        report(preparing, false);
+        report(missing, false);
+        report(ready, false);
+        report(ready, true);
+        report(ready, true);
+        report(preparing, false);
+        report(ready, true);
+        report(preparing, false);
+        report(missing, false);
+        report(preparing, false);
+        report(missing, false);
+        report(ready, true);
+        let played: Vec<_> = sink
+            .0
+            .borrow()
+            .iter()
+            .filter_map(|command| match command {
+                AudioCommand::Play { cue, .. } => Some(*cue),
+                _ => None,
+            })
+            .collect();
+        let mut expected = vec![Cue::Ready.id(), Cue::PeerLost.id(), Cue::Ready.id()];
+        if !network {
+            expected.insert(0, Cue::RoomOpened.id());
+        }
+        assert_eq!(played, expected);
+    }
+}

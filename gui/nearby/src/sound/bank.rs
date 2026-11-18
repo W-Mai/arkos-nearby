@@ -151,5 +151,29 @@ static CUES: &[AudioCue] = &[
             ],
         ),
     ),
+    AudioCue::new(
+        Cue::RoomOpened.id(),
+        Score::new(
+            1000,
+            112,
+            false,
+            &[
+                NoteEvent::new(0, 34, 67, 42, Waveform::Square),
+                NoteEvent::new(42, 69, 74, 48, Waveform::Triangle),
+            ],
+        ),
+    ),
+    AudioCue::new(
+        Cue::PeerLost.id(),
+        Score::new(
+            1000,
+            142,
+            false,
+            &[
+                NoteEvent::new(0, 42, 74, 42, Waveform::Square),
+                NoteEvent::new(63, 78, 67, 48, Waveform::Triangle),
+            ],
+        ),
+    ),
 ];
 pub(super) static BANK: AudioBank = AudioBank::new(CUES);

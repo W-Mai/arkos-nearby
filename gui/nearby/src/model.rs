@@ -88,6 +88,10 @@ pub struct View {
     pub local_address: String,
     #[serde(default)]
     pub peers: Vec<NetworkPeer>,
+    #[serde(default)]
+    pub player_names: [String; 2],
+    #[serde(default)]
+    pub room_game: String,
     pub page: Page,
     pub title: String,
     pub core: String,
@@ -101,6 +105,8 @@ pub struct View {
     #[serde(default)]
     pub refreshing: bool,
     pub status: String,
+    #[serde(default)]
+    pub routine_stage: bool,
     #[serde(default)]
     pub phase: Phase,
     #[serde(default)]
@@ -123,7 +129,17 @@ impl View {
     }
 
     pub fn host_action_enabled(&self) -> bool {
-        (self.ready || self.connected || self.phase == Phase::ApprovalPending) && !self.busy
+        if self.busy {
+            return false;
+        }
+        match (self.page, self.phase) {
+            (Page::Host | Page::Joined, Phase::NetworkConnected) => {
+                self.network_only && self.connected
+            }
+            (Page::Host, Phase::ApprovalPending) => true,
+            (Page::Host, Phase::HostReady | Phase::Idle) => !self.network_only && self.ready,
+            _ => false,
+        }
     }
 }
 
@@ -174,6 +190,29 @@ fn available() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_ready_flag_does_not_reactivate_the_start_button_during_launch() {
+        let mut room = View {
+            page: Page::Host,
+            ready: true,
+            ..View::default()
+        };
+        assert!(room.host_action_enabled());
+        room.phase = Phase::HostReady;
+        assert!(room.host_action_enabled());
+        room.phase = Phase::Starting;
+        assert!(!room.host_action_enabled());
+        room.page = Page::Joined;
+        room.phase = Phase::WaitingStart;
+        assert!(!room.host_action_enabled());
+        room.network_only = true;
+        room.connected = true;
+        room.phase = Phase::NetworkConnected;
+        assert!(room.host_action_enabled());
+        room.phase = Phase::NetworkReconnecting;
+        assert!(!room.host_action_enabled());
+    }
+
     #[test]
     fn game_rows_are_display_only_and_old_room_views_remain_valid() {
         assert!(serde_json::from_value::<GameRow>(serde_json::json!({"name":"game","detail":"select","directory":false,"path":"/roms/game.zip"})).is_err());

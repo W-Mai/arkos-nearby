@@ -18,7 +18,7 @@ pub(super) fn choice(view: PageKey, state: model!(DisplayState), metrics: Metric
     let cards = if view.page == Page::Mode {
         [
             (0, "仅组网", "连接附近的掌机"),
-            (1, "选择游戏", "选择要一起玩的游戏"),
+            (1, "选择游戏", "从游戏库选择"),
         ]
     } else if view.network_only {
         [
@@ -49,7 +49,9 @@ pub(super) fn choice(view: PageKey, state: model!(DisplayState), metrics: Metric
                             min_height: 0,
                             padding: metrics.card_padding(),
                             row_gap: metrics.gap,
-                            bg_color: ${ state.card_motion().card_color(card.0) }
+                            bg_color: ${ state.card_motion().card_color(card.0) },
+                            border_width: 1,
+                            border_color: DIVIDER
                         ) [
                             FocusTarget::fixed(card.0).scoped(view.page),
                         ] {

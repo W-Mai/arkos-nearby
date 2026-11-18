@@ -198,6 +198,27 @@ fn only_game_loading_entries_can_resume_single_player_on_cancel() {
 }
 
 #[test]
+fn launch_requires_the_hosts_ready_phase_and_cannot_repeat_after_start() {
+    use crate::flow::{Flow, Operation};
+    for (role, step, expected) in [
+        ("host", "host_ready", Some(Operation::Start)),
+        ("host", "starting", None),
+        ("client", "waiting_start", None),
+        ("client", "approval_pending_client", None),
+    ] {
+        let mut flow = Flow::new(Some(context()));
+        let id = "a".repeat(32);
+        flow.status(0, serde_json::json!({
+            "id":id, "role":role, "phase":if step == "starting" { "launching" } else { "hosting" },
+            "step":step, "context_matches":true, "ready":true
+        }));
+        assert_eq!(flow.view()["phase"], step);
+        flow.dispatch("confirm", crate::system::monotonic() + 1.0);
+        assert_eq!(flow.request.map(|r| r.operation), expected);
+    }
+}
+
+#[test]
 fn network_completion_can_detach_but_cannot_offer_game_start() {
     use crate::flow::{Flow, FlowExit, Operation, Page};
     for role in ["host", "client"] {
@@ -205,6 +226,7 @@ fn network_completion_can_detach_but_cannot_offer_game_start() {
         let id = "a".repeat(32);
         flow.status(0, serde_json::json!({"id":id,"purpose":"network_only","phase":"network_connected","role":role,"step":"network_connected","context_matches":true,"connected":true,"ready":false,"peer_present":true}));
         assert_eq!(flow.view()["ready"], false);
+        assert_eq!(flow.view()["routine_stage"], true);
         assert!(matches!(flow.page, Page::Host | Page::Joined));
         flow.dispatch("confirm", crate::system::monotonic() + 1.0);
         let detach = flow.request.take().unwrap();
@@ -527,6 +549,9 @@ fn renderer_contract_contains_display_fields_without_launch_authority() {
         .map(String::as_str)
         .collect();
     let expected: std::collections::BTreeSet<_> = [
+        "artwork",
+        "player_names",
+        "room_game",
         "page",
         "title",
         "core",
@@ -537,6 +562,7 @@ fn renderer_contract_contains_display_fields_without_launch_authority() {
         "ready",
         "busy",
         "refreshing",
+        "routine_stage",
         "status",
         "phase",
         "back_label",

@@ -35,6 +35,10 @@ pub(super) const CLAY: ColorToken = ColorToken::Custom("clay");
 pub(super) const SKY: ColorToken = ColorToken::Custom("sky");
 pub(super) const HILL: ColorToken = ColorToken::Custom("hill");
 pub(super) const DEEP: ColorToken = ColorToken::Custom("deep");
+pub(super) const SHELL: ColorToken = ColorToken::Custom("shell");
+pub(super) const SHELL_EDGE: ColorToken = ColorToken::Custom("shell-edge");
+pub(super) const SHELL_FACE: ColorToken = ColorToken::Custom("shell-face");
+pub(super) const SHELL_TEXT: ColorToken = ColorToken::Custom("shell-text");
 pub(super) const HEADER_TEXT: ColorToken = ColorToken::Custom("header-text");
 pub(super) const HEADER_DETAIL: ColorToken = ColorToken::Custom("header-detail");
 #[derive(Clone, Copy)]
@@ -119,7 +123,7 @@ impl Metrics {
         Padding::all(self.sized(3, 4, 6))
     }
     pub fn preview_title_height(self) -> i32 {
-        i32::from(TITLE_SIZE) * 2 + LABEL_LEADING * 2
+        i32::from(TITLE_SIZE) + LABEL_LEADING
     }
     pub fn action_height(self) -> i32 {
         self.sized(32, 37, 54)

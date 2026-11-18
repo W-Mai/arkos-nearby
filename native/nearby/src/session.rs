@@ -33,6 +33,8 @@ pub struct RoomEntry {
     pub token: String,
     pub name: String,
     pub same_game_hint: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listing: Option<crate::discovery::Listing>,
 }
 impl RoomEntry {
     pub fn purpose(&self) -> SessionPurpose {
@@ -64,6 +66,7 @@ impl RoomEntry {
                 bssid.replace(':', "").chars().skip(6).collect::<String>(),
                 &token[..4]
             ),
+            listing: None,
             same_game_hint: game.is_some_and(|game| sha.starts_with(game)),
         })
     }
@@ -298,10 +301,14 @@ pub fn status(context: Option<&Context>) -> Result<Value> {
     if state.purpose == SessionPurpose::NetworkOnly {
         return crate::network::status(&state, context.is_none());
     }
+    let host = state.role == "host";
+    let ready_peer = (host && !state.closed() && state.phase != "restoring")
+        .then(|| receipt(&state).ok())
+        .flatten();
     let ready = if state.closed() || state.phase == "restoring" {
         false
-    } else if state.role == "host" {
-        receipt(&state).is_ok()
+    } else if host {
+        ready_peer.is_some()
     } else {
         matches!(state.phase.as_str(), "ready" | "launching" | "playing")
     };
@@ -337,8 +344,30 @@ pub fn status(context: Option<&Context>) -> Result<Value> {
     } else {
         &state.step
     };
+    let players = if state.closed() {
+        [String::new(), String::new()]
+    } else {
+        let other = if host {
+            ready_peer
+                .as_ref()
+                .map(|p| p.peer_mac.as_str())
+                .or(state.game_peer_mac.as_deref())
+                .or(state.pending_pair_mac.as_deref())
+        } else {
+            Some(state.room.bssid.as_str())
+        };
+        let local = crate::identity::local_name().unwrap_or_default();
+        let remote = other
+            .and_then(crate::identity::remembered_name)
+            .unwrap_or_default();
+        if host {
+            [local, remote]
+        } else {
+            [remote, local]
+        }
+    };
     Ok(
-        json!({"id":state.id,"phase":state.phase,"role":state.role,"room":state.room,"ready":ready,"peer_present":present,"step":step,"stage":if present && !ready && state.phase=="hosting" { "设备已连入，正在核对游戏..." } else { &state.stage },"context_matches":context.is_none_or(|c|c.key()==state.context_key),"error":state.error,"end_reason":state.end_reason,"network_restored":state.network_restored,"recovery_errors":state.recovery_errors,"session":state.game_session}),
+        json!({"player_names":players,"id":state.id,"phase":state.phase,"role":state.role,"room":state.room,"ready":ready,"peer_present":present,"step":step,"stage":if present && !ready && state.phase=="hosting" { "设备已连入，正在核对游戏..." } else { &state.stage },"context_matches":context.is_none_or(|c|c.key()==state.context_key),"error":state.error,"end_reason":state.end_reason,"network_restored":state.network_restored,"recovery_errors":state.recovery_errors,"session":state.game_session}),
     )
 }
 
@@ -374,6 +403,7 @@ fn scan_observations(sha: &str, refresh: bool, force: bool) -> Result<Value> {
     let mut result = collect_scan(&mut cache, &owner, sha, refresh, force, now, |request| {
         platform_radio::scan(request)
     })?;
+    crate::discovery::enrich(&mut cache, &mut result["rooms"], now);
     write(&path, &cache)?;
     result["scanning"] = platform_radio::scan_activity()
         .unwrap_or(result["refresh_accepted"] == true)
@@ -1197,7 +1227,7 @@ pub fn worker(id: &str) -> Result<()> {
                     let receipt: Value =
                         serde_json::from_slice(&crate::http::request("/ready", Some(&value))?)?;
                     if receipt["approved"] == false {
-                        progress(id, None, "checking", "等待房主确认加入...")?;
+                        progress(id, None, "approval_pending_client", "等待房主确认加入...")?;
                         thread::sleep(Duration::from_millis(250));
                         continue;
                     }

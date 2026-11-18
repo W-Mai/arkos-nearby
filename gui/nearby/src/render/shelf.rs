@@ -1,6 +1,8 @@
-use crate::model::{LibraryKind, View};
+use super::rows::Row;
+use crate::model::{LibraryKind, Page, View};
 use howff_menu::input::Generation;
 use mirui::anim::{Tween, TweenConfig, ease};
+use mirui::core::model::ModelList;
 use mirui::prelude::*;
 use serde::Serialize;
 
@@ -10,7 +12,7 @@ pub(super) const GAP: i32 = 12;
 pub(super) const CARD_INSET: i32 = 2;
 pub(super) const LABEL_HEIGHT: i32 = 30;
 pub(super) const LABEL_ACTOR_SPACE: i32 = 24;
-pub(super) const SHADOW: i32 = 2;
+pub(super) const SHADOW: i32 = 5;
 const MIN_CARD_WIDTH: i32 = 160;
 const MAX_CARD_WIDTH: i32 = 280;
 const IMAGE_CHROME_WIDTH: i32 = 28;
@@ -20,6 +22,8 @@ const PAGE_MARK_GAP: i32 = 4;
 pub(super) const PAGE_MARKERS: usize = 7;
 const SHORT_MARK: Fixed = Fixed::from_int(6);
 const LONG_MARK: Fixed = Fixed::from_int(22);
+// A slow cartridge mount must still display the crossing of the two pages.
+const MIN_SLIDE_STEPS: u16 = 8;
 const PAGE_MOTION: TweenConfig = TweenConfig::new(260, &ease::OUT_CUBIC);
 
 pub use howff_menu::shelf::Grid;
@@ -111,8 +115,37 @@ pub(super) struct Shelf {
     pub pages: (usize, usize, usize),
     #[observe]
     pub marker_lengths: [Fixed; PAGE_MARKERS],
+    pub departing: model!(owned ModelList<Row>),
+    #[observe]
+    pub offsets: (Fixed, Fixed),
+    slide: Option<Slide>,
     markers: [MarkerMotion; PAGE_MARKERS],
     now: u64,
+    last_tick: u64,
+}
+
+#[derive(Clone, Copy)]
+struct Slide {
+    tween: Tween,
+    started: u64,
+    distance: Fixed,
+    origin: usize,
+    first_frame: bool,
+}
+
+fn window(view: &View) -> Option<usize> {
+    (view.page == Page::Games
+        && view.library.kind == LibraryKind::Favorites
+        && !view.busy
+        && !view.entries.is_empty()
+        && !view.launcher.navigation
+        && view.launcher.tab == 0
+        && view.launcher.overlay.is_empty())
+    .then(|| {
+        view.library
+            .position
+            .saturating_sub(view.selected.saturating_add(1))
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -148,20 +181,41 @@ impl Shelf {
             pending: None,
             pages: (0, 0, 0),
             marker_lengths: [SHORT_MARK; PAGE_MARKERS],
+            departing: ModelList::new().into(),
+            offsets: (Fixed::ZERO, Fixed::ZERO),
+            slide: None,
             markers: [MarkerMotion {
                 page: usize::MAX,
                 tween: Tween::preset(SHORT_MARK, SHORT_MARK, PAGE_MOTION),
                 started: 0,
             }; PAGE_MARKERS],
             now: 0,
+            last_tick: 0,
         }
     }
 
-    fn update(&mut self) {
+    fn finish_slide(&mut self) {
+        if self.slide.is_none() {
+            return;
+        }
+        self.slide = None;
+        self.offsets = (Fixed::ZERO, Fixed::ZERO);
+        self.departing.clear();
+    }
+
+    fn update(&mut self, fit: bool) {
         if !self.active || self.size.0 <= 0 || self.size.1 <= 0 {
             return;
         }
-        self.plan = Plan::fit(self.size.0, self.size.1, self.total);
+        if fit {
+            self.plan = Plan::fit(self.size.0, self.size.1, self.total);
+            // Reserve only the visible leaving page, once layout has measured its size.
+            let capacity = self.plan.grid.capacity();
+            if self.total > capacity && capacity > self.departing.capacity() {
+                let additional = capacity - self.departing.len();
+                let _ = self.departing.reserve(additional);
+            }
+        }
         if self.sent != Some(self.plan.grid) {
             self.sent = Some(self.plan.grid);
             self.pending = Some(LayoutRequest {
@@ -210,15 +264,94 @@ impl Shelf {
 
 #[model]
 impl Shelf {
+    pub fn change_window(&mut self, old: &View, new: &View, rows: &mut ModelList<Row>) {
+        let Some((from, to)) = window(old).zip(window(new)) else {
+            self.finish_slide();
+            return;
+        };
+        let capacity = self.plan.grid.capacity();
+        if !self.active
+            || self.size.0 <= 0
+            || self.layout_pending
+            || capacity == 0
+            || old.library.sort != new.library.sort
+            || old.library.total != new.library.total
+            || old.launcher.enabled != new.launcher.enabled
+            || rows.is_empty()
+            || rows.len() > self.departing.capacity()
+            || from % capacity != 0
+            || to % capacity != 0
+        {
+            self.finish_slide();
+            return;
+        }
+        if from == to || old.entries == new.entries {
+            return;
+        }
+        let stride = Fixed::from_int((self.size.0 - 2 * INSET).max(1));
+        let distance = if to > from { stride } else { -stride };
+        let start = match self.slide {
+            Some(slide) if slide.origin == to => self.offsets.1,
+            _ => distance,
+        };
+        self.departing.clear();
+        if start == Fixed::ZERO {
+            self.finish_slide();
+            return;
+        }
+        let ids: Vec<_> = rows.entries().map(|(id, _)| id).collect();
+        for id in ids {
+            if let Some(row) = rows.remove(id) {
+                self.departing
+                    .try_push(row)
+                    .unwrap_or_else(|_| unreachable!("identical shelf window capacities"));
+            }
+        }
+        self.slide = Some(Slide {
+            origin: from,
+            first_frame: true,
+            distance,
+            started: self.now,
+            tween: Tween::preset(start, Fixed::ZERO, PAGE_MOTION),
+        });
+        self.offsets = (start, start - distance);
+    }
+
     pub fn tick(&mut self, now: u64) {
-        self.now = now;
+        let delta = now.saturating_sub(std::mem::replace(&mut self.last_tick, now));
+        let step = match &mut self.slide {
+            Some(slide) if slide.first_frame => {
+                slide.first_frame = false;
+                0
+            }
+            Some(slide) => delta.min(u64::from(slide.tween.duration_ms / MIN_SLIDE_STEPS)),
+            None => delta,
+        };
+        self.now = self.now.saturating_add(step);
+        let now = self.now;
+        if let Some(slide) = self.slide.as_mut() {
+            let elapsed = now.saturating_sub(slide.started);
+            if elapsed >= u64::from(slide.tween.duration_ms) {
+                self.finish_slide();
+            } else {
+                let mut tween = slide.tween;
+                tween.tick(elapsed as u16);
+                let x = tween.value();
+                self.offsets = (x, x - slide.distance);
+            }
+        }
         self.marker_lengths = self.markers.map(|marker| marker.value(now));
     }
 
+    pub fn sliding(&self) -> bool {
+        self.slide.is_some()
+    }
+
     pub fn markers_settled(&self) -> bool {
-        self.markers.iter().all(|marker| {
-            self.now.saturating_sub(marker.started) >= u64::from(marker.tween.duration_ms)
-        })
+        self.slide.is_none()
+            && self.markers.iter().all(|marker| {
+                self.now.saturating_sub(marker.started) >= u64::from(marker.tween.duration_ms)
+            })
     }
     pub fn present(&mut self, view: &View) {
         if self.input_generation != view.input_generation {
@@ -232,19 +365,22 @@ impl Shelf {
             self.sent = None;
             self.pending = None;
         }
+        let total = view.library.total.max(view.entries.len());
+        let fit = active != self.active || self.total != total;
         self.active = active;
-        self.total = view.library.total.max(view.entries.len());
+        self.total = total;
         self.position = view
             .library
             .position
             .max(view.selected.saturating_add(1))
             .min(self.total);
-        self.update();
+        self.update(fit);
     }
 
     pub fn set_size(&mut self, width: Fixed, height: Fixed) {
         let size = (width.to_int(), height.to_int());
         if self.size != size {
+            self.finish_slide();
             self.size = size;
             self.layout_pending = true;
         }
@@ -253,7 +389,7 @@ impl Shelf {
     pub fn layout(&mut self) {
         if self.layout_pending {
             self.layout_pending = false;
-            self.update();
+            self.update(true);
         }
     }
 
@@ -325,17 +461,17 @@ mod tests {
         shelf.size = (600, 370);
         shelf.total = 24;
         shelf.position = 1;
-        shelf.update();
+        shelf.update(true);
         shelf.tick(300);
         assert_eq!(shelf.marker_lengths[0], LONG_MARK);
         shelf.position = shelf.plan.grid.capacity() + 1;
-        shelf.update();
+        shelf.update(true);
         shelf.tick(430);
         let previous = shelf.marker_lengths;
         assert!(previous[0] > SHORT_MARK && previous[0] < LONG_MARK);
         assert!(previous[1] > SHORT_MARK && previous[1] < LONG_MARK);
         shelf.position = 1;
-        shelf.update();
+        shelf.update(true);
         shelf.tick(430);
         assert_eq!(shelf.marker_lengths, previous);
         shelf.tick(800);

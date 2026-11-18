@@ -11,7 +11,7 @@ use super::{
     selection::FocusTarget,
     state::DisplayState,
     style::*,
-    widgets::{caption, paragraph},
+    widgets::{caption, hold_badge, paragraph},
 };
 use crate::model::LibraryKind;
 
@@ -23,7 +23,7 @@ const KEYS: [&str; 40] = [
 
 const CARTRIDGE_EDGE: i32 = 2;
 const CARTRIDGE_RAIL: i32 = 2;
-const CARTRIDGE_CAP: i32 = 4;
+const CARTRIDGE_CAP: i32 = 8;
 const CARTRIDGE_CONTACTS: usize = 8;
 
 #[compose]
@@ -56,7 +56,7 @@ fn shelf(
             grow: 1.0,
             min_height: 0,
             min_width: 0,
-            bg_color: PANEL,
+            bg_color: BACKGROUND,
             padding: Padding::all(super::shelf::INSET),
             row_gap: 4
         ) [
@@ -65,33 +65,16 @@ fn shelf(
             if ${ state.entries().is_empty() } {
                 console (super::consoles::Platform::Favorites)
             } else {
-                Column (
+                View (
                     grow: 1.0,
-                    min_height: 0,
                     min_width: 0,
-                    row_gap: super::shelf::GAP,
-                    align: AlignItems::Center,
-                    justify: JustifyContent::Center
+                    min_height: 0,
+                    container: true,
+                    clip_children: true
                 ) {
-                    walk ${ 0..grid.plan().grid.rows } with line {
-                        Row (
-                            width: ${ grid.plan().width() },
-                            height: ${ grid.plan().card_height },
-                            shrink: 0.0,
-                            min_height: 0,
-                            column_gap: super::shelf::GAP
-                        ) {
-                            walk ${
-                                state
-                                    .entries()
-                                    .entries()
-                                    .skip(line * grid.plan().grid.columns)
-                                    .take(grid.plan().grid.columns)
-                                    .collect::<Vec<_>>()
-                            } with item by item.0 {
-                                cartridge (state, item.1, item.0, grid, metrics)
-                            }
-                        }
+                    shelf_sheet (state, grid, metrics, false)
+                    walk ${ (!grid.departing().is_empty()).then_some(()) } with _departing {
+                        shelf_sheet (state, grid, metrics, true)
                     }
                 }
             }
@@ -106,6 +89,62 @@ fn shelf(
                 }
             }
         } on SizeChanged { grid.set_size(event.new.width, event.new.height); }
+    }
+}
+
+#[compose]
+fn shelf_sheet(
+    state: model!(DisplayState),
+    grid: model!(super::shelf::Shelf),
+    metrics: Metrics,
+    departing: bool,
+) -> Entity {
+    ui! {
+        Column (
+            position: Position::Absolute,
+            top: 0,
+            left: 0,
+            width: Dimension::percent(100),
+            height: Dimension::percent(100),
+            transform: ${
+                {
+                    let offsets = grid.offsets();
+                    mirui::types::Transform::translate(
+                        if departing { offsets.1 } else { offsets.0 },
+                        Fixed::ZERO,
+                    )
+                }
+            },
+            min_height: 0,
+            min_width: 0,
+            row_gap: super::shelf::GAP,
+            align: AlignItems::Center,
+            justify: JustifyContent::Center
+        ) {
+            walk ${ 0..grid.plan().grid.rows } with line {
+                Row (
+                    width: ${ grid.plan().width() },
+                    height: ${ grid.plan().card_height },
+                    shrink: 0.0,
+                    min_height: 0,
+                    column_gap: super::shelf::GAP
+                ) {
+                    walk ${
+                        let rows = if departing { grid.departing() } else { state.entries() };
+                        rows.entries()
+                            .skip(line * grid.plan().grid.columns)
+                            .take(grid.plan().grid.columns)
+                            .collect::<Vec<_>>()
+                    } with item by item.0 {
+                        if departing {
+                            retiring_cartridge (item.1, grid, metrics)
+                        } else {
+                            cartridge (state, item.1, item.0, grid, metrics)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -129,16 +168,16 @@ fn cartridge(
 ) -> Entity {
     let movement = row.clone();
     let focus = row.clone();
+    let badge = row.clone();
     let directory = row.clone();
     let name = row.clone();
-    let enabled = row.clone();
     ui! {
         Column (
             width: ${ grid.plan().card_width },
             shrink: 0.0,
             min_width: 0,
             min_height: 0,
-            transform: ${ state.card_motion().card_transform(movement.index()) }
+            transform: ${ state.card_motion().cartridge_transform(movement.index()) }
         ) {
             Column (
                 grow: 1.0,
@@ -146,7 +185,9 @@ fn cartridge(
                 min_height: 0,
                 padding: Padding::all(super::shelf::CARD_INSET),
                 container: true,
-                bg_color: ${ state.card_motion().card_color(focus.index()) }
+                bg_color: SHELL,
+                border_width: 2,
+                border_color: ${ if state.card_motion().selected == Some(focus.index()) { ACCENT } else { SHELL_EDGE } }
             ) [
                 FocusTarget::row(row.clone()),
             ] {
@@ -155,31 +196,77 @@ fn cartridge(
                 } else {
                     cartridge_content (state.clone(), row, member, metrics)
                 }
-                Row (
-                    height: super::shelf::LABEL_HEIGHT,
-                    shrink: 0.0,
-                    min_width: 0,
-                    container: true,
-                    padding: Padding {
-                        left: metrics.gap.into(),
-                        right: super::shelf::LABEL_ACTOR_SPACE.into(),
-                        ..Default::default()
+                if ${
+                    state.playable_selection() && state.selected() == Some(badge.index())
+                        && !badge.directory()
+                } {
+                    Row (position: Position::Absolute, top: 4, left: 4) {
+                        hold_badge ()
                     }
-                ) {
-                    Text (
-                        text: ${ name.label(true) },
-                        grow: 1.0,
-                        min_width: 0,
-                        font: font(TITLE_SIZE),
-                        font_size: TITLE_SIZE,
-                        text_color: ${ if enabled.available() { FOREGROUND } else { DISABLED } },
-                        paragraph: paragraph(mirui::ui::widgets::TextAlign::Start, 1)
-                    ) [
-                        FONT_PAINT,
-                    ]
                 }
+                cartridge_label (name, metrics)
             }
-            View (height: super::shelf::SHADOW, shrink: 0.0, bg_color: DIVIDER)
+            View (height: super::shelf::SHADOW, shrink: 0.0, bg_color: SHELL_EDGE)
+        }
+    }
+}
+
+#[compose]
+fn cartridge_label(row: model!(Row), metrics: Metrics) -> Entity {
+    let enabled = row.clone();
+    ui! {
+        Row (
+            height: super::shelf::LABEL_HEIGHT,
+            shrink: 0.0,
+            min_width: 0,
+            container: true,
+            padding: Padding {
+                left: metrics.gap.into(),
+                right: super::shelf::LABEL_ACTOR_SPACE.into(),
+                ..Default::default()
+            }
+        ) {
+            Text (
+                text: ${ row.label(true) },
+                grow: 1.0,
+                min_width: 0,
+                font: font(TITLE_SIZE),
+                font_size: TITLE_SIZE,
+                text_color: ${ if enabled.available() { SHELL_TEXT } else { DIVIDER } },
+                paragraph: paragraph(mirui::ui::widgets::TextAlign::Start, 1)
+            ) [
+                FONT_PAINT,
+            ]
+        }
+    }
+}
+
+#[compose]
+fn retiring_cartridge(
+    row: model!(Row),
+    grid: model!(super::shelf::Shelf),
+    metrics: Metrics,
+) -> Entity {
+    ui! {
+        Column (width: ${ grid.plan().card_width }, shrink: 0.0, min_width: 0, min_height: 0) {
+            Column (
+                grow: 1.0,
+                min_width: 0,
+                min_height: 0,
+                padding: Padding::all(super::shelf::CARD_INSET),
+                container: true,
+                bg_color: SHELL,
+                border_width: 2,
+                border_color: SHELL_EDGE
+            ) {
+                if ${ row.directory() } {
+                    library_icon (metrics)
+                } else {
+                    cartridge_source (row, metrics)
+                }
+                cartridge_label (row, metrics)
+            }
+            View (height: super::shelf::SHADOW, shrink: 0.0, bg_color: SHELL_EDGE)
         }
     }
 }
@@ -420,14 +507,14 @@ fn cartridge_source(row: model!(Row), _metrics: Metrics) -> Entity {
                 grow: 1.0,
                 min_height: 0,
                 min_width: 0,
-                bg_color: DIVIDER,
+                bg_color: SHELL,
                 padding: Padding {
                     left: CARTRIDGE_RAIL.into(),
                     right: CARTRIDGE_RAIL.into(),
                     ..Default::default()
                 },
                 border_width: CARTRIDGE_EDGE,
-                border_color: DEEP
+                border_color: SHELL_EDGE
             ) {
                 Row (
                     height: CARTRIDGE_CAP,
@@ -437,8 +524,8 @@ fn cartridge_source(row: model!(Row), _metrics: Metrics) -> Entity {
                 ) {
                     cartridge_rivet ()
                     Column (grow: 1.0, row_gap: 2) {
-                        View (height: 1, bg_color: PANEL)
-                        View (height: 1, bg_color: SECONDARY)
+                        View (height: 1, bg_color: SHELL_FACE)
+                        View (height: 1, bg_color: SHELL_EDGE)
                     }
                     cartridge_rivet ()
                 }
@@ -448,7 +535,7 @@ fn cartridge_source(row: model!(Row), _metrics: Metrics) -> Entity {
                         grow: 1.0,
                         min_height: 0,
                         min_width: 0,
-                        bg_color: DEEP,
+                        bg_color: SHELL_EDGE,
                         padding: Padding::all(CARTRIDGE_EDGE)
                     ) {
                         cover (
@@ -473,7 +560,7 @@ fn cartridge_source(row: model!(Row), _metrics: Metrics) -> Entity {
                             ..Default::default()
                         },
                         column_gap: CARTRIDGE_EDGE,
-                        bg_color: DEEP
+                        bg_color: SHELL_EDGE
                     ) {
                         walk 0..CARTRIDGE_CONTACTS with _index {
                             Column (grow: 1.0, min_width: 0, bg_color: WARNING) {
@@ -497,8 +584,8 @@ fn cartridge_grip() -> Entity {
             row_gap: CARTRIDGE_RAIL
         ) {
             walk 0..3 with _index {
-                Column (height: 3, shrink: 0.0, bg_color: SECONDARY) {
-                    View (height: 1, bg_color: PANEL)
+                Column (height: 3, shrink: 0.0, bg_color: SHELL_EDGE) {
+                    View (height: 1, bg_color: SHELL_FACE)
                 }
             }
         }
@@ -512,11 +599,11 @@ fn cartridge_rivet() -> Entity {
             width: 3,
             height: 3,
             shrink: 0.0,
-            bg_color: SECONDARY,
+            bg_color: SHELL_EDGE,
             align: AlignItems::Center,
             justify: JustifyContent::Center
         ) {
-            View (width: 3, height: 1, bg_color: PANEL)
+            View (width: 3, height: 1, bg_color: SHELL_FACE)
         }
     }
 }

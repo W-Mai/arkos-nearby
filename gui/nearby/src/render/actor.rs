@@ -195,20 +195,15 @@ pub(super) fn follow(
     }
     for (entity, _, hidden, bounds) in frames {
         if let Some(target) = target {
-            if bounds.is_none_or(|old| old.target != target) {
-                commands.insert(
-                    entity,
-                    if matches!(
-                        action_layout,
-                        ActionLayout::WifiProgress
-                            | ActionLayout::SavesProgress
-                            | ActionLayout::ManagementProgress
-                    ) {
-                        FollowBounds::new(target)
-                    } else {
-                        FollowBounds::new(target).with_transition(mirui::anim::SNAPPY)
-                    },
+            let direct = state.shelf().sliding()
+                || matches!(
+                    action_layout,
+                    ActionLayout::WifiProgress
+                        | ActionLayout::SavesProgress
+                        | ActionLayout::ManagementProgress
                 );
+            if let Some(next) = super::selection::track(target, bounds, direct) {
+                commands.insert(entity, next);
             }
             if hidden.is_some() {
                 commands.remove::<Hidden>(entity);

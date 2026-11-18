@@ -45,6 +45,9 @@ impl<B: Surface, F: RendererFactory<B>> Plugin<B, F> for EditorFocus {
 
 #[system(order = Animation)]
 fn edit(launcher: model!(Launcher), commands: commands!()) {
+    if !launcher.overlay_visible() {
+        return;
+    }
     if let Some(session) = launcher.input_session() {
         let management = launcher.management();
         let naming = management.editing();
@@ -89,7 +92,9 @@ fn edit(launcher: model!(Launcher), commands: commands!()) {
 }
 
 fn focus_editor(world: &mut mirui::ecs::World, launcher: super::LauncherHandle) {
-    let target = if launcher.wifi_keyboard() || launcher.management().editing() {
+    let target = if launcher.overlay_visible()
+        && (launcher.wifi_keyboard() || launcher.management().editing())
+    {
         world.query::<InputEditor>().iter().find_map(|(entity, _)| {
             let mut node = entity;
             loop {

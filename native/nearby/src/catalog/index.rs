@@ -167,7 +167,7 @@ impl Index {
             self.children.insert(path.clone(), children);
         }
     }
-    pub(super) fn entries(&self) -> impl Iterator<Item = &Entry> {
+    pub(crate) fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.records.iter().map(|record| &record.entry)
     }
     pub(super) fn entry(&self, path: &Path) -> Option<&Entry> {

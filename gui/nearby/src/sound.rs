@@ -27,6 +27,8 @@ pub enum Cue {
     Start,
     Error,
     Restored,
+    RoomOpened,
+    PeerLost,
 }
 
 impl Cue {
@@ -154,6 +156,7 @@ struct Feedback {
     last_focus: Option<u64>,
     last_action: Option<u64>,
     seen_rooms: BTreeSet<String>,
+    partner_was_ready: bool,
 }
 
 fn selection(view: &View) -> Option<String> {
@@ -287,6 +290,39 @@ impl Feedback {
         }
     }
 
+    fn room_cue(&mut self, old: &View, next: &View) -> Option<Cue> {
+        let ready = |view: &View| match view.phase {
+            Phase::HostReady | Phase::WaitingStart => view.ready,
+            Phase::NetworkConnected => view.connected,
+            _ => false,
+        };
+        let same_room = matches!(next.page, Page::Host | Page::Joined)
+            && old.page == next.page
+            && old.room_name == next.room_name
+            && old.network_only == next.network_only;
+        self.partner_was_ready = same_room && (self.partner_was_ready || ready(old));
+        if ready(next) {
+            let announced = std::mem::replace(&mut self.partner_was_ready, true);
+            return (!announced).then_some(Cue::Ready);
+        }
+        if old.phase == next.phase {
+            return None;
+        }
+        match next.phase {
+            Phase::Failed | Phase::RestoreFailed => Some(Cue::Error),
+            Phase::ApprovalPending => Some(Cue::JoinRequest),
+            Phase::Starting => Some(Cue::Start),
+            Phase::WaitingPeer if next.page == Page::Host && old.phase == Phase::Creating => {
+                Some(Cue::RoomOpened)
+            }
+            Phase::WaitingPeer | Phase::NetworkReconnecting if self.partner_was_ready => {
+                self.partner_was_ready = false;
+                Some(Cue::PeerLost)
+            }
+            _ => None,
+        }
+    }
+
     pub fn observe(&mut self, previous: Option<&View>, next: &View, now: u64) -> Option<Cue> {
         if previous.is_none_or(|old| old.scene_page() != next.scene_page()) {
             self.seen_rooms.clear();
@@ -329,18 +365,8 @@ impl Feedback {
                 return Some(Cue::Restored);
             }
         }
-        if old.phase != next.phase {
-            let cue = match next.phase {
-                Phase::Failed | Phase::RestoreFailed => Some(Cue::Error),
-                Phase::ApprovalPending => Some(Cue::JoinRequest),
-                Phase::HostReady | Phase::WaitingStart if next.ready => Some(Cue::Ready),
-                Phase::NetworkConnected if next.connected => Some(Cue::Ready),
-                Phase::Starting => Some(Cue::Start),
-                _ => None,
-            };
-            if cue.is_some() {
-                return cue;
-            }
+        if let Some(cue) = self.room_cue(old, next) {
+            return Some(cue);
         }
         if old.page == Page::Leaving
             && matches!(next.page, Page::Choice | Page::Rooms | Page::Lobby)
@@ -387,7 +413,7 @@ mod tests {
 
     #[test]
     fn all_cues_are_finite_nonzero_and_unclipped() {
-        assert_eq!(bank::BANK.cues().len(), Cue::Restored as usize + 1);
+        assert_eq!(bank::BANK.cues().len(), Cue::PeerLost as usize + 1);
         for cue in bank::BANK.cues() {
             let mut mixer = AudioMixer::<4>::new(&bank::BANK, 48_000).unwrap();
             mixer

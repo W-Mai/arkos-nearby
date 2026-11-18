@@ -245,6 +245,7 @@ fn room_projection_changed(record: &Record, room: &Value, available: bool) -> bo
         .or_else(|| room.get("session_id").and_then(Value::as_str))
         .unwrap_or_default();
     record.available != available
+        || record.room["listing"] != room["listing"]
         || record.room["signal"] != room["signal"]
         || previous_token != next_token
         || string(&record.room, "ssid").starts_with("DIRECT-NW-")
@@ -375,16 +376,23 @@ impl Flow {
                 .iter()
                 .map(|id| {
                     let record = &self.rooms[id];
+                    let room = &record.room;
+                    let owner = string(&room["listing"], "owner");
+                    let game = string(&room["listing"], "game");
+                    let code = room_name(room);
+                    let detail = if !game.is_empty() {
+                        game
+                    } else if string(room, "ssid").starts_with("DIRECT-NW-") {
+                        "仅组网"
+                    } else if truth(room, "same_game_hint") {
+                        "当前游戏"
+                    } else {
+                        "游戏房间"
+                    };
                     json!({
                         "key": format!("{:x}", Sha256::digest(id.as_bytes())),
-                        "name": room_name(&record.room),
-                        "detail": if string(&record.room, "ssid").starts_with("DIRECT-NW-") {
-                            "仅组网 · 保持局域网连接"
-                        } else if truth(&record.room, "same_game_hint") {
-                            "当前游戏 · 加入后核对"
-                        } else {
-                            "游戏房间 · 加入后查找本地游戏"
-                        },
+                        "name": if owner.is_empty() { code.clone() } else { owner.to_string() },
+                        "detail": if owner.is_empty() { detail.to_owned() } else { format!("{code}  {detail}") },
                         "signal": record.room["signal"].as_i64().unwrap_or(0).clamp(0, 100),
                         "available": record.available,
                     })
@@ -652,7 +660,12 @@ impl Flow {
             Page::Host if self.phase == "approval_pending" => {
                 self.begin(Operation::Approve, json!({}))
             }
-            Page::Host if truth(&self.state, "ready") && self.state["context_matches"] != false => {
+            Page::Host
+                if !self.network_only
+                    && self.phase == "host_ready"
+                    && truth(&self.state, "ready")
+                    && self.state["context_matches"] != false =>
+            {
                 self.begin(Operation::Start, json!({}))
             }
             Page::Rooms | Page::Lobby => {
@@ -985,6 +998,17 @@ impl Flow {
         } else {
             &self.state["room"]
         };
+        let listing = selected_room
+            .as_ref()
+            .and_then(|key| self.rooms.get(key))
+            .filter(|_| self.scans())
+            .map(|record| &record.room["listing"])
+            .unwrap_or(&Value::Null);
+        let mut players: [String; 2] =
+            serde_json::from_value(self.state["player_names"].clone()).unwrap_or_default();
+        if self.page == Page::Joined && players[0].is_empty() {
+            players[0] = string(&room["listing"], "owner").into();
+        }
         let back = if self.page == Page::Lobby {
             if self.context.is_some() {
                 "单机游玩"
@@ -1018,6 +1042,27 @@ impl Flow {
         } else {
             "取消加入"
         };
-        json!({"lobby":self.lobby,"current_game":self.context.is_some(),"entries":if self.page == Page::Candidates { self.state["candidates"].as_array().cloned().unwrap_or_default().into_iter().skip(self.candidate.saturating_sub(3)).take(4).collect::<Vec<_>>() } else { vec![] },"network_only":self.network_only,"local_address":self.state["local_address"].as_str().unwrap_or(""),"peers":self.state["peers"].as_array().cloned().unwrap_or_default(),"connected":truth(&self.state,"connected"),"page":self.page.name(),"title":title,"core":core,"selected":selected,"room_selected":room_selected,"rooms":rows,"room_name":if room.is_null() { String::new() } else { room_name(room) },"ready":truth(&self.state,"ready") && self.state["context_matches"] != false && self.pending_back.is_none() && matches!(self.phase.as_str(),"host_ready"|"waiting_start"|"starting"),"busy":self.operation.is_some(),"refreshing":self.scans() && self.scanning.unwrap_or(monotonic()<self.refreshing_until),"status":label(&self.message),"phase":self.phase,"back_label":back})
+        let routine_stage = matches!(self.page, Page::Host | Page::Joined)
+            && matches!(
+                self.phase.as_str(),
+                "creating"
+                    | "waiting_peer"
+                    | "connecting"
+                    | "checking"
+                    | "peer_preparing"
+                    | "notifying"
+                    | "host_ready"
+                    | "waiting_start"
+                    | "starting"
+                    | "network_confirming"
+                    | "network_connected"
+            )
+            && !self.peer_left
+            && self.pending_back.is_none()
+            && !errors(&self.state)
+            && (self.operation.is_some()
+                || self.message == string(&self.state, "stage")
+                || self.phase == "host_ready");
+        json!({"routine_stage":routine_stage,"room_game":string(listing,"game"),"artwork":string(listing,"artwork"),"player_names":players,"lobby":self.lobby,"current_game":self.context.is_some(),"entries":if self.page == Page::Candidates { self.state["candidates"].as_array().cloned().unwrap_or_default().into_iter().skip(self.candidate.saturating_sub(3)).take(4).collect::<Vec<_>>() } else { vec![] },"network_only":self.network_only,"local_address":self.state["local_address"].as_str().unwrap_or(""),"peers":self.state["peers"].as_array().cloned().unwrap_or_default(),"connected":truth(&self.state,"connected"),"page":self.page.name(),"title":title,"core":core,"selected":selected,"room_selected":room_selected,"rooms":rows,"room_name":if room.is_null() { String::new() } else { room_name(room) },"ready":truth(&self.state,"ready") && self.state["context_matches"] != false && self.pending_back.is_none() && matches!(self.phase.as_str(),"host_ready"|"waiting_start"|"starting"),"busy":self.operation.is_some(),"refreshing":self.scans() && self.scanning.unwrap_or(monotonic()<self.refreshing_until),"status":label(&self.message),"phase":self.phase,"back_label":back})
     }
 }

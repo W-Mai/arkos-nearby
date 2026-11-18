@@ -5,7 +5,6 @@ use mirui::prelude::*;
 pub(super) const FULL: Fixed = Fixed::from_ratio(13, 16);
 const MINIATURE: Fixed = Fixed::from_ratio(36, 100);
 const SLIDE: TweenConfig = TweenConfig::new(540, &ease::IN_OUT_CUBIC);
-const PANEL: TweenConfig = TweenConfig::new(320, &ease::OUT_CUBIC);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Layer {
@@ -92,9 +91,11 @@ pub(super) struct Deck {
     #[observe]
     pub panel: Fixed,
     #[observe]
+    pub panel_visible: bool,
+    #[observe]
     pub height: Fixed,
     slide: Track,
-    modal: Track,
+    modal: crate::launcher::popup::Track,
     now: u64,
     pause_background: bool,
     slide_clock: super::modal::AnimationClock,
@@ -108,9 +109,10 @@ impl Default for Deck {
             enabled: false,
             expansion: Fixed::ZERO,
             panel: Fixed::ZERO,
+            panel_visible: false,
             height: Fixed::ZERO,
             slide: Track::new(SLIDE),
-            modal: Track::new(PANEL),
+            modal: crate::launcher::popup::Track::visibility(),
             now: 0,
             pause_background: false,
             slide_clock: super::modal::AnimationClock::default(),
@@ -143,7 +145,8 @@ impl Deck {
             self.slide
                 .set(view.launcher.tab == 1, self.slide_now, SLIDE);
         }
-        self.modal.set(view.return_to_launcher, self.now, PANEL);
+        self.modal.show(view.return_to_launcher);
+        self.panel_visible = self.modal.visible();
     }
     pub fn tick(&mut self, now: u64) {
         self.now = now;
@@ -151,7 +154,8 @@ impl Deck {
             self.slide_now = local;
             self.expansion = self.slide.value(local);
         }
-        self.panel = self.modal.value(now);
+        self.panel = self.modal.tick(now);
+        self.panel_visible = self.modal.visible();
     }
     pub fn pause_background(&mut self, paused: bool) {
         self.pause_background = paused;
@@ -201,6 +205,7 @@ mod tests {
         view.return_to_launcher = true;
         view.launcher.enabled = false;
         deck.present(&view);
+        deck.tick(200);
         deck.tick(800);
         assert_eq!(deck.expansion, Fixed::ZERO);
         assert_eq!(deck.panel, Fixed::ONE);

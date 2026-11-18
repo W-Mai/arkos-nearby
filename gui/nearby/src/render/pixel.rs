@@ -82,11 +82,33 @@ pub(super) struct SearchSprite {
 #[component]
 pub(super) enum Scenery {
     Logo,
-    Header,
     Map,
     Margins,
     Landscape,
     Ridge,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Character {
+    Host,
+    Guest,
+    HostSignal { lift: i32, reach: i32 },
+}
+
+impl Character {
+    fn host(frame: Frame) -> Self {
+        let (age, lift, reach) = if frame.phase == Phase::Starting {
+            (frame.phase_age, 7, 12)
+        } else {
+            (frame.host_ack_age, 14, 6)
+        };
+        if age == 0 || age >= timing::HOP_MS {
+            return Self::Host;
+        }
+        let lift = -motion::hop(age, lift as f32);
+        let reach = -motion::hop(age, reach as f32);
+        Self::HostSignal { lift, reach }
+    }
 }
 
 struct Painter<'a, F> {
@@ -203,43 +225,7 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
                 self.tent(w / 2 - 2 * scale, h - 5 * scale, scale);
                 self.fill(4, h - 5, w - 8, 2, ACCENT);
             }
-            Scenery::Header => {
-                self.mountain(w - w / 4, h, w / 3, (h - 4).min(48), self.alpha(HILL, 45));
-                self.mountain(w - w / 8, h, w / 4, (h - 4).min(64), self.alpha(SKY, 30));
-                let scale = (h / 24).clamp(1, 3).min((w / 24).max(1));
-                self.tree(w - 8 * scale, h, scale, self.alpha(HILL, 55));
-                self.tree(w * 2 / 3, h, 1, self.alpha(HILL, 55));
-            }
-            Scenery::Map | Scenery::Margins => {
-                if matches!(kind, Scenery::Margins) {
-                    let (edge, length, stride) = if w < 500 { (4, 4, 16) } else { (10, 8, 22) };
-                    for y in (h / 4..h - 36).step_by(stride) {
-                        self.fill(edge, y, length, 2, self.alpha(DIVIDER, 125));
-                        self.fill(
-                            w - edge - length,
-                            y + 8,
-                            length,
-                            2,
-                            self.alpha(DIVIDER, 125),
-                        );
-                    }
-                }
-                for y in (12..h - 4).step_by(38) {
-                    for x in (8..w - 8).step_by(94) {
-                        self.fill(x, y, 2, 2, self.alpha(DIVIDER, 70));
-                        self.fill(x + 4, y, 2, 2, self.alpha(DIVIDER, 70));
-                    }
-                }
-            }
-            Scenery::Ridge => {
-                let floor = h - 6;
-                self.mountain(w * 3 / 5, floor, w / 3, (floor - 4).min(42), PANEL);
-                self.mountain(w * 4 / 5, floor, w / 3, (floor - 4).min(30), HILL);
-                self.tent(w * 2 / 3, floor, 1);
-                self.tree(w - 16, floor, 1, ACCENT);
-                self.tree(w - 32, floor, 1, HILL);
-                self.fill(w / 2, floor, w - w / 2, 3, DIVIDER);
-            }
+            Scenery::Map | Scenery::Margins | Scenery::Ridge => {}
             Scenery::Landscape => {
                 let floor = h - 10;
                 self.fill(0, 0, w, floor, SKY);
@@ -286,7 +272,8 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
         let color = self.theme.resolve(token);
         Color::rgba(color.r, color.g, color.b, alpha)
     }
-    fn person(&mut self, x: i32, y: i32, guest: bool, step: u16, facing_left: bool) {
+    fn person(&mut self, x: i32, y: i32, character: Character, step: u16, facing_left: bool) {
+        let guest = character == Character::Guest;
         // Rectangles below are local pixel-art data; stage placement is layout-derived.
         let color = if guest { actor::GUEST } else { actor::HOST };
         let light = if guest {
@@ -296,31 +283,53 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
         };
         let boots = actor::BOOTS;
         let f = step / timing::WALK_FRAME_MS % 4;
-        self.fill(x - 13, y + 34, 28, 3, DIVIDER);
-        for (dx, dy, w, h) in [
-            (-8, 0, 16, 6),
-            (-12, 6, 24, 4),
-            (-8, 19, 16, 10),
-            (-12, 20 + i32::from(f % 2) * 2, 4, 8),
-            (8, 20 - i32::from(f % 2) * 2, 4, 8),
-        ] {
-            self.fill(x + dx, y + dy, w, h, color);
+        // A walking player crosses the stage edge one pixel column at a time.
+        let mut stripe = |x: i32, y: i32, width: i32, height: i32, color: ColorToken| {
+            let left = x.clamp(0, self.width);
+            let right = (x + width).clamp(0, self.width);
+            self.fill(left, y, right - left, height, color);
+        };
+        stripe(x - 13, y + 34, 28, 3, DIVIDER);
+        for (dx, dy, w, h) in [(-8, 0, 16, 6), (-12, 6, 24, 4), (-8, 19, 16, 10)] {
+            stripe(x + dx, y + dy, w, h, color);
         }
-        self.fill(x - 7, y, 14, 2, light);
-        self.fill(x - 8, y + 19, 3, 10, light);
-        self.fill(x - 8, y + 10, 16, 9, actor::SKIN);
-        self.fill(x + if facing_left { -6 } else { 3 }, y + 12, 3, 3, boots);
-        self.fill(x - 8 + if f == 1 { 3 } else { 0 }, y + 29, 6, 5, boots);
-        self.fill(x + 2 - if f == 3 { 3 } else { 0 }, y + 29, 6, 5, boots);
+        for (left, dx, dy) in [
+            (true, -12, 20 + i32::from(f % 2) * 2),
+            (false, 8, 20 - i32::from(f % 2) * 2),
+        ] {
+            if let Character::HostSignal { lift, reach } = character
+                && left == facing_left
+            {
+                for joint in 0..=3 {
+                    let offset = 8 + reach * joint / 3;
+                    let arm_x = if left { -offset - 4 } else { offset };
+                    stripe(
+                        x + arm_x,
+                        y + dy + (4 - lift) * joint / 3,
+                        4,
+                        4,
+                        if joint == 3 { actor::SKIN } else { color },
+                    );
+                }
+            } else {
+                stripe(x + dx, y + dy, 4, 8, color);
+            }
+        }
+        stripe(x - 7, y, 14, 2, light);
+        stripe(x - 8, y + 19, 3, 10, light);
+        stripe(x - 8, y + 10, 16, 9, actor::SKIN);
+        stripe(x + if facing_left { -6 } else { 3 }, y + 12, 3, 3, boots);
+        stripe(x - 8 + if f == 1 { 3 } else { 0 }, y + 29, 6, 5, boots);
+        stripe(x + 2 - if f == 3 { 3 } else { 0 }, y + 29, 6, 5, boots);
         if guest {
-            self.fill(
+            stripe(
                 x + if facing_left { 8 } else { -12 },
                 y + 4,
                 4,
                 8,
                 actor::PACK,
             );
-            self.fill(
+            stripe(
                 x + if facing_left { 12 } else { -16 },
                 y + 6,
                 4,
@@ -408,11 +417,104 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
             );
         }
     }
+    fn room_emblem(&mut self, mid: i32, y: i32, frame: Frame) {
+        use Phase::*;
+        static BEACON: Path = path!(M 1 4 H 3 V 10 H 1 Z M 4 5 H 6 V 9 H 4 Z M 7 6 H 9 V 8 H 7 Z M 7 9 H 9 V 14 H 7 Z M 10 5 H 12 V 9 H 10 Z M 13 4 H 15 V 10 H 13 Z);
+        static GATE: Path = path!(M 1 3 H 6 V 5 H 3 V 11 H 6 V 13 H 1 Z M 10 3 H 15 V 13 H 10 V 11 H 13 V 5 H 10 Z M 7 6 H 9 V 10 H 7 Z);
+        static SCAN: Path = path!(M 1 2 H 6 V 4 H 3 V 7 H 1 Z M 10 2 H 15 V 7 H 13 V 4 H 10 Z M 1 9 H 3 V 12 H 6 V 14 H 1 Z M 13 9 H 15 V 14 H 10 V 12 H 13 Z M 5 7 H 11 V 9 H 5 Z);
+        static LOCKED: Path = path!(M 1 8 L 4 5 L 7 8 L 12 3 L 15 6 L 7 14 Z);
+        static PLAY: Path = path!(M 3 2 L 14 8 L 3 14 Z);
+        static SPLIT: Path =
+            path!(M 4 2 H 7 V 6 H 5 V 8 H 2 V 5 H 4 Z M 9 8 H 13 V 10 H 11 V 14 H 8 V 10 H 9 Z);
+        let (glyph, color) = match frame.phase {
+            Creating | WaitingPeer | Connecting | NetworkReconnecting => (&BEACON, SHELL_TEXT),
+            ApprovalPending | ApprovalPendingClient => (&GATE, WARNING),
+            PeerPreparing | Checking | Notifying | NetworkConfirming => (&SCAN, SHELL_TEXT),
+            HostReady | WaitingStart | NetworkConnected => (&LOCKED, ON_ACCENT),
+            Starting => (&PLAY, ON_ACCENT),
+            Leaving | Closed | Failed | RestoreFailed => (&SPLIT, WARNING),
+            _ => return,
+        };
+        // The center seam is clear of both nameplates and both characters.
+        let lift = motion::hop(frame.phase_age, 6.0);
+        let y = y + lift;
+        let latched = matches!(
+            frame.phase,
+            HostReady | WaitingStart | NetworkConnected | Starting
+        );
+        self.fill(mid - 18, y + 3, 36, 32, DIVIDER);
+        self.fill(mid - 18, y, 36, 32, if latched { ACCENT } else { SHELL });
+        self.contour(glyph, mid - 16, y, 2, color);
+    }
+
+    fn room_link(&mut self, ends: [i32; 2], y: i32, hops: [i32; 2], frame: Frame) {
+        use Phase::*;
+        let [left, right] = ends;
+        let mid = (left + right) / 2;
+        let tick = i32::from(frame.wave.unwrap_or(frame.phase_age));
+        let cycle = i32::from(timing::WAVE_MS);
+        let arrival = i32::from(frame.phase_age.min(320));
+        let tip = |x| mid + (x - mid) * arrival / 320;
+        let scan = |x| x + (mid - x) * tick / cycle;
+        match frame.phase {
+            Creating | WaitingPeer | Connecting | NetworkReconnecting => {
+                for (end, side) in [(left, -1), (right, 1)] {
+                    let x = scan(end);
+                    self.fill(x - 3, y - 2, 6, 4, ACCENT);
+                    self.fill(x + side * 8, y - 1, 4, 2, DIVIDER);
+                }
+            }
+            ApprovalPending | ApprovalPendingClient => {
+                for (end, side) in [(left, -1), (right, 1)] {
+                    let x = mid + side * 9 + (end - tip(end)) / 2;
+                    self.fill(x - 2, y - 9, 4, 18, WARNING);
+                    self.fill(x.min(x + side * 6), y - 9, 8, 3, WARNING);
+                    self.fill(x.min(x + side * 6), y + 6, 8, 3, WARNING);
+                }
+            }
+            Checking | PeerPreparing | Notifying | NetworkConfirming => {
+                self.fill(left, y, right - left, 2, DIVIDER);
+                for x in ends.map(scan) {
+                    self.fill(x - 2, y - 4, 4, 10, ACCENT);
+                }
+                self.fill(mid - 3, y - 5, 6, 12, WARNING);
+            }
+            HostReady | WaitingStart | NetworkConnected | Starting => {
+                let [a, b] = ends.map(tip);
+                self.fill(a, y, b - a + 1, 3, ACCENT);
+                // Each tip rises with its player's hand as the ready animation lands.
+                for (x, hop) in [(a, hops[0]), (b, hops[1])] {
+                    self.fill(x - 1, y + hop, 3, 3 - hop, ACCENT);
+                }
+                if frame.phase == Starting {
+                    for i in 0..3 {
+                        let x = mid - 15 + (i * 12 + tick * 36 / cycle) % 36;
+                        self.fill(x, y - 6, 3, 4, WARNING);
+                        self.fill(x + 3, y - 3, 3, 4, WARNING);
+                    }
+                } else {
+                    self.fill(mid - 5, y - 3, 10, 8, SHELL);
+                    self.fill(mid - 2, y - 1, 4, 4, WARNING);
+                }
+            }
+            Leaving | Closed | Failed | RestoreFailed => {
+                for (end, side) in [(left, -1), (right, 1)] {
+                    let x = mid + side * 3 + (tip(end) - mid) / 2;
+                    self.fill(x - 5, y - 2, 10, 3, CLAY);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn session(&mut self, w: i32, h: i32, frame: Frame) {
         let floor = h - 12;
-        let position = |value: Fixed| stage_position(w, value);
-        let host = position(frame.host);
-        let guest = position(frame.guest);
+        let position = |value: Fixed| (Fixed::from_int(w) * value).to_int();
+        // Leave space for the host's outstretched hand beyond the left edge.
+        let host = -24 + (frame.host_presence * (position(frame.host) + 24)).to_int();
+        // The pack extends sixteen art pixels beyond the player center.
+        let outside = w + 16;
+        let guest = outside + (frame.guest_presence * (position(frame.guest) - outside)).to_int();
         let ready = if frame.network_only {
             frame.connected
         } else {
@@ -428,105 +530,99 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
         for x in (24..w - 20).step_by(22) {
             self.fill(x, floor + 4, 8, 2, DIVIDER);
         }
-        if w > 250 && h >= 84 {
-            self.flag(
-                w / 7,
-                floor,
-                if frame.phase == Phase::Creating {
-                    frame.phase_age
-                } else {
-                    timing::SETTLED_MS
-                },
-            );
-        }
-        let shake = if matches!(frame.phase, Phase::Failed | Phase::RestoreFailed) {
-            motion::recoil(frame.phase_age)
+        let host_seat = position(anchors::HOST_HOME);
+        let seat = position(anchors::GUEST_HOME);
+        let hops = if celebrate {
+            [
+                motion::hop(
+                    frame.phase_age.saturating_sub(timing::HOST_HOP_DELAY_MS),
+                    7.0,
+                ),
+                motion::hop(frame.phase_age, 11.0),
+            ]
         } else {
-            0
+            [0, 0]
         };
-        if h >= 116 {
-            self.beacon(w / 2 + shake, floor - 50, frame.wave);
+        // Unoccupied seats anchor discovery. A live link follows the inward sleeves.
+        let (source, destination) = if frame.visitor && frame.host_presence > Fixed::ZERO {
+            (host, guest)
+        } else {
+            (host_seat, seat)
+        };
+        let left = (source + 10).clamp(18, w - 18);
+        let right = (destination - 10).clamp(left, w - 18);
+        self.room_link([left, right], floor - 12, hops, frame);
+        if self.unit == 1 && w >= 200 && h >= 80 {
+            self.room_emblem((left + right) / 2, (floor - 54).max(8), frame);
+        }
+        let doorway = position(anchors::GUEST_GATE);
+        let vacancy =
+            Fixed::from_ratio((guest - seat).max(0), (doorway - seat).max(1)).min(Fixed::ONE);
+        if vacancy > Fixed::ZERO
+            && !matches!(
+                frame.phase,
+                Phase::Starting
+                    | Phase::Leaving
+                    | Phase::Closed
+                    | Phase::Failed
+                    | Phase::RestoreFailed
+            )
+        {
+            // Keep the landing mark visible until the player reaches it.
+            let ink = self.alpha(SHELL_EDGE, (vacancy * 255).to_int() as u8);
+            let y = floor - 22;
+            let half_cycle = i32::from(timing::WAVE_MS) / 2;
+            let beat = (i32::from(frame.wave.unwrap_or(0)) - half_cycle).abs();
+            let spread = 11 + 6 * beat / half_cycle;
+            for side in [-1, 1] {
+                self.fill(seat + side * spread - 1, y - 7, 3, 14, ink);
+            }
+            self.fill(seat - 5, y - 1, 11, 3, ink);
+            self.fill(seat - 1, y - 5, 3, 11, ink);
         }
         if !frame.external_actor {
             self.person(
                 host,
-                floor - 34
-                    + if celebrate {
-                        motion::hop(
-                            frame.phase_age.saturating_sub(timing::HOST_HOP_DELAY_MS),
-                            7.0,
-                        )
-                    } else {
-                        0
-                    },
-                false,
+                floor - 34 + hops[0],
+                Character::host(frame),
                 if frame.host_walking {
                     frame.phase_age
                 } else {
                     0
                 },
-                matches!(frame.phase, Phase::Leaving | Phase::Closed),
+                frame.host_facing_left,
             );
         }
         if frame.visitor {
             self.person(
                 guest,
-                floor - 34
-                    + if celebrate {
-                        motion::hop(frame.phase_age, 11.0)
-                    } else {
-                        0
-                    },
-                true,
+                floor - 34 + hops[1],
+                Character::Guest,
                 if frame.guest_walking {
                     frame.phase_age
                 } else {
                     0
                 },
-                frame.phase != Phase::Starting,
+                frame.guest_facing_left,
             );
         }
         self.fill(
-            position(anchors::HOST_HOME) - 20,
+            host_seat - 20,
             floor + 7,
             40,
             4,
-            ACCENT_DIM,
+            if ready { ACCENT } else { ACCENT_DIM },
         );
         self.fill(
-            position(anchors::GUEST_HOME) - 20,
+            seat - 20,
             floor + 7,
             40,
             4,
             if ready { ACCENT } else { DIVIDER },
         );
-        if w >= 240
-            && matches!(
-                frame.phase,
-                Phase::ApprovalPending | Phase::ApprovalPendingClient
-            )
-        {
-            let gate = position(anchors::GATE) - 16;
-            self.fill(gate, floor - 42, 4, 40, ACCENT);
-            self.fill(gate - 10, floor - 42, 24, 4, ACCENT);
-        }
-        if w >= 240 && matches!(frame.phase, Phase::Checking | Phase::Notifying) {
-            self.fill(w / 2 - 12, floor - 40, 24, 2, ACCENT);
-            self.fill(w / 2 - 12, floor - 18, 24, 2, ACCENT);
-            self.fill(w / 2 - 12, floor - 40, 2, 24, ACCENT);
-            self.fill(w / 2 + 10, floor - 40, 2, 24, ACCENT);
-            let bars = if frame.phase == Phase::Notifying {
-                3
-            } else {
-                1
-            };
-            for i in 0..bars {
-                self.fill(w / 2 - 6 + i * 5, floor - 32, 3, 8, ACCENT);
-            }
-        }
         if celebrate {
-            self.stars(guest, floor - 30, frame.phase_age);
-            self.dust(guest, floor, frame.phase_age);
+            self.stars(seat, floor - 30, frame.phase_age);
+            self.dust(seat, floor, frame.phase_age);
         }
     }
 }
@@ -635,7 +731,11 @@ pub(super) fn actor_sprite(
     painter.person(
         rect.w.to_int() / 2,
         rect.h.to_int() - 38 + hop,
-        false,
+        if session {
+            Character::host(frame)
+        } else {
+            Character::Host
+        },
         if session && frame.host_walking {
             frame.phase_age
         } else if frame.walking {
@@ -644,7 +744,7 @@ pub(super) fn actor_sprite(
             0
         },
         if session {
-            matches!(frame.phase, Phase::Leaving | Phase::Closed)
+            frame.host_facing_left
         } else {
             frame.selected == Some(0)
         },
@@ -843,7 +943,7 @@ fn draw(
                         } else {
                             0
                         },
-                    false,
+                    Character::Host,
                     if frame.walking { frame.selection } else { 0 },
                     frame.selected == Some(0),
                 );
@@ -1005,10 +1105,15 @@ mod tests {
                     ready: true,
                     connected: true,
                     visitor: true,
+                    guest_presence: Fixed::from_ratio(i32::from(age % 256), 255),
+                    guest_facing_left: age % 64 == 0,
                     network_only: age % 64 == 0,
                     walking: true,
                     host_walking: true,
                     guest_walking: true,
+                    host_presence: Fixed::from_ratio(i32::from(age % 256), 255),
+                    host_facing_left: age % 64 != 0,
+                    host_ack_age: age,
                     walker: Fixed::HALF,
                     ..Frame::default()
                 };
@@ -1075,7 +1180,6 @@ mod tests {
             }
             for kind in [
                 Scenery::Logo,
-                Scenery::Header,
                 Scenery::Map,
                 Scenery::Margins,
                 Scenery::Landscape,
@@ -1114,7 +1218,17 @@ mod tests {
                     height: 60,
                     unit: 1,
                 }
-                .person(60, 10, guest, 0, false);
+                .person(
+                    60,
+                    10,
+                    if guest {
+                        Character::Guest
+                    } else {
+                        Character::Host
+                    },
+                    0,
+                    false,
+                );
                 colors.extend(sprite.into_iter().skip(1));
             }
             if let Some(reference) = &reference {
@@ -1194,6 +1308,8 @@ mod tests {
                                 wave: Some(age),
                                 ready: true,
                                 visitor: true,
+                                guest_presence: Fixed::from_ratio(i32::from(age % 256), 255),
+                                guest_facing_left: selected == 0,
                                 host: Fixed::from_ratio(i32::from(100 + age.min(800) / 2), 1000),
                                 guest: Fixed::from_ratio(i32::from(980 - age.min(800)), 1000),
                                 walker: if selected == 0 {

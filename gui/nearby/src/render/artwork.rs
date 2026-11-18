@@ -135,6 +135,7 @@ fn source_key(path: String) -> ArtworkKey {
 #[derive(Clone)]
 enum Target {
     Display(super::state::DisplayHandle),
+    Room(super::state::DisplayHandle),
     Row(super::rows::RowHandle),
 }
 
@@ -151,6 +152,11 @@ impl ArtworkTarget {
                 if display.callback_ready() && display.artwork() == self.path =>
             {
                 display.cover_bounds()
+            }
+            Target::Room(display)
+                if display.callback_ready() && display.room_artwork() == self.path =>
+            {
+                display.room_cover_bounds()
             }
             Target::Row(row) if row.callback_ready() && row.artwork() == self.path => {
                 row.cover_bounds()
@@ -181,6 +187,7 @@ struct Lease {
 struct DisplayArtwork {
     display: super::state::DisplayHandle,
     path: String,
+    room_path: String,
     rows: Vec<(super::rows::RowHandle, String)>,
 }
 
@@ -295,11 +302,15 @@ impl ArtworkPlan {
                 target: Target::Display(display.display.clone()),
                 path: display.path.clone(),
             };
+            let room = ArtworkTarget {
+                target: Target::Room(display.display.clone()),
+                path: display.room_path.clone(),
+            };
             let rows = display.rows.iter().map(|(row, path)| ArtworkTarget {
                 target: Target::Row(row.clone()),
                 path: path.clone(),
             });
-            for target in std::iter::once(visible).chain(rows) {
+            for target in [visible, room].into_iter().chain(rows) {
                 target.bind(self.source(&target.path), textures);
             }
         }
@@ -374,7 +385,12 @@ fn update(
                         (row, path)
                     })
                     .collect();
+                let room_path = display.room_artwork();
+                if !room_path.is_empty() && !visible.contains(&room_path) {
+                    visible.insert(0, room_path.clone());
+                }
                 DisplayArtwork {
+                    room_path,
                     display: (*display).clone(),
                     path: display.artwork(),
                     rows,
@@ -460,6 +476,24 @@ pub(super) fn preview(state: model!(DisplayState), metrics: Metrics) -> Entity {
                 ${ state.selected_platform() }
             )
         }
+    }
+}
+
+#[compose]
+pub(super) fn room_preview(state: model!(DisplayState)) -> Entity {
+    let bounds = state.room_cover_bounds();
+    let resize = bounds.clone();
+    ui! {
+        View (
+            grow: 1.0,
+            min_height: 0,
+            min_width: 0,
+            container: true,
+            clip_children: true,
+            bg_color: PANEL
+        ) {
+            bitmap (bounds.clone())
+        } on SizeChanged { resize.resize(event.new); }
     }
 }
 

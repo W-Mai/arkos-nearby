@@ -1,7 +1,7 @@
 use super::rows::{self, Row};
 use super::{copy::*, selection, style::*};
-use crate::model::{Page, Phase, View};
-use TextField::{Headline, HostButton, Next, Peer};
+use crate::model::{Page, View};
+use TextField::{Headline, HostButton, Next};
 use mirui::app::RendererFactory;
 use mirui::core::model::ModelList;
 use mirui::prelude::*;
@@ -14,14 +14,6 @@ pub(super) enum TextField {
     Headline,
     Next,
     HostButton,
-    Peer,
-    RoomName,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) struct StepColors {
-    pub(super) background: ColorToken,
-    pub(super) foreground: ColorToken,
 }
 
 #[derive(Default)]
@@ -66,6 +58,8 @@ impl LibraryPlaceholder {
     }
 }
 
+pub(super) const ROOM_WINDOW: usize = 4;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DisplayRole {
     Primary,
@@ -108,7 +102,7 @@ impl Changes {
     const HEADLINE: Self = Self(1 << 6);
     const NEXT: Self = Self(1 << 7);
     const HOST_BUTTON: Self = Self(1 << 8);
-    const PEER: Self = Self(1 << 9);
+    const PLAYERS: Self = Self(1 << 9);
     const CONFIRM: Self = Self(1 << 10);
     const DEVICES: Self = Self(1 << 11);
     const QUERY: Self = Self(1 << 12);
@@ -137,7 +131,7 @@ impl Changes {
         headline = Changes::HEADLINE,
         next = Changes::NEXT,
         host_button = Changes::HOST_BUTTON,
-        peer = Changes::PEER,
+        players = Changes::PLAYERS,
         confirm = Changes::CONFIRM,
         devices = Changes::DEVICES,
         query = Changes::QUERY,
@@ -148,17 +142,22 @@ impl Changes {
 pub(super) struct DisplayState {
     role: DisplayRole,
     pub(super) cover_bounds: model!(owned super::artwork::CoverBounds),
+    pub(super) room_cover_bounds: model!(owned super::artwork::CoverBounds),
     pub(super) shelf: model!(owned super::shelf::Shelf),
     pub(super) list_layout: model!(owned super::list_layout::ListLayout),
     #[observe]
     pub(super) deck_height: Fixed,
     #[observe]
     pub(super) network_connected: bool,
+    scanning_rooms: bool,
+    #[observe]
+    pub(super) has_online_room: bool,
     #[observe]
     pub(super) embedded: bool,
     view: View,
     library: LibraryPresentation,
     platform_preview: PlatformPresentation,
+    room_artwork: String,
     artwork_revision: u64,
     pub(crate) launcher: model!(owned crate::launcher::Launcher),
     pub(crate) settings: model!(owned crate::settings::Settings),
@@ -177,12 +176,12 @@ pub(super) struct DisplayState {
     headline: String,
     next: String,
     host_button: String,
-    peer: String,
+    players: [String; 2],
     confirm: String,
     #[observe]
     pub(super) confirm_visible: bool,
     #[observe]
-    pub(super) steps: [StepColors; 3],
+    pub(super) room_art: bool,
     #[observe]
     pub(super) stamp: Color,
     #[observe]
@@ -205,8 +204,14 @@ impl DisplayState {
         let bind_rows = renders_rows(self.role, view);
         let binding_activated = bind_rows && !renders_rows(self.role, &self.view);
         self.network_connected = view.connected || view.launcher.retained;
+        self.scanning_rooms = view.refreshing;
+        self.has_online_room = view.rooms.iter().any(|row| row.available);
         self.embedded = view.return_to_launcher;
         self.launcher.present(view);
+        if bind_rows {
+            self.shelf
+                .change_window(&self.view, view, &mut self.entries);
+        }
         self.shelf.present(view);
         self.list_layout.present(view);
         let mut changes = Changes::NONE;
@@ -232,63 +237,48 @@ impl DisplayState {
             button_text(view).into(),
             Changes::HOST_BUTTON,
         );
-        changes.update(&mut self.peer, peer_text(view).into(), Changes::PEER);
+        changes.update(&mut self.players, player_labels(view), Changes::PLAYERS);
         changes.update(
             &mut self.confirm,
             confirm_text(view).into(),
             Changes::CONFIRM,
         );
         self.confirm_visible = !confirm_text(view).is_empty();
-        let active = match phase(view) {
-            Phase::Connecting => Some(0),
-            Phase::ResolvingGame | Phase::SelectingGame | Phase::Checking | Phase::Notifying => {
-                Some(1)
-            }
-            Phase::WaitingStart | Phase::Starting => Some(2),
-            _ => None,
+        let room_artwork = match view.page {
+            Page::Rooms | Page::Lobby | Page::Mode => view.artwork.as_str(),
+            _ => "",
         };
-        self.steps = std::array::from_fn(|index| {
-            if active == Some(index) {
-                StepColors {
-                    background: ACCENT,
-                    foreground: ON_ACCENT,
-                }
-            } else if active.is_some_and(|step| index < step) {
-                StepColors {
-                    background: ACCENT_DIM,
-                    foreground: ACCENT,
-                }
-            } else {
-                StepColors {
-                    background: PANEL,
-                    foreground: DISABLED,
-                }
-            }
-        });
+        self.room_art = !room_artwork.is_empty();
+        if self.room_artwork != room_artwork {
+            room_artwork.clone_into(&mut self.room_artwork);
+            self.artwork_revision = self.artwork_revision.wrapping_add(1);
+        }
         let first = view
             .room_selected
             .unwrap_or(view.selected)
-            .saturating_sub(3)
-            .min(view.rooms.len().saturating_sub(4));
+            .saturating_sub(ROOM_WINDOW - 1)
+            .min(view.rooms.len().saturating_sub(ROOM_WINDOW));
         let previous_first = self
             .view
             .room_selected
             .unwrap_or(self.view.selected)
-            .saturating_sub(3)
-            .min(self.view.rooms.len().saturating_sub(4));
+            .saturating_sub(ROOM_WINDOW - 1)
+            .min(self.view.rooms.len().saturating_sub(ROOM_WINDOW));
         let rooms_changed = previous_first != first
-            || self.view.rooms.iter().skip(previous_first).take(4).ne(view
+            || self
+                .view
                 .rooms
                 .iter()
-                .skip(first)
-                .take(4));
+                .skip(previous_first)
+                .take(ROOM_WINDOW)
+                .ne(view.rooms.iter().skip(first).take(ROOM_WINDOW));
         if bind_rows && (rooms_changed || binding_activated) {
             let rows: Vec<_> = view
                 .rooms
                 .iter()
                 .enumerate()
                 .skip(first)
-                .take(4)
+                .take(ROOM_WINDOW)
                 .map(|(i, row)| Row::room(i, row))
                 .collect();
             self.row_revision = self.row_revision.wrapping_add(1);
@@ -449,8 +439,8 @@ impl DisplayState {
     fn host_button_value(&self) -> String {
         self.host_button.clone()
     }
-    fn peer_value(&self) -> String {
-        self.peer.clone()
+    fn player_value(&self, seat: usize) -> String {
+        self.players[seat].clone()
     }
     fn confirm_value(&self) -> String {
         self.confirm.clone()
@@ -504,6 +494,11 @@ impl DisplayState {
     }
 
     #[observe]
+    pub(super) fn room_cursor(&self) -> usize {
+        self.view.room_selected.unwrap_or(self.view.selected)
+    }
+
+    #[observe]
     pub(super) fn selected(&self) -> Option<usize> {
         match self.view.page {
             Page::Games if self.view.library.keyboard => {
@@ -544,6 +539,15 @@ impl DisplayState {
 
     pub(super) fn artwork(&self) -> String {
         self.library.artwork.clone()
+    }
+
+    #[observe]
+    pub(super) fn room_game(&self) -> String {
+        self.view.room_game.clone()
+    }
+
+    pub(super) fn room_artwork(&self) -> String {
+        self.room_artwork.clone()
     }
 
     pub(super) fn artwork_revision(&self) -> u64 {
@@ -638,8 +642,13 @@ impl DisplayState {
     }
 
     #[observe]
-    pub(super) fn ready(&self) -> bool {
-        self.view.ready
+    pub(super) fn playable_selection(&self) -> bool {
+        self.view.launcher.enabled
+            && !self.view.launcher.key.is_empty()
+            && !self.view.launcher.navigation
+            && self.view.launcher.overlay.is_empty()
+            && !self.view.library.keyboard
+            && !self.view.busy
     }
 
     #[observe]
@@ -706,7 +715,11 @@ impl DisplayState {
 
     #[observe]
     pub(super) fn search_motion(&self) -> super::motion::Frame {
-        self.motion.search()
+        if self.scanning_rooms {
+            self.motion.search()
+        } else {
+            super::motion::Frame::default()
+        }
     }
 
     pub(super) fn press(&mut self, now: u64) -> Changes {
@@ -762,6 +775,26 @@ pub(super) struct PageKey {
 }
 
 impl DisplayStateHandle {
+    pub(super) fn reading_title(&self, platforms: bool) -> String {
+        if platforms {
+            return self.platform_preview_title();
+        }
+        let selected = self.library_selection();
+        let entries = self.entries();
+        entries
+            .get(selected)
+            .filter(|row| row.index() == selected)
+            .or_else(|| {
+                entries
+                    .entries()
+                    .into_iter()
+                    .find(|(_, row)| row.index() == selected)
+                    .map(|(_, row)| row)
+            })
+            .map(|row| row.label(true))
+            .unwrap_or_default()
+    }
+
     pub(super) fn platform_previews(&self) -> Vec<(usize, super::consoles::Platform)> {
         self.platform_previews_revision();
         self.platform_previews_value()
@@ -812,9 +845,9 @@ impl DisplayStateHandle {
         self.host_button_revision();
         self.host_button_value()
     }
-    pub(super) fn peer(&self) -> String {
-        self.peer_revision();
-        self.peer_value()
+    pub(super) fn player(&self, seat: usize) -> String {
+        self.players_revision();
+        self.player_value(seat)
     }
     pub(super) fn confirm(&self) -> String {
         self.confirm_revision();
@@ -830,8 +863,6 @@ impl DisplayStateHandle {
             Headline => self.headline(),
             Next => self.next(),
             HostButton => self.host_button(),
-            Peer => self.peer(),
-            TextField::RoomName => self.room_name(),
         }
     }
 }
@@ -886,10 +917,14 @@ fn register<B: Surface, F: RendererFactory<B>>(
     app.add_model(DisplayState {
         role,
         cover_bounds: super::artwork::CoverBounds::default().into(),
+        room_cover_bounds: super::artwork::CoverBounds::default().into(),
+        room_artwork: String::new(),
         shelf: super::shelf::Shelf::new(role == DisplayRole::Shelf).into(),
         list_layout: super::list_layout::ListLayout::new(role == DisplayRole::Catalog).into(),
         deck_height: Fixed::ZERO,
         network_connected: false,
+        scanning_rooms: false,
+        has_online_room: false,
         embedded: false,
         view: View::default(),
         library: LibraryPresentation::default(),
@@ -899,7 +934,7 @@ fn register<B: Surface, F: RendererFactory<B>>(
         launcher: crate::launcher::Launcher::default().into(),
         settings: crate::settings::Settings::default().into(),
         direction: PageDirection::Forward,
-        rooms: ModelList::bounded(4).into(),
+        rooms: ModelList::bounded(ROOM_WINDOW).into(),
         entries: ModelList::bounded(super::shelf::WINDOW_BUDGET).into(),
         row_revision: 0,
         devices: Vec::new(),
@@ -912,13 +947,10 @@ fn register<B: Surface, F: RendererFactory<B>>(
         headline: String::new(),
         next: String::new(),
         host_button: String::new(),
-        peer: String::new(),
+        players: Default::default(),
         confirm: String::new(),
         confirm_visible: false,
-        steps: [StepColors {
-            background: PANEL,
-            foreground: DISABLED,
-        }; 3],
+        room_art: false,
         stamp: app.theme().resolve(ACCENT_DIM),
         activity: [app.theme().resolve(BACKGROUND); 3],
         timeline: super::motion::Timeline::default(),
@@ -979,6 +1011,6 @@ fn display_activity(deck: &super::deck::DeckHandle, background_paused: bool) -> 
     [
         !background_paused,
         !background_paused && (deck.expansion() > Fixed::ZERO || deck.layer() == Layer::Catalog),
-        deck.panel() > Fixed::ZERO || deck.layer() == Layer::Room,
+        deck.panel_visible() || deck.layer() == Layer::Room,
     ]
 }

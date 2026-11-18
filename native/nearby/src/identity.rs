@@ -187,6 +187,19 @@ pub fn friends() -> Result<BTreeMap<String, Friend>> {
     }
     Ok(saved)
 }
+pub(crate) fn local_name() -> Option<String> {
+    let path = Path::new(arkos::PATHS.personal).join(arkos::application::IDENTITY.local());
+    Some(read::<Local>(&path).ok()?.public.name)
+}
+
+pub(crate) fn remembered_name(mac: &str) -> Option<String> {
+    friends()
+        .ok()?
+        .into_values()
+        .find(|friend| friend.last_mac == mac)
+        .map(|friend| friend.identity.name)
+}
+
 pub fn known(peer: &PublicIdentity) -> Result<bool> {
     peer.validate()?;
     Ok(friends()?

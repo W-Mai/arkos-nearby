@@ -17,7 +17,7 @@ pub(crate) mod actor {
     pub const BOOTS: ColorToken = ColorToken::Custom("actor-boots");
     pub const PACK: ColorToken = ColorToken::Custom("actor-pack");
 
-    // Player identity colors stay consistent when the campsite palette changes.
+    // Player identity colors stay consistent across palettes.
     pub const COLORS: [(ColorToken, u32); 7] = [
         (HOST, 0xdb603d),
         (HOST_LIGHT, 0xffad68),
@@ -40,9 +40,9 @@ pub enum Palette {
 impl Palette {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Forest => "森林",
-            Self::Sunset => "落日",
-            Self::Night => "夜色",
+            Self::Forest => "浅色",
+            Self::Sunset => "暖色",
+            Self::Night => "深色",
         }
     }
     pub const ALL: [Self; 3] = [Self::Forest, Self::Sunset, Self::Night];
@@ -96,16 +96,16 @@ impl Palette {
         use ColorToken::*;
         let values = match self {
             Self::Forest => [
-                0xf2eddb, 0x293a31, 0x42664c, 0xe6e7d3, 0xbdc6a9, 0x63705b, 0xc68c3d, 0xad573b,
-                0xd6dfc7, 0xaabda0, 0x243f33, 0xf2eddb,
+                0xeeeae1, 0x202124, 0xe85d38, 0xe2ddd1, 0xbbb6aa, 0x68665e, 0xe85d38, 0xad573b,
+                0xd8d1bf, 0xaca594, 0x25272a, 0x171819,
             ],
             Self::Sunset => [
-                0xf5e9d4, 0x482f29, 0xa74e37, 0xecddc4, 0xcebaa0, 0x82614f, 0xc18a32, 0x70835c,
-                0xe8cdb0, 0xc49e81, 0x623b30, 0xf5e9d4,
+                0xefe3c8, 0x302c27, 0xab442c, 0xddd0af, 0xb9a88b, 0x75644e, 0xbb5034, 0x995b37,
+                0xdcc6a0, 0xba9e7b, 0x38322b, 0xfff4dc,
             ],
             Self::Night => [
-                0x283933, 0xf2e8c9, 0xd2aa65, 0x344b40, 0x58705b, 0xb5c6a4, 0xdcaa56, 0xde8760,
-                0x3c5547, 0x577058, 0x1c2e26, 0x1c2e26,
+                0x232528, 0xf1ecdf, 0xff8c63, 0x35373a, 0x595b5d, 0xb5b6ae, 0xff8c63, 0xde8760,
+                0x414145, 0x646268, 0x151719, 0x202226,
             ],
         };
         let tokens = [
@@ -129,8 +129,22 @@ impl Palette {
                 Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
             );
         }
-        theme.set(Custom("header-text"), Color::rgb(243, 236, 216));
-        theme.set(Custom("header-detail"), Color::rgb(199, 208, 181));
+        theme.set(Custom("header-text"), theme.resolve(OnSurface));
+        theme.set(Custom("header-detail"), theme.resolve(OnSurfaceVariant));
+        let material = match self {
+            Self::Forest => [0x303236, 0x121315, 0x414247, 0xf8f2e5],
+            Self::Sunset => [0x4a3f32, 0x282016, 0x645441, 0xfff4dc],
+            Self::Night => [0x45474b, 0x111315, 0x626469, 0xf1ecdf],
+        };
+        for (name, rgb) in ["shell", "shell-edge", "shell-face", "shell-text"]
+            .into_iter()
+            .zip(material)
+        {
+            theme.set(
+                Custom(name),
+                Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
+            );
+        }
         theme
     }
 }

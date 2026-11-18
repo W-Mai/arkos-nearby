@@ -3,7 +3,7 @@ use super::{
     Section,
     branding::{logo as brand_logo, wordmark as brand_wordmark},
     cache::GpuLayerCache,
-    pixel::{Scenery::Header, backdrop},
+    device_status::indicators,
     state::DisplayState,
     style::*,
     widgets::{control_key, control_label, paragraph},
@@ -20,20 +20,10 @@ pub(super) fn header(view: PageKey, state: model!(DisplayState), metrics: Metric
             height: metrics.header_height(),
             shrink: 0.0,
             padding: metrics.header_padding(),
-            bg_color: ${ if state.embedded() { PANEL } else { DEEP } }
+            bg_color: ${ if state.embedded() { SHELL } else { BACKGROUND } }
         ) [
             Section::Header,
         ] {
-            View (
-                position: Position::Absolute,
-                left: 0,
-                top: 0,
-                width: Dimension::percent(100),
-                height: Dimension::percent(100),
-                visible: ${ !state.embedded() }
-            ) {
-                backdrop (Header)
-            }
             if ${ state.embedded() } {
                 embedded_header (view, state, metrics)
             } else {
@@ -70,6 +60,12 @@ fn product_header(view: PageKey, state: model!(DisplayState), metrics: Metrics) 
                 )
             }
             header_badge (view, state, metrics, HEADER_DETAIL)
+            if ${
+                state.launcher().enabled() || matches!(view.page, Page::Lobby | Page::Mode)
+                    || (view.page == Page::Choice && !view.network_only)
+            } {
+                indicators (HEADER_DETAIL)
+            }
         }
     }
 }
@@ -109,7 +105,7 @@ fn embedded_header(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                 }
             )
             header_context (state, metrics, true)
-            header_badge (view, state, metrics, SECONDARY)
+            header_badge (view, state, metrics, SHELL_TEXT)
         }
     }
 }
@@ -125,7 +121,7 @@ fn header_context(state: model!(DisplayState), metrics: Metrics, embedded: bool)
             height: Dimension::Content,
             font: font(size),
             font_size: size,
-            text_color: if embedded { FOREGROUND } else { HEADER_DETAIL },
+            text_color: if embedded { SHELL_TEXT } else { HEADER_DETAIL },
             paragraph: paragraph(if embedded { Start } else { End }, 1),
             clip_children: true
         ) [
@@ -180,17 +176,7 @@ pub(super) fn footer(view: PageKey, state: model!(DisplayState), metrics: Metric
             Section::Footer,
             GpuLayerCache,
         ] {
-            View (height: 1, shrink: 0.0, bg_color: DIVIDER) {
-                View (
-                    height: Dimension::percent(100),
-                    width: ${
-                        Dimension::Percent(
-                            Fixed::from_int(i32::from(state.launcher().progress())) / Fixed::from_int(10),
-                        )
-                    },
-                    bg_color: ACCENT
-                )
-            }
+            View (height: 1, shrink: 0.0, bg_color: DIVIDER)
             footer_controls (view, state, metrics)
         }
     }
@@ -207,7 +193,10 @@ fn footer_controls(view: PageKey, state: model!(DisplayState), metrics: Metrics)
             column_gap: metrics.control_gap(),
             align: AlignItems::Center
         ) {
-            if ${ state.confirm_visible() } {
+            if ${
+                state.confirm_visible()
+                    && !(view.page == Page::Host && !view.network_only && state.enabled())
+            } {
                 control_key ("A", metrics, true)
                 control_label (${ confirm.confirm() }, metrics)
             }
@@ -233,7 +222,7 @@ fn footer_controls(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                 control_label ("主题", metrics)
             }
             Text (
-                text: ${ state.hint() },
+                text: ${ if state.launcher().enabled() && state.busy() { String::new() } else { state.hint() } },
                 grow: 1.0,
                 min_width: 0,
                 height: Dimension::Content,

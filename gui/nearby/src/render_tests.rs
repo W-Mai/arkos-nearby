@@ -500,15 +500,25 @@ fn wifi_windows_and_keyboard_keep_focus_in_the_active_panel_scope() {
                 }
             );
             if phase == WifiPage::Connecting {
-                for offset in [0, 160, 500, 999] {
+                let track = app
+                    .world
+                    .query::<wifi::LoadingTrack>()
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .0;
+                app.with_widget(reading_geometry_probe::view());
+                app.world
+                    .insert(target, ReadingGeometryProbe { target: track });
+                paint_at(&mut app, &scene, phase_time + 16);
+                for offset in [16, 160, 500, 999] {
                     paint_at(&mut app, &scene, phase_time + offset);
                     let track = app
                         .world
                         .query::<wifi::LoadingTrack>()
                         .iter()
-                        .find_map(|(entity, _)| {
-                            app.world.get::<ComputedRect>(entity).map(|rect| rect.0)
-                        })
+                        .next()
+                        .map(|(entity, _)| entity)
                         .unwrap();
                     let outputs = app
                         .world
@@ -521,12 +531,26 @@ fn wifi_windows_and_keyboard_keep_focus_in_the_active_panel_scope() {
                             .apply_rect(geometry.border_rect())
                             .unwrap(),
                     );
-                    let expected = track.x + scene.state.launcher().wifi_loading_end() * track.w;
+                    let track_geometry = outputs.get(track).unwrap();
+                    let track = track_geometry.border_rect();
+                    let expected = track_geometry
+                        .transform()
+                        .apply_point(Point {
+                            x: track.x + scene.state.launcher().loading_end() * track.w,
+                            y: track.y,
+                        })
+                        .unwrap()
+                        .x;
+                    let track_ink =
+                        Rect::bounding_quad(&track_geometry.transform().apply_rect(track).unwrap());
                     assert!(
                         (ink.x - expected).abs() <= Fixed::from_int(2),
                         "actor must follow the moving leading edge: {ink:?} {track:?}"
                     );
-                    assert!(ink.x >= track.x && ink.x <= track.x + track.w + Fixed::ONE);
+                    assert!(
+                        ink.x >= track_ink.x - Fixed::ONE
+                            && ink.x <= track_ink.x + track_ink.w + Fixed::ONE
+                    );
                 }
             }
             if phase == WifiPage::Password {
@@ -852,6 +876,126 @@ fn list_windows_follow_available_space_and_keep_native_title_size() {
 }
 
 #[test]
+fn favorite_page_slide_retains_only_the_leaving_window_and_reverses_in_place() {
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut home = view(Page::Games);
+        home.launcher.enabled = true;
+        home.library.kind = crate::model::LibraryKind::Favorites;
+        home.library.total = 23;
+        let mut scene = draw(&mut app, &home).unwrap();
+        paint_at(&mut app, &scene, 500);
+        let shelf = scene.shelf.shelf();
+        let capacity = shelf.plan().grid.capacity();
+        assert_eq!(shelf.departing().capacity(), capacity);
+        assert_eq!(scene.catalog.shelf().departing().capacity(), 0);
+        let page = |offset: usize, selected: usize| {
+            let mut v = home.clone();
+            v.entries = (offset..(offset + capacity).min(v.library.total))
+                .map(|i| GameRow {
+                    key: format!("cart-{i}"),
+                    name: format!("游戏 {i}"),
+                    icon: if offset == 0 { "nes" } else { "gba" }.into(),
+                    available: true,
+                    ..Default::default()
+                })
+                .collect();
+            v.selected = selected;
+            v.library.position = offset + selected + 1;
+            v.launcher.key = v.entries[selected].key.clone();
+            v.launcher_shelf = Some(Box::new(v.clone()));
+            v
+        };
+        let first = page(0, capacity - 1);
+        let second = page(capacity, 0);
+        update(&mut scene, &first).unwrap();
+        paint_at(&mut app, &scene, 1000);
+        assert!(shelf.departing().is_empty());
+        let at_rest = app
+            .backend
+            .framebuffer()
+            .read_pixels()
+            .unwrap()
+            .bytes()
+            .to_vec();
+        update(&mut scene, &second).unwrap();
+        assert_eq!(shelf.departing().len(), capacity);
+        assert_eq!(
+            shelf.departing().entries().next().unwrap().1.label(true),
+            "游戏 0"
+        );
+        assert_eq!(
+            scene
+                .shelf
+                .entries()
+                .entries()
+                .next()
+                .unwrap()
+                .1
+                .label(true),
+            format!("游戏 {capacity}")
+        );
+        let launch = shelf.offsets();
+        TIME.with(|clock| clock.set(1_500_000_000));
+        super::paint_at(&mut app, 1500).unwrap();
+        assert_eq!(
+            shelf.offsets(),
+            launch,
+            "Idle time must not consume the slide"
+        );
+        TIME.with(|clock| clock.set(1_700_000_000));
+        super::paint_at(&mut app, 1700).unwrap();
+        assert!(
+            shelf.offsets().0 > launch.0 / 2,
+            "The first expensive mount keeps intermediate frames"
+        );
+        for frame in 0..=5 {
+            paint_at(&mut app, &scene, 1701 + 16 * frame);
+            capture_text_audit(&mut app, &format!("shelf-{frame:02}"), size);
+        }
+        let forward = shelf.offsets();
+        assert!(forward.0 > Fixed::ZERO && forward.1 < Fixed::ZERO);
+        assert_ne!(
+            at_rest.as_slice(),
+            app.backend.framebuffer().read_pixels().unwrap().bytes()
+        );
+        let active_target = |app: &TestApp| {
+            let actor = app
+                .world
+                .query::<actor::ActorFrame>()
+                .iter()
+                .next()
+                .unwrap()
+                .0;
+            let target = app.world.get::<FollowBounds>(actor).unwrap().target;
+            app.world
+                .get::<selection::FocusTarget>(target)
+                .unwrap()
+                .index()
+        };
+        assert_eq!(active_target(&app), 0);
+        update(&mut scene, &first).unwrap();
+        assert_eq!(shelf.offsets(), (forward.1, forward.0));
+        for frame in 6..=24 {
+            paint_at(&mut app, &scene, 1701 + 16 * frame);
+            capture_text_audit(&mut app, &format!("shelf-{frame:02}"), size);
+        }
+        assert!(shelf.departing().is_empty());
+        assert_eq!(shelf.offsets(), (Fixed::ZERO, Fixed::ZERO));
+        assert_eq!(active_target(&app), capacity - 1);
+        update(&mut scene, &second).unwrap();
+        paint_at(&mut app, &scene, 2410);
+        assert!(shelf.departing().is_empty());
+        assert_eq!(active_target(&app), 0);
+        let mut sorted = first;
+        sorted.library.sort = "name".into();
+        sorted.launcher_shelf = Some(Box::new(sorted.clone()));
+        update(&mut scene, &sorted).unwrap();
+        assert!(shelf.departing().is_empty());
+    }
+}
+
+#[test]
 fn page_marker_entities_follow_the_active_page_without_remounting() {
     let mut app = app([640, 480]);
     let mut current = view(Page::Games);
@@ -1029,7 +1173,7 @@ fn menu_values_observe_settings_without_replacing_the_backend_view() {
                 .map(|(_, text)| text.resolve(world.resource()).to_string())
                 .collect::<Vec<_>>()
         };
-        for expected in ["尚未保留直连网络", "森林", "开", "45%", "60%"] {
+        for expected in ["尚未保留直连网络", "浅色", "开", "45%", "60%"] {
             assert!(
                 labels(&app.world).iter().any(|text| text == expected),
                 "{size:?}: missing {expected}"
@@ -1051,7 +1195,7 @@ fn menu_values_observe_settings_without_replacing_the_backend_view() {
             ..Default::default()
         });
         paint_at(&mut app, &scene, 500);
-        for expected in ["落日", "关"] {
+        for expected in ["暖色", "关"] {
             assert!(
                 labels(&app.world).iter().any(|text| text == expected),
                 "{size:?}: missing {expected}"
@@ -1399,6 +1543,16 @@ fn launcher_feedback_retains_shelf_geometry_and_selected_action() {
             gesture.press(start);
             paint_at(&mut app, &scene, start + 240);
             assert!(gesture.progress() > 0);
+            let charge = app
+                .world
+                .resource::<mirui::ui::IdMap>()
+                .unwrap()
+                .get("launcher_game_feedback")
+                .unwrap();
+            assert!(visible_in_tree(&app.world, charge));
+            let rect = app.world.get::<ComputedRect>(charge).unwrap().0;
+            assert!(rect.w >= Fixed::from_int(i32::from(size[0]) * 3 / 4));
+            capture_text_audit(&mut app, "game-hold", size);
             assert!(app.world.query::<Text>().iter().any(|(entity, text)| {
                 text.resolve(None) == "操作"
                     && !mirui::ui::branch::is_effectively_hidden(&app.world, entity)
@@ -1435,6 +1589,17 @@ fn launcher_feedback_retains_shelf_geometry_and_selected_action() {
             "Preparation has no library action"
         );
         assert_eq!(scene.state.hint(), waiting.status);
+        let charge = app
+            .world
+            .resource::<mirui::ui::IdMap>()
+            .unwrap()
+            .get("launcher_game_feedback")
+            .unwrap();
+        assert!(visible_in_tree(&app.world, charge));
+        let before = (gesture.loading_start(), gesture.loading_end());
+        paint_at(&mut app, &scene, 2130);
+        assert_ne!(before, (gesture.loading_start(), gesture.loading_end()));
+        capture_text_audit(&mut app, "game-preparing", size);
         assert_eq!(
             scene.deck.height(),
             height,
@@ -1777,6 +1942,26 @@ fn action_panels_keep_labels_inside_their_cards() {
                 })
                 .collect();
             assert_eq!(anchors.len(), labels.len());
+            let (heading, _) = app
+                .world
+                .query::<Text>()
+                .iter()
+                .find(|(entity, text)| {
+                    visible_in_tree(&app.world, *entity)
+                        && text.resolve(app.world.resource()) == current.launcher.overlay
+                })
+                .expect("visible panel heading");
+            let parent = app.world.get::<mirui::ui::Parent>(heading).unwrap().0;
+            let area = app.world.get::<ComputedRect>(parent).unwrap().0;
+            let text = app.world.get::<ComputedRect>(heading).unwrap().0;
+            assert!(
+                area.h >= Fixed::from_int(i32::from(style::TITLE_SIZE)),
+                "{size:?} {kind}: collapsed header {area:?}"
+            );
+            assert!(
+                text.y >= area.y && text.y + text.h <= area.y + area.h,
+                "{size:?} {kind}: clipped header {text:?} in {area:?}"
+            );
             for (_, bounds) in &anchors {
                 assert!(bounds.x >= Fixed::ZERO && bounds.y >= Fixed::ZERO);
                 assert!(bounds.x + bounds.w <= Fixed::from_int(i32::from(size[0])));
@@ -2266,6 +2451,7 @@ fn library_content_is_owned_by_its_route_during_page_departure() {
             &mut scene,
             &View {
                 page: Page::Lobby,
+                artwork: "room-cover".into(),
                 ..View::default()
             },
         )
@@ -2274,6 +2460,7 @@ fn library_content_is_owned_by_its_route_during_page_departure() {
             paint_at(&mut app, &scene, at);
             assert_eq!(scene.state.entries().entries().len(), count);
             assert_eq!(scene.state.artwork(), "retained-cover");
+            assert_eq!(scene.state.room_artwork(), "room-cover");
             assert_eq!(scene.state.library_selection(), 1);
             assert_eq!(scene.state.platforms(), current.platforms);
             assert!(!app.world.query::<Text>().iter().any(|(entity, text)| {
@@ -2439,7 +2626,12 @@ fn retained_lists_start_below_status_at_every_row_count() {
                 if count > 0 {
                     let top = focus_rect(&app).unwrap()[1];
                     let status = rect(&app, "nearby_status");
-                    let gap = top - (status.y + status.h).to_int();
+                    let heading = if page == Page::Rooms {
+                        super::discovery::HEADER_HEIGHT
+                    } else {
+                        0
+                    };
+                    let gap = top - (status.y + status.h).to_int() - heading;
                     assert!(
                         (0..=style::Metrics::for_height(size[1]).gap * 2).contains(&gap),
                         "{size:?} {page:?} count={count} gap={gap}"
@@ -3115,7 +3307,11 @@ fn readiness_is_the_only_source_of_waiting_for_host_copy() {
         Phase::RestoreFailed,
     ] {
         view.phase = phase;
-        assert_eq!(status_text(&view), next_step(&view));
+        if phase == Phase::RestoreFailed {
+            assert_eq!(status_text(&view), next_step(&view));
+        } else {
+            assert!(status_text(&view).is_empty());
+        }
         if matches!(
             phase,
             Phase::Connecting | Phase::Checking | Phase::Notifying
@@ -3446,7 +3642,8 @@ fn palettes_define_all_roles_and_legible_action_text() {
             (FOREGROUND, BACKGROUND),
             (FOREGROUND, PANEL),
             (ON_ACCENT, ACCENT),
-            (HEADER_TEXT, DEEP),
+            (HEADER_TEXT, BACKGROUND),
+            (SHELL_TEXT, SHELL),
         ] {
             let a = luminance(theme.resolve(foreground));
             let b = luminance(theme.resolve(background));
@@ -3804,6 +4001,8 @@ fn room_actor_ownership_and_membership_are_independent_of_entry() {
             (Page::Host, Phase::WaitingPeer, false, false, false),
             (Page::Host, Phase::ApprovalPending, false, false, true),
             (Page::Host, Phase::PeerPreparing, false, false, true),
+            (Page::Host, Phase::Checking, false, false, true),
+            (Page::Host, Phase::Notifying, false, false, true),
             (Page::Host, Phase::HostReady, true, true, true),
             (Page::Host, Phase::WaitingPeer, false, false, false),
             (Page::Joined, Phase::Connecting, false, false, true),
@@ -3830,7 +4029,14 @@ fn room_actor_ownership_and_membership_are_independent_of_entry() {
             current.ready = ready;
             current.connected = connected;
             update(&mut scene, &current).unwrap();
-            paint_at(&mut app, &scene, 1600 + index as u64 * 480);
+            let settled = 1600 + index as u64 * 480;
+            if phase == Phase::WaitingPeer && index > 1 {
+                // Membership clears immediately. The departing player still crosses the stage.
+                paint_at(&mut app, &scene, settled - 352);
+                assert_eq!(actors(&mut app), (2, true, true));
+                assert_full_frame_matches(&mut app, "Leaving guest on the room stage");
+            }
+            paint_at(&mut app, &scene, settled);
             let active = if launcher { &scene.room } else { &scene.state };
             assert_eq!(
                 active.session_motion().visitor,
@@ -4115,7 +4321,8 @@ fn modal_snapshot_stays_below_foreground_panel_and_actor() {
     assert_ne!(token, next_token);
     update(&mut scene, &home).unwrap();
     super::paint_at(&mut app, 1548).unwrap();
-    super::paint_at(&mut app, 1900).unwrap();
+    super::paint_at(&mut app, 2000).unwrap();
+    super::paint_at(&mut app, 2016).unwrap();
     check_order(&app);
     assert!(
         app.world
@@ -4126,8 +4333,8 @@ fn modal_snapshot_stays_below_foreground_panel_and_actor() {
             .is_none()
     );
     update(&mut scene, &panel).unwrap();
-    super::paint_at(&mut app, 1916).unwrap();
-    super::paint_at(&mut app, 2400).unwrap();
+    super::paint_at(&mut app, 2016).unwrap();
+    super::paint_at(&mut app, 2700).unwrap();
     check_order(&app);
     assert!(
         app.world
@@ -4188,6 +4395,7 @@ fn launcher_overlays_share_one_background_snapshot_until_the_last_overlay_closes
     }
     assert_eq!(scene.shelf.animation_counts().0, counts.0);
 
+    super::paint_at(&mut app, 1600).unwrap();
     let source = modal.source();
     let ImageSource::Handle(source) = source else {
         panic!("modal snapshots must be direct texture sources");
@@ -4236,24 +4444,25 @@ fn launcher_overlays_share_one_background_snapshot_until_the_last_overlay_closes
     room.lobby = true;
     room.return_to_launcher = true;
     update(&mut scene, &room).unwrap();
-    super::paint_at(&mut app, 1096).unwrap();
-    super::paint_at(&mut app, 1500).unwrap();
+    super::paint_at(&mut app, 1616).unwrap();
+    super::paint_at(&mut app, 2100).unwrap();
     assert_eq!(modal.token(), Some(token));
     assert!(modal.hidden() && modal.paused());
     actions.launcher.overlay_kind = "game".into();
     actions.launcher.overlay = "超级马里奥世界".into();
     update(&mut scene, &actions).unwrap();
-    super::paint_at(&mut app, 1516).unwrap();
+    super::paint_at(&mut app, 2116).unwrap();
     assert_eq!(modal.token(), Some(token));
     app.set_theme(crate::theme::Palette::Sunset.theme())
         .unwrap();
-    super::paint_at(&mut app, 1532).unwrap();
-    super::paint_at(&mut app, 1548).unwrap();
+    super::paint_at(&mut app, 2132).unwrap();
+    super::paint_at(&mut app, 2148).unwrap();
     assert!(modal.token().unwrap() > token);
     assert_eq!(app.world.get::<Children>(shell).unwrap().0, order);
     update(&mut scene, &home).unwrap();
-    super::paint_at(&mut app, 1564).unwrap();
-    super::paint_at(&mut app, 2000).unwrap();
+    super::paint_at(&mut app, 2164).unwrap();
+    super::paint_at(&mut app, 2600).unwrap();
+    super::paint_at(&mut app, 2616).unwrap();
     assert_eq!(modal.phase(), modal::Phase::Live);
     assert!(!modal.hidden() && !modal.paused());
     assert!(modal.token().is_none());
@@ -4368,6 +4577,9 @@ fn compressed_shelf_snapshot_preserves_pixels_and_reopens_current_contents() {
         update(&mut scene, &library).unwrap();
         super::paint_at(&mut app, 2596).unwrap();
         assert!(!model.hidden());
+        for now in [2800, 2816, 2832, 2848] {
+            super::paint_at(&mut app, now).unwrap();
+        }
         super::paint_at(&mut app, 3284).unwrap();
         super::paint_at(&mut app, 3300).unwrap();
         super::paint_at(&mut app, 3316).unwrap();
@@ -5676,6 +5888,22 @@ fn product_header_keeps_identity_and_context_inside_its_bounds() {
     for size in [[480, 320], [640, 480], [640, 640]] {
         for page in [Page::Choice, Page::Games, Page::Host] {
             let mut app = app(size);
+            let status = app
+                .world
+                .resource::<device_status::Runtime>()
+                .unwrap()
+                .0
+                .clone();
+            status.present(
+                "23:59".into(),
+                howff_platform::device::Status {
+                    battery: Some(howff_platform::device::Battery {
+                        percent: Some(100),
+                        charging: true,
+                    }),
+                    wireless: howff_platform::device::Wireless::Connected,
+                },
+            );
             let mut current = view(page);
             current.title = "超级长的游戏标题 / A game with a long name".repeat(4);
             current.room_name = "房间 A216".into();
@@ -5695,6 +5923,12 @@ fn product_header_keeps_identity_and_context_inside_its_bounds() {
                 })
                 .map(|(entity, text)| (entity, text.resolve(None).to_string()))
                 .collect::<Vec<_>>();
+            for value in ["23:59", "100%"] {
+                assert_eq!(
+                    labels.iter().any(|(_, text)| text == value),
+                    page == Page::Choice
+                );
+            }
             assert_eq!(
                 labels
                     .iter()
@@ -6177,5 +6411,543 @@ fn capture_text_audit(app: &mut TestApp, name: &str, size: [u16; 2]) {
             .unwrap()
             .write_image_data(app.backend.framebuffer().read_pixels().unwrap().bytes())
             .unwrap();
+    }
+}
+
+#[test]
+fn device_status_updates_leave_navigation_and_content_entities_intact() {
+    use howff_platform::device::{Battery, Status, Wireless};
+    let mut app = app([480, 320]);
+    let mut current = view(Page::Games);
+    current.library.kind = crate::model::LibraryKind::Favorites;
+    current.launcher.enabled = true;
+    let scene = draw(&mut app, &current).unwrap();
+    paint_at(&mut app, &scene, 800);
+    let entities = app
+        .world
+        .query::<Style>()
+        .iter()
+        .map(|(e, _)| e)
+        .collect::<Vec<_>>();
+    let status = app
+        .world
+        .resource::<device_status::Runtime>()
+        .unwrap()
+        .0
+        .clone();
+    let mut now = 800;
+    for (clock, reading) in [
+        (
+            "23:59",
+            Status {
+                battery: Some(Battery {
+                    percent: Some(8),
+                    charging: false,
+                }),
+                wireless: Wireless::Disconnected,
+            },
+        ),
+        (
+            "00:00",
+            Status {
+                battery: Some(Battery {
+                    percent: Some(100),
+                    charging: true,
+                }),
+                wireless: Wireless::Connected,
+            },
+        ),
+        ("00:01", Status::default()),
+    ] {
+        status.present(clock.into(), reading);
+        now += 16;
+        paint_at(&mut app, &scene, now);
+        assert_eq!(scene.state.snapshot(), current);
+        assert_eq!(
+            entities,
+            app.world
+                .query::<Style>()
+                .iter()
+                .map(|(e, _)| e)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            app.world
+                .query::<Text>()
+                .iter()
+                .any(|(_, text)| text.resolve(None) == clock)
+        );
+        assert_eq!(status.battery(), reading.battery);
+        assert_eq!(status.wireless(), reading.wireless);
+    }
+    assert_eq!(status.battery_label(), "--%");
+}
+
+#[test]
+fn popup_frames_render_across_responsive_insets_and_reversal() {
+    use mirui::ui::widgets::WidgetTransform;
+    for viewport in [[480, 320], [640, 480]] {
+        for actions in [false, true] {
+            let mut app = app(viewport);
+            let mut home = view(Page::Games);
+            home.launcher.enabled = true;
+            let mut scene = draw(&mut app, &home).unwrap();
+            paint_at(&mut app, &scene, 800);
+            let mut panel = if actions {
+                home.clone()
+            } else {
+                view(Page::Lobby)
+            };
+            if actions {
+                panel.launcher.overlay_kind = "system".into();
+                panel.launcher.overlay = "设置".into();
+            } else {
+                panel.lobby = true;
+                panel.return_to_launcher = true;
+            }
+            update(&mut scene, &panel).unwrap();
+            let mut projected = false;
+            for now in [816, 880, 944, 1040, 1160, 1400, 1416] {
+                super::paint_at(&mut app, now).unwrap();
+                app.render_dirty().unwrap();
+                projected |= app
+                    .world
+                    .query::<material::PanelMotion>()
+                    .iter()
+                    .any(|(e, _)| {
+                        app.world
+                            .get::<WidgetTransform>(e)
+                            .is_some_and(|pose| !pose.0.is_identity())
+                    });
+            }
+            assert!(
+                projected,
+                "The popup must submit intermediate transformed frames"
+            );
+            update(&mut scene, &home).unwrap();
+            for now in [1432, 1528, 1624] {
+                super::paint_at(&mut app, now).unwrap();
+                app.render_dirty().unwrap();
+            }
+            update(&mut scene, &panel).unwrap();
+            for now in [1640, 1736, 2200, 2216] {
+                super::paint_at(&mut app, now).unwrap();
+                app.render_dirty().unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn library_marquee_reads_the_tail_once_and_resets_on_focus_change() {
+    use super::reading::Reading;
+    use crate::model::LibraryKind;
+    use mirui::ui::{ComputedRect, Parent, widgets::WidgetTransform};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.library.kind = LibraryKind::Directory;
+        current.entries[0].name =
+            "超级炸弹人 Nintendo Super Famicom Special Edition 完整纪念版 Chapter Twenty Four"
+                .repeat(2);
+        current.entries[1].name = "魂斗罗".into();
+        let mut scene = draw(&mut app, &current).unwrap();
+        let reader = |app: &TestApp| {
+            app.world
+                .query::<Reading>()
+                .iter()
+                .map(|(e, _)| e)
+                .find(|e| visible_in_tree(&app.world, *e))
+                .unwrap()
+        };
+        let pose = |app: &TestApp, e| app.world.get::<WidgetTransform>(e).unwrap().0;
+        paint_at(&mut app, &scene, 32);
+        let long = reader(&app);
+        let bounds = |e| app.world.get::<ComputedRect>(e).unwrap().0;
+        let clip = bounds(app.world.get::<Parent>(long).unwrap().0);
+        assert!(
+            bounds(long).w > clip.w,
+            "natural text {} viewport {}",
+            bounds(long).w,
+            clip.w
+        );
+        assert!(pose(&app, long).ty > Fixed::ZERO);
+        paint_at(&mut app, &scene, 2200);
+        assert!(pose(&app, long).tx < Fixed::ZERO);
+        assert_eq!(pose(&app, long).ty, Fixed::ZERO);
+        capture_text_audit(&mut app, "library-reading", size);
+        paint_at(&mut app, &scene, 120000);
+        assert!(pose(&app, long).ty > Fixed::ZERO);
+        current.selected = 1;
+        update(&mut scene, &current).unwrap();
+        paint_at(&mut app, &scene, 120032);
+        paint_at(&mut app, &scene, 120064);
+        let short = reader(&app);
+        assert_eq!(short, long);
+        paint_at(&mut app, &scene, 123000);
+        assert!(pose(&app, short).ty > Fixed::ZERO);
+    }
+}
+
+#[test]
+fn discovery_caption_keeps_its_glyphs_and_reverses_with_room_membership() {
+    use mirui::render::path::{PathCmd, PathStore};
+    use mirui::text::TextPath;
+
+    #[derive(Clone, Copy)]
+    struct Glyph {
+        entity: Entity,
+        path: PathId,
+        x: f32,
+        y: f32,
+        tangent: f32,
+    }
+    impl Glyph {
+        fn travel(self, from: Self) -> f32 {
+            (self.x - from.x).hypot(self.y - from.y)
+        }
+    }
+    fn letters(app: &TestApp) -> [Glyph; 4] {
+        let paths = app.world.resource::<PathStore>().unwrap();
+        let mut letters = [None; 4];
+        for (e, glyph) in app.world.query::<discovery::DiscoveryGlyph>().iter() {
+            if !visible_in_tree(&app.world, e) {
+                continue;
+            }
+            assert_eq!(
+                app.world.get::<Text>(e).unwrap().resolve(None),
+                ["附", "近", "房", "间"][glyph.0]
+            );
+            let id = app.world.get::<TextPath>(e).unwrap().path();
+            let [
+                PathCmd::MoveTo(a),
+                PathCmd::CubicTo {
+                    ctrl1: b,
+                    ctrl2: c,
+                    end: d,
+                },
+            ] = paths.get(id).unwrap().commands()
+            else {
+                panic!("Expected a cubic glyph baseline")
+            };
+            // Position and tangent at the center of the typeset glyph's window.
+            assert!(
+                letters[glyph.0]
+                    .replace(Glyph {
+                        entity: e,
+                        path: id,
+                        x: (a.x + b.x * 3 + c.x * 3 + d.x).to_f32() / 8.0,
+                        y: (a.y + b.y * 3 + c.y * 3 + d.y).to_f32() / 8.0,
+                        tangent: ((d.y - a.y + c.y - b.y) / (d.x - a.x + c.x - b.x)).to_f32(),
+                    })
+                    .is_none()
+            );
+        }
+        letters.map(|g| g.expect("Four visible discovery glyphs"))
+    }
+    for size in [[480, 320], [640, 480]] {
+        for (page, select) in [
+            (Page::Rooms, false),
+            (Page::Lobby, false),
+            (Page::Lobby, true),
+        ] {
+            let mut app = app(size);
+            let mut current = view(page);
+            let rooms = std::mem::take(&mut current.rooms);
+            current.status.clear();
+            current.lobby = page == Page::Lobby;
+            current.return_to_launcher = select;
+            let mut home = view(Page::Games);
+            home.launcher.enabled = true;
+            let mut scene = draw(&mut app, if select { &home } else { &current }).unwrap();
+            if select {
+                paint_at(&mut app, &scene, 600);
+                update(&mut scene, &current).unwrap();
+            }
+            paint_at(&mut app, &scene, 1600);
+            let empty = letters(&app);
+            let ids = |glyphs: [Glyph; 4]| glyphs.map(|g| (g.entity, g.path));
+            let frame = |app: &mut TestApp, scene: &Scene, time| {
+                paint_at(app, scene, time);
+                let glyphs = letters(app);
+                assert_eq!(
+                    ids(glyphs),
+                    ids(empty),
+                    "Glyphs and paths must survive result changes"
+                );
+                assert_full_frame_matches(
+                    app,
+                    &format!("{size:?}/{page:?}/select={select}/{time}"),
+                );
+                glyphs
+            };
+            current.rooms = rooms.clone();
+            update(&mut scene, &current).unwrap();
+            let takeoff = frame(&mut app, &scene, 1648);
+            assert!(takeoff[0].travel(empty[0]) > takeoff[3].travel(empty[3]) + 2.0);
+            let moving = frame(&mut app, &scene, 1760);
+            assert!(
+                (moving[0].y - moving[3].y).abs() > 5.0
+                    && (moving[0].tangent - moving[3].tangent).abs() > 0.04
+            );
+            let dock = frame(&mut app, &scene, 2480);
+            assert!(
+                dock.iter()
+                    .all(|g| g.tangent.abs() < 0.02 && (g.y - dock[0].y).abs() < 1.0)
+            );
+            assert!(
+                dock.windows(2)
+                    .all(|p| p[1].x - p[0].x >= f32::from(style::TITLE_SIZE) - 1.0)
+            );
+            // A retained offline row remains visible; only the last online room changes the destination.
+            current.rooms.truncate(2);
+            current.rooms[1].available = false;
+            update(&mut scene, &current).unwrap();
+            assert!(
+                frame(&mut app, &scene, 2560)
+                    .iter()
+                    .zip(dock)
+                    .all(|(a, b)| a.travel(b) < 1.0)
+            );
+            current.rooms[0].available = false;
+            update(&mut scene, &current).unwrap();
+            let offline = frame(&mut app, &scene, 2672);
+            assert!(offline[3].travel(dock[3]) > 3.0);
+            current.rooms[0].available = true;
+            update(&mut scene, &current).unwrap();
+            let back = frame(&mut app, &scene, 2688);
+            assert!(
+                back.iter()
+                    .zip(offline)
+                    .all(|(a, b)| a.travel(b) < dock[0].travel(empty[0]) / 3.0)
+            );
+            frame(&mut app, &scene, 3568);
+            current.rooms.clear();
+            update(&mut scene, &current).unwrap();
+            let departure = frame(&mut app, &scene, 3616);
+            assert!(departure[3].travel(dock[3]) > departure[0].travel(dock[0]) + 2.0);
+            assert!(
+                frame(&mut app, &scene, 4528)
+                    .iter()
+                    .zip(empty)
+                    .all(|(a, b)| a.travel(b) < 1.0)
+            );
+            current.rooms = rooms;
+            update(&mut scene, &current).unwrap();
+            let departing = frame(&mut app, &scene, 4640);
+            current.rooms.clear();
+            update(&mut scene, &current).unwrap();
+            assert!(
+                frame(&mut app, &scene, 4656)
+                    .iter()
+                    .zip(departing)
+                    .all(|(a, b)| a.travel(b) < dock[0].travel(empty[0]) / 3.0)
+            );
+        }
+    }
+}
+
+#[test]
+fn compact_room_list_scrolls_the_entire_selected_row_into_view() {
+    use mirui::ui::Parent;
+    for select in [false, true] {
+        let mut app = app([480, 320]);
+        let mut current = view(Page::Lobby);
+        current.lobby = true;
+        current.return_to_launcher = select;
+        let mut home = view(Page::Games);
+        home.launcher.enabled = true;
+        let mut scene = draw(&mut app, if select { &home } else { &current }).unwrap();
+        if select {
+            paint_at(&mut app, &scene, 600);
+        }
+        for (index, time) in [(0, 1600), (3, 2400), (0, 3200)] {
+            current.room_selected = Some(index);
+            current.selected = index;
+            update(&mut scene, &current).unwrap();
+            paint_at(&mut app, &scene, time);
+            let name = &current.rooms[index].name;
+            let mut e = app
+                .world
+                .query::<Text>()
+                .iter()
+                .find_map(|(e, t)| {
+                    (t.resolve(None) == name.as_str() && visible_in_tree(&app.world, e))
+                        .then_some(e)
+                })
+                .expect("Visible selected room");
+            while !app.world.has::<selection::FocusTarget>(e) {
+                e = app.world.get::<Parent>(e).unwrap().0;
+            }
+            let row = app.world.get::<Parent>(e).unwrap().0;
+            let bounds = app.world.get::<ComputedRect>(row).unwrap().0;
+            let mut list = row;
+            while app.world.get::<Section>(list) != Some(&Section::FocusList) {
+                list = app.world.get::<Parent>(list).unwrap().0;
+            }
+            let viewport = app.world.get::<ComputedRect>(list).unwrap().0;
+            assert!(
+                bounds.y >= viewport.y - Fixed::ONE
+                    && bounds.y + bounds.h <= viewport.y + viewport.h + Fixed::ONE,
+                "Row {bounds:?} clipped at {viewport:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn room_names_fit_below_the_players_for_both_seating_orders() {
+    use super::style::{FOREGROUND, TITLE_SIZE};
+    for size in [[480, 320], [640, 480]] {
+        for page in [Page::Host, Page::Joined] {
+            let mut app = app(size);
+            let mut room = view(page);
+            room.ready = true;
+            room.routine_stage = true;
+            room.status.clear();
+            room.phase = if page == Page::Host {
+                Phase::HostReady
+            } else {
+                Phase::WaitingStart
+            };
+            room.player_names = ["横滨港口的红色掌机".into(), "R36S-Lavender-Player".into()];
+            let scene = draw(&mut app, &room).unwrap();
+            paint_at(&mut app, &scene, 880);
+            let rect_for = |name: &str| {
+                let e = app
+                    .world
+                    .query::<Text>()
+                    .iter()
+                    .find_map(|(e, t)| {
+                        (t.resolve(None).starts_with(name) && visible_in_tree(&app.world, e))
+                            .then_some(e)
+                    })
+                    .expect("Visible player name");
+                app.world.get::<ComputedRect>(e).unwrap().0
+            };
+            let left = rect_for(&room.player_names[0]);
+            let right = rect_for(&room.player_names[1]);
+            let sprite = app
+                .world
+                .query::<pixel::SessionSprite>()
+                .iter()
+                .find_map(|(e, _)| visible_in_tree(&app.world, e).then_some(e))
+                .unwrap();
+            let stage = app.world.get::<ComputedRect>(sprite).unwrap().0;
+            for name in [left, right] {
+                assert!(
+                    name.w.to_int() >= i32::from(size[0]) / 4
+                        && name.h.to_int() >= i32::from(TITLE_SIZE),
+                    "Name needs its own readable slot: {name:?} at {size:?}"
+                );
+                let color = app.theme().resolve(FOREGROUND);
+                let frame_buffer = app.backend.framebuffer();
+                let image = frame_buffer.read_pixels().unwrap();
+                let stride = usize::from(size[0]);
+                let ink = (name.y.to_int().max(0)
+                    ..(name.y + name.h).to_int().min(i32::from(size[1])))
+                    .flat_map(|y| {
+                        (name.x.to_int().max(0)..(name.x + name.w).to_int().min(i32::from(size[0])))
+                            .map(move |x| 4 * (y as usize * stride + x as usize))
+                    })
+                    .filter(|i| image.bytes()[*i..*i + 3] == [color.r, color.g, color.b])
+                    .count();
+                assert!(ink >= 40, "Missing visible name at {size:?}: {name:?}");
+            }
+            let inks = [crate::theme::actor::BOOTS, super::style::ACCENT]
+                .map(|token| (token, app.theme().resolve(token)));
+            let buffer = app.backend.framebuffer();
+            let pixels = buffer.read_pixels().unwrap();
+            let rgb = |x: i32, y: i32| {
+                let offset = (y as usize * usize::from(size[0]) + x as usize) * 4;
+                &pixels.bytes()[offset..offset + 3]
+            };
+            let center_of_last_row = |name: Rect, color: Color| {
+                let columns = name.x.to_int()..(name.x + name.w).to_int();
+                (stage.y.to_int()..(stage.y + stage.h).to_int())
+                    .rev()
+                    .find_map(|y| {
+                        let mut ink = columns
+                            .clone()
+                            .filter(|&x| rgb(x, y) == [color.r, color.g, color.b]);
+                        let first = ink.next()?;
+                        Some((first + ink.next_back().unwrap_or(first) + 1) / 2)
+                    })
+                    .expect("The settled seat must be visible")
+            };
+            for name in [left, right] {
+                let axis = (name.x + name.w * Fixed::HALF).to_int();
+                for (token, color) in inks {
+                    let painted = center_of_last_row(name, color);
+                    assert!(
+                        (painted - axis).abs() <= 1,
+                        "{page:?} {size:?}: {token:?} at {painted}, nameplate at {axis}"
+                    );
+                }
+            }
+            assert!(stage.y + stage.h <= left.y && stage.y + stage.h <= right.y);
+            assert!(left.x >= Fixed::ZERO && left.x + left.w <= right.x);
+            assert!(right.x + right.w <= Fixed::from_int(i32::from(size[0])));
+            capture_text_audit(&mut app, &format!("long-{page:?}"), size);
+        }
+    }
+}
+
+#[test]
+fn room_role_and_phase_share_the_link_stage_with_a_single_status_layer() {
+    use crate::model::Phase;
+    for size in [[480, 320], [640, 480]] {
+        for page in [Page::Host, Page::Joined] {
+            let mut app = app(size);
+            let mut current = view(page);
+            current.player_names = ["白色掌机".into(), "紫色掌机".into()];
+            let mut scene = draw(&mut app, &current).unwrap();
+            for (i, phase) in [
+                Phase::Connecting,
+                Phase::ApprovalPending,
+                Phase::Checking,
+                Phase::HostReady,
+                Phase::Starting,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                current.phase = match (page, phase) {
+                    (Page::Joined, Phase::HostReady) => Phase::WaitingStart,
+                    (Page::Joined, Phase::ApprovalPending) => Phase::ApprovalPendingClient,
+                    _ => phase,
+                };
+                current.status.clear();
+                current.ready = phase == Phase::HostReady;
+                update(&mut scene, &current).unwrap();
+                let t = 1000 * (i + 1) as u64;
+                paint_at(&mut app, &scene, t);
+                paint_at(&mut app, &scene, t + 168);
+                capture_text_audit(&mut app, &format!("room-{page:?}-{phase:?}"), size);
+                if page == Page::Host
+                    && size == [480, 320]
+                    && std::env::var_os("HOWFF_MOTION_CAPTURE").is_some()
+                {
+                    for frame in 3..=15 {
+                        paint_at(&mut app, &scene, t + frame * 60);
+                        capture_text_audit(&mut app, &format!("motion-{i}-{frame:02}"), size);
+                    }
+                }
+                assert!(
+                    !app.world
+                        .query::<Text>()
+                        .iter()
+                        .any(|(e, t)| t.resolve(None) == "--:--" && visible_in_tree(&app.world, e))
+                );
+                assert_eq!(
+                    app.world
+                        .query::<pixel::SessionSprite>()
+                        .iter()
+                        .filter(|(e, _)| visible_in_tree(&app.world, *e))
+                        .count(),
+                    1
+                );
+            }
+        }
     }
 }

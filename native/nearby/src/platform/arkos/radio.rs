@@ -221,7 +221,12 @@ fn provision(state: &State) -> Result<String> {
         "Could not submit selected-room provisioning",
     )?;
     eprintln!("Sent selected-peer Wi-Fi Direct provisioning request");
-    crate::session::progress(&state.id, None, "connecting", "等待房主确认加入...")?;
+    crate::session::progress(
+        &state.id,
+        None,
+        "approval_pending_client",
+        "等待房主确认加入...",
+    )?;
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         current(&state.id)?;
@@ -464,10 +469,14 @@ fn private_supplicant(state: &State, config: &str) -> Result<Control> {
 
 fn supplicant_config(state: &State) -> String {
     format!(
-        "ctrl_interface={}\nupdate_config={}\np2p_no_group_iface=1\np2p_group_idle=-1\nmax_num_sta=2\ndevice_name={}\nconfig_methods=push_button\ndevice_type=1-0050F204-1\n",
+        "ctrl_interface={}\nupdate_config={}\np2p_no_group_iface=1\np2p_group_idle=-1\nmax_num_sta=2\n{}config_methods=push_button\ndevice_type=1-0050F204-1\n",
         state.root().join("ctrl").display(),
         if state.role == "client" { 1 } else { 0 },
-        howff_menu::brand::NAME,
+        if state.role == "host" {
+            crate::discovery::host_fields(state)
+        } else {
+            format!("device_name={}\n", howff_menu::brand::NAME)
+        },
     )
 }
 

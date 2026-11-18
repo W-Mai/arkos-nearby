@@ -215,7 +215,10 @@ fn requested<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> bool {
     app.world
         .resource::<DisplayRuntime>()
         .is_some_and(|runtime| {
-            runtime.deck.enabled() && matches!(runtime.deck.layer(), Layer::Room | Layer::Actions)
+            runtime.deck.enabled()
+                && (matches!(runtime.deck.layer(), Layer::Room | Layer::Actions)
+                    || runtime.deck.panel() > Fixed::ZERO
+                    || runtime.state.launcher().popup().mounted())
         })
 }
 

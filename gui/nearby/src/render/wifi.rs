@@ -516,14 +516,14 @@ fn progress(state: model!(Launcher), metrics: Metrics) -> Entity {
                         bg_color: ACCENT,
                         transform: ${
                             mirui::types::Transform::translate(
-                                    (start.wifi_loading_start()
-                                        - (Fixed::ONE - (end.wifi_loading_end() - end.wifi_loading_start()))
-                                            * Fixed::HALF) * start.wifi_track(),
+                                    (start.loading_start()
+                                        - (Fixed::ONE - (end.loading_end() - end.loading_start())) * Fixed::HALF)
+                                        * start.wifi_track(),
                                     Fixed::ZERO,
                                 )
                                 .compose(
                                     &mirui::types::Transform::scale(
-                                        end.wifi_loading_end() - end.wifi_loading_start(),
+                                        end.loading_end() - end.loading_start(),
                                         Fixed::ONE,
                                     ),
                                 )
@@ -653,7 +653,7 @@ pub(super) fn heading(state: model!(Launcher), metrics: Metrics) -> Entity {
                 text: ${ state.overlay_title() },
                 font: font(TITLE_SIZE),
                 font_size: TITLE_SIZE,
-                text_color: FOREGROUND,
+                text_color: SHELL_TEXT,
                 grow: 1.0,
                 min_width: 0,
                 paragraph: super::widgets::paragraph(Start, 1)
