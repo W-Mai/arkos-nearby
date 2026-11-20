@@ -11,6 +11,13 @@ pub mod wifi;
 
 pub const LIST_WINDOW_ITEMS: usize = 8;
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FavoriteChange {
+    pub sequence: u64,
+    pub key: String,
+    pub favorite: bool,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LibraryLoad {

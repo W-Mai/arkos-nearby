@@ -106,6 +106,12 @@ fn hash(value: impl AsRef<[u8]>) -> String {
     format!("{:x}", Sha256::digest(value.as_ref()))
 }
 
+#[derive(Default)]
+pub struct Applied {
+    pub launch: Option<launch::Intent>,
+    pub copied_to: Option<String>,
+}
+
 impl Store {
     pub fn new(
         root: &Path,
@@ -320,28 +326,24 @@ impl Store {
         }
         Ok(())
     }
-    pub fn operate(
-        &mut self,
-        key: &str,
-        revision: &str,
-        operation: Operation,
-    ) -> Result<Option<launch::Intent>> {
+    pub fn operate(&mut self, key: &str, revision: &str, operation: Operation) -> Result<Applied> {
+        let mut result = Applied::default();
         files::directory(self.root.parent().ok_or("备份目录缺失")?)?;
         let _lock = crate::system::Lock::try_acquire(&self.root.with_extension("lock"))?;
         self.recover()?;
         let record = self.selected(key, revision, operation)?;
         match operation {
             Operation::Backup => {
-                self.capture(&record)?;
+                result.copied_to = Some(self.capture(&record)?);
             }
             Operation::Load => {
                 self.backup_progress()?;
-                return Ok(Some(launch::Intent::State {
+                result.launch = Some(launch::Intent::State {
                     slot: record.slot.ok_or("存档槽缺失")?,
                     revision: record.revision,
-                }));
+                });
             }
-            Operation::Start => return Ok(Some(launch::Intent::Configured)),
+            Operation::Start => result.launch = Some(launch::Intent::Configured),
             Operation::Delete => {
                 if record.kind != Kind::Backup {
                     self.capture(&record)?;
@@ -406,18 +408,19 @@ impl Store {
                     )?;
                 }
                 crate::system::write(&self.root.join("transaction.json"), &journal)?;
-                let result = self.replace_backup(&journal.source, &target);
-                if result.is_err() {
+                let replaced = self.replace_backup(&journal.source, &target);
+                if replaced.is_err() {
                     self.recover()?;
-                    result?;
+                    replaced?;
                 }
                 fs::remove_file(self.root.join("transaction.json"))?;
+                result.copied_to = Some(hash(target.as_os_str().as_encoded_bytes()));
                 if record.slot.is_none() {
-                    return Ok(Some(launch::Intent::Sram));
+                    result.launch = Some(launch::Intent::Sram);
                 }
             }
         }
-        Ok(None)
+        Ok(result)
     }
     fn replace_backup(&self, id: &str, target: &Path) -> Result<()> {
         let backup: Backup = files::read_manifest(&self.backup_path(id, "json")?)?;

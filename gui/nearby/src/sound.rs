@@ -24,11 +24,14 @@ pub enum Cue {
     RoomFound,
     JoinRequest,
     Ready,
-    Start,
+    RelaySend,
     Error,
     Restored,
     RoomOpened,
     PeerLost,
+    LabelOn,
+    LabelOff,
+    RelayCatch,
 }
 
 impl Cue {
@@ -78,6 +81,7 @@ pub struct SoundState {
     feedback: Feedback,
     previous: Option<View>,
     pending: Option<Cue>,
+    last_favorite_sequence: Option<u64>,
 }
 
 #[model]
@@ -88,6 +92,21 @@ impl SoundState {
         }
         self.pending = self.feedback.observe(self.previous.as_ref(), view, at);
         self.previous = Some(view.clone());
+    }
+
+    pub fn favorite_result(&mut self, change: Option<&howff_menu::FavoriteChange>) {
+        let Some(previous) = self.last_favorite_sequence else {
+            self.last_favorite_sequence = Some(change.map_or(0, |change| change.sequence));
+            return;
+        };
+        if let Some(change) = change.filter(|change| change.sequence > previous) {
+            self.last_favorite_sequence = Some(change.sequence);
+            self.pending = Some(if change.favorite {
+                Cue::LabelOn
+            } else {
+                Cue::LabelOff
+            });
+        }
     }
 
     pub fn input(&mut self, action: Action, at: u64) {
@@ -157,6 +176,7 @@ struct Feedback {
     last_action: Option<u64>,
     seen_rooms: BTreeSet<String>,
     partner_was_ready: bool,
+    last_relay: String,
 }
 
 fn selection(view: &View) -> Option<String> {
@@ -175,6 +195,7 @@ fn selection(view: &View) -> Option<String> {
         Page::Games if view.library.keyboard => {
             Some(format!("keyboard:{}", view.library.key_selected))
         }
+        Page::Host | Page::Joined if view.manages_network() => Some(view.selected.to_string()),
         Page::Mode | Page::Choice => Some(view.selected.to_string()),
         Page::Rooms | Page::Lobby => view.rooms.get(view.selected).map(|row| row.key.clone()),
         Page::Games | Page::Candidates => {
@@ -191,6 +212,10 @@ fn elapsed(last: Option<u64>, now: u64, interval: u64) -> bool {
 
 impl Feedback {
     pub fn input(&mut self, action: Action, view: &View, now: u64) -> Option<Cue> {
+        if view.favorite_target(action).is_some() {
+            self.navigation_at = None;
+            return None;
+        }
         if matches!(
             action,
             Action::Up
@@ -271,8 +296,9 @@ impl Feedback {
                 {
                     Some(Cue::Confirm)
                 }
-                Page::Host if view.host_action_enabled() => Some(Cue::Confirm),
-                Page::Joined if view.network_only && view.host_action_enabled() => {
+                Page::Host | Page::Joined
+                    if view.host_action_enabled() && view.phase != Phase::HostReady =>
+                {
                     Some(Cue::Confirm)
                 }
                 Page::Leaving if matches!(view.phase, Phase::RestoreFailed | Phase::RoomActive) => {
@@ -291,6 +317,20 @@ impl Feedback {
     }
 
     fn room_cue(&mut self, old: &View, next: &View) -> Option<Cue> {
+        if next.phase == Phase::Failed {
+            self.last_relay.clear();
+        }
+        if let Some(session) = next.relay_session() {
+            if self.last_relay == session {
+                return None;
+            }
+            self.last_relay = session.to_owned();
+            return Some(if next.page == Page::Host {
+                Cue::RelaySend
+            } else {
+                Cue::RelayCatch
+            });
+        }
         let ready = |view: &View| match view.phase {
             Phase::HostReady | Phase::WaitingStart => view.ready,
             Phase::NetworkConnected => view.connected,
@@ -311,7 +351,6 @@ impl Feedback {
         match next.phase {
             Phase::Failed | Phase::RestoreFailed => Some(Cue::Error),
             Phase::ApprovalPending => Some(Cue::JoinRequest),
-            Phase::Starting => Some(Cue::Start),
             Phase::WaitingPeer if next.page == Page::Host && old.phase == Phase::Creating => {
                 Some(Cue::RoomOpened)
             }
@@ -400,6 +439,35 @@ mod tests {
     use mirui::audio::{AudioCommand, AudioMixer};
 
     #[test]
+    fn launch_relay_sounds_once_per_session_and_role() {
+        for (page, phase, sound) in [
+            (Page::Host, Phase::HostReady, Cue::RelaySend),
+            (Page::Joined, Phase::WaitingStart, Cue::RelayCatch),
+        ] {
+            let mut policy = Feedback::default();
+            let ready = View {
+                page,
+                phase,
+                ready: true,
+                ..View::default()
+            };
+            let mut started = View {
+                phase: Phase::Starting,
+                launch_session: Some("room".into()),
+                ..ready.clone()
+            };
+            assert_eq!(policy.input(Action::Confirm, &ready, 50), None);
+            assert_eq!(policy.observe(Some(&ready), &started, 100), Some(sound));
+            assert_eq!(policy.observe(Some(&ready), &started, 120), None);
+            started.launch_session = Some("new game".into());
+            started.network_only = true;
+            assert_eq!(policy.observe(Some(&ready), &started, 200), None);
+            started.network_only = false;
+            assert_eq!(policy.observe(Some(&ready), &started, 300), Some(sound));
+        }
+    }
+
+    #[test]
     fn plugin_controls_expire_with_the_menu() {
         use mirui::surface::framebuf::FramebufSurface;
         let mut app = App::new(FramebufSurface::new(16, 16, |_, _| {}));
@@ -413,7 +481,7 @@ mod tests {
 
     #[test]
     fn all_cues_are_finite_nonzero_and_unclipped() {
-        assert_eq!(bank::BANK.cues().len(), Cue::PeerLost as usize + 1);
+        assert_eq!(bank::BANK.cues().len(), Cue::RelayCatch as usize + 1);
         for cue in bank::BANK.cues() {
             let mut mixer = AudioMixer::<4>::new(&bank::BANK, 48_000).unwrap();
             mixer

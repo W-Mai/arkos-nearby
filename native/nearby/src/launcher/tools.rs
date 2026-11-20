@@ -82,6 +82,7 @@ mod tests {
                 tab: 1,
                 overlay: Some(Overlay::Tools),
                 selection: 0,
+                disconnect_for_play: None,
                 entry: None,
                 controls: controls::Controls::default(),
                 tools: Tools {

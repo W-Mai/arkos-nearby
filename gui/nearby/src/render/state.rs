@@ -1,7 +1,7 @@
 use super::rows::{self, Row};
 use super::{copy::*, selection, style::*};
 use crate::model::{Page, View};
-use TextField::{Headline, HostButton, Next};
+use TextField::{Headline, Next};
 use mirui::app::RendererFactory;
 use mirui::core::model::ModelList;
 use mirui::prelude::*;
@@ -13,7 +13,6 @@ use std::rc::Rc;
 pub(super) enum TextField {
     Headline,
     Next,
-    HostButton,
 }
 
 #[derive(Default)]
@@ -186,6 +185,10 @@ pub(super) struct DisplayState {
     pub(super) stamp: Color,
     #[observe]
     pub(super) activity: [Color; 3],
+    sleeve: super::binding::Sleeve,
+    departing_sleeve: super::binding::Pose,
+    #[observe]
+    pub(super) sleeve_pose: super::binding::Pose,
     timeline: super::motion::Timeline,
     feedback: crate::feedback::Feedback,
     #[observe]
@@ -201,8 +204,21 @@ impl DisplayState {
     }
 
     pub(super) fn present(&mut self, view: &View) -> Changes {
+        if self.role == DisplayRole::Catalog
+            && !self.view.launcher.navigation
+            && self.view.launcher.overlay.is_empty()
+            && (view.launcher.navigation || !view.launcher.overlay.is_empty())
+        {
+            self.departing_sleeve = self.sleeve_pose;
+        }
         let bind_rows = renders_rows(self.role, view);
         let binding_activated = bind_rows && !renders_rows(self.role, &self.view);
+        if (self.role == DisplayRole::Primary && !view.launcher.enabled && !view.return_to_launcher)
+            || self.role == DisplayRole::Catalog
+        {
+            self.sleeve.present(view);
+            self.sleeve_pose = self.sleeve.pose();
+        }
         self.network_connected = view.connected || view.launcher.retained;
         self.scanning_rooms = view.refreshing;
         self.has_online_room = view.rooms.iter().any(|row| row.available);
@@ -516,6 +532,9 @@ impl DisplayState {
             Page::Games | Page::Candidates if !self.view.entries.is_empty() => {
                 Some(self.view.selected.min(self.entries.len().saturating_sub(1)))
             }
+            Page::Host | Page::Joined if self.view.manages_network() && !self.view.busy => {
+                Some(self.view.selected.min(1))
+            }
             Page::Host if host_action_enabled(&self.view) => Some(0),
             Page::Joined if self.view.network_only && host_action_enabled(&self.view) => Some(0),
             _ => None,
@@ -596,6 +615,21 @@ impl DisplayState {
         )
     }
 
+    pub(super) fn selected_game_key(&self) -> Option<String> {
+        self.library
+            .entries
+            .get(self.library_selection())
+            .map(|row| row.key.clone())
+    }
+
+    pub(super) fn source_sleeve(&self) -> super::binding::Pose {
+        if self.view.launcher.navigation || !self.view.launcher.overlay.is_empty() {
+            self.departing_sleeve
+        } else {
+            self.sleeve_pose
+        }
+    }
+
     #[observe]
     pub(super) fn library_kind(&self) -> crate::model::LibraryKind {
         self.library.detail.kind
@@ -642,9 +676,9 @@ impl DisplayState {
     }
 
     #[observe]
-    pub(super) fn playable_selection(&self) -> bool {
+    pub(super) fn shows_netplay_hint(&self) -> bool {
         self.view.launcher.enabled
-            && !self.view.launcher.key.is_empty()
+            && self.view.launcher.netplay
             && !self.view.launcher.navigation
             && self.view.launcher.overlay.is_empty()
             && !self.view.library.keyboard
@@ -654,6 +688,16 @@ impl DisplayState {
     #[observe]
     pub(super) fn busy(&self) -> bool {
         self.view.busy
+    }
+
+    #[observe]
+    pub(super) fn manages_network(&self) -> bool {
+        self.view.manages_network()
+    }
+
+    #[observe]
+    pub(super) fn confirming_disconnect(&self) -> bool {
+        self.view.confirm_disconnect
     }
 
     #[observe]
@@ -737,8 +781,16 @@ impl DisplayState {
             .map_or((0, 0), |gate| gate.counts())
     }
 
-    pub(super) fn advance_frame(&mut self, now: u64, theme: &mirui::ui::theme::Theme) -> Changes {
-        self.shelf.tick(now);
+    pub(super) fn advance_frame(
+        &mut self,
+        now: u64,
+        theme: &mirui::ui::theme::Theme,
+        reflect: bool,
+    ) -> Changes {
+        if self.sleeve.tick(now) {
+            self.sleeve_pose = self.sleeve.pose();
+        }
+        self.shelf.tick(now, reflect);
         self.frame(now, theme);
         self.launcher.tick(now);
         Changes::NONE
@@ -862,13 +914,13 @@ impl DisplayStateHandle {
         match field {
             Headline => self.headline(),
             Next => self.next(),
-            HostButton => self.host_button(),
         }
     }
 }
 
 pub(super) struct DisplayRuntime {
     pub state: DisplayHandle,
+    pub card_face: super::material::CardFaceHandle,
     pub shelf: DisplayHandle,
     pub catalog: DisplayHandle,
     pub room: DisplayHandle,
@@ -894,6 +946,7 @@ pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
     let room = register(app, DisplayRole::Room, Some(gates[2].clone()));
     app.add_system(advance::system());
     let deck = app.add_model(super::deck::Deck::default()).finish();
+    let card_face = app.add_model(super::material::CardFace::default()).finish();
     app.add_system(advance_deck::system(deck.clone()));
     app.add_system(super::cache::settled_layer::system());
     app.add_system(selection::update::system());
@@ -901,6 +954,7 @@ pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
     app.add_system(super::shelf::layout_shelves::system());
     app.add_resource(DisplayRuntime {
         state,
+        card_face,
         shelf,
         catalog,
         room,
@@ -953,6 +1007,9 @@ fn register<B: Surface, F: RendererFactory<B>>(
         room_art: false,
         stamp: app.theme().resolve(ACCENT_DIM),
         activity: [app.theme().resolve(BACKGROUND); 3],
+        sleeve: Default::default(),
+        sleeve_pose: Default::default(),
+        departing_sleeve: Default::default(),
         timeline: super::motion::Timeline::default(),
         feedback: crate::feedback::Feedback::default(),
         motion: super::motion::Frame::default(),
@@ -985,7 +1042,9 @@ fn advance(
         let now = clock.now_ns() / 1_000_000;
         // The primary model owns the live gesture and shared actor even when
         // retained display layers are hidden or represented by a frozen image.
-        runtime.state.advance_frame(now, &theme);
+        runtime
+            .state
+            .advance_frame(now, &theme, !runtime.deck.enabled());
         let mut active = display_activity(&runtime.deck, modal.model.paused());
         active[0] &= !suspension.model.paused();
         for ((state, gate), active) in [
@@ -997,7 +1056,9 @@ fn advance(
         .zip(active)
         {
             if let Some(now) = gate.sample(now, !active) {
-                state.advance_frame(now, &theme);
+                let reflect = runtime.deck.layer() == super::deck::Layer::Shelf
+                    && runtime.deck.expansion() == Fixed::ZERO;
+                state.advance_frame(now, &theme, reflect);
             }
         }
     }

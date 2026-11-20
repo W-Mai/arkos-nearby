@@ -15,6 +15,7 @@ impl Target {
                 view["page"],
                 view["return_to_launcher"],
                 view["network_only"],
+                view["confirm_disconnect"],
                 view["current_game"],
                 launcher["enabled"],
                 launcher["tab"],

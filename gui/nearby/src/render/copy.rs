@@ -97,6 +97,9 @@ pub(super) fn phase(view: &View) -> Phase {
 }
 
 pub(super) fn headline(view: &View) -> &str {
+    if view.manages_network() && view.confirm_disconnect {
+        return "断开组网？";
+    }
     match phase(view) {
         Phase::ResolvingGame => "正在查找本机游戏",
         Phase::SelectingGame => "选择对应游戏",
@@ -124,6 +127,9 @@ pub(super) fn headline(view: &View) -> &str {
 }
 
 pub(super) fn next_step(view: &View) -> &str {
+    if view.manages_network() && view.confirm_disconnect {
+        return "断开后将恢复原 Wi-Fi";
+    }
     if view.network_only {
         return match phase(view) {
             Phase::ResolvingGame | Phase::SelectingGame => "正在查找对应游戏",
@@ -136,7 +142,7 @@ pub(super) fn next_step(view: &View) -> &str {
             Phase::Leaving => "正在断开连接并恢复 Wi-Fi",
             Phase::Creating => "房间准备好后，好友才能加入",
             Phase::WaitingPeer => "请好友选择这个房间加入",
-            Phase::ApprovalPending => "按 A 确认，B 关闭房间",
+            Phase::ApprovalPending => "按 A 允许好友加入",
             Phase::Closed | Phase::Failed => "按 B 返回，重新创建或选择房间",
             Phase::RestoreFailed => "按 A 重试，完成后再返回",
             Phase::RoomActive => "按 A 关闭上一场后继续",
@@ -178,7 +184,10 @@ pub(super) fn next_step(view: &View) -> &str {
 }
 
 pub(super) fn button_text(view: &View) -> &str {
-    if view.network_only && view.connected && view.phase == Phase::NetworkConnected {
+    if view.manages_network() {
+        if view.confirm_disconnect {
+            return "保留连接";
+        }
         return if view.return_to_launcher {
             "返回首页"
         } else {
@@ -301,9 +310,6 @@ pub(super) fn hint_text(view: &View) -> &str {
     if view.page == Page::Mode && view.lobby {
         return "上 / L 展开房间";
     }
-    if view.network_only && view.connected && view.phase == Phase::NetworkConnected {
-        return "连接保持中";
-    }
     if matches!(view.page, Page::Games | Page::Candidates) {
         return if view.busy {
             "正在核对游戏"
@@ -333,6 +339,9 @@ pub(super) fn hint_text(view: &View) -> &str {
 }
 
 pub(super) fn confirm_text(view: &View) -> &str {
+    if view.manages_network() {
+        return if view.busy { "" } else { "选择" };
+    }
     if view.launcher.enabled {
         if view.busy || view.launcher.navigation {
             return "";
@@ -364,13 +373,7 @@ pub(super) fn confirm_text(view: &View) -> &str {
             ""
         };
     }
-    if view.network_only && view.connected && view.phase == Phase::NetworkConnected && !view.busy {
-        return if view.return_to_launcher {
-            "返回收藏"
-        } else {
-            "返回系统"
-        };
-    }
+
     match phase(view) {
         Phase::RestoreFailed => "重试",
         Phase::RoomActive => "关闭",

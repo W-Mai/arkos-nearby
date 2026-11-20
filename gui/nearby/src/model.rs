@@ -84,6 +84,8 @@ pub struct View {
     pub network_only: bool,
     #[serde(default)]
     pub connected: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_disconnect: bool,
     #[serde(default)]
     pub local_address: String,
     #[serde(default)]
@@ -92,6 +94,8 @@ pub struct View {
     pub player_names: [String; 2],
     #[serde(default)]
     pub room_game: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_session: Option<String>,
     pub page: Page,
     pub title: String,
     pub core: String,
@@ -116,6 +120,16 @@ pub struct View {
 }
 
 impl View {
+    pub fn relay_session(&self) -> Option<&str> {
+        if self.network_only
+            || self.phase != Phase::Starting
+            || !matches!(self.page, Page::Host | Page::Joined)
+        {
+            return None;
+        }
+        self.launch_session.as_deref().filter(|id| !id.is_empty())
+    }
+
     pub fn scene_page(&self) -> Page {
         if self.lobby && self.page == Page::Mode {
             Page::Lobby
@@ -128,14 +142,23 @@ impl View {
         matches!(self.page, Page::Mode | Page::Choice) && !self.busy
     }
 
+    pub fn manages_network(&self) -> bool {
+        self.network_only
+            && matches!(self.page, Page::Host | Page::Joined)
+            && matches!(
+                self.phase,
+                Phase::NetworkConnected | Phase::NetworkReconnecting
+            )
+    }
+
     pub fn host_action_enabled(&self) -> bool {
         if self.busy {
             return false;
         }
+        if self.manages_network() {
+            return true;
+        }
         match (self.page, self.phase) {
-            (Page::Host | Page::Joined, Phase::NetworkConnected) => {
-                self.network_only && self.connected
-            }
             (Page::Host, Phase::ApprovalPending) => true,
             (Page::Host, Phase::HostReady | Phase::Idle) => !self.network_only && self.ready,
             _ => false,
@@ -166,6 +189,28 @@ pub struct GameRow {
     pub name: String,
     pub detail: String,
     pub directory: bool,
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl View {
+    pub fn favorite_target(&self, action: Action) -> Option<&GameRow> {
+        if self.page != Page::Games || self.busy || self.library.keyboard {
+            return None;
+        }
+        let toggle = if !self.launcher.overlay.is_empty() {
+            action == Action::Confirm
+                && self.launcher.selected_action() == Some(MenuAction::ToggleFavorite)
+        } else {
+            (action == Action::Refresh && self.library.kind != LibraryKind::Platforms)
+                || (action == Action::Auxiliary
+                    && self.launcher.enabled
+                    && self.launcher.tab == 1
+                    && !self.launcher.key.is_empty())
+        };
+        self.entries
+            .get(self.selected)
+            .filter(|row| toggle && !row.directory && !row.key.is_empty())
+    }
 }
 
 impl Default for GameRow {
@@ -210,6 +255,11 @@ mod tests {
         room.phase = Phase::NetworkConnected;
         assert!(room.host_action_enabled());
         room.phase = Phase::NetworkReconnecting;
+        room.connected = false;
+        assert!(room.manages_network());
+        assert!(room.host_action_enabled());
+        room.phase = Phase::NetworkConfirming;
+        assert!(!room.manages_network());
         assert!(!room.host_action_enabled());
     }
 
@@ -255,6 +305,8 @@ pub enum LibraryKind {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct LibraryView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub favorite_change: Option<howff_menu::FavoriteChange>,
     pub kind: LibraryKind,
     pub load: howff_menu::LibraryLoad,
     pub query: String,

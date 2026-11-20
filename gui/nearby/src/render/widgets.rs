@@ -21,43 +21,24 @@ pub(super) fn paragraph(align: TextAlign, lines: u16) -> ParagraphStyle {
 #[compose]
 pub(super) fn hold_badge() -> Entity {
     ui! {
-        Row (
+        Text (
+            "长按 X 联机",
             width: Dimension::Content,
             height: 20,
             shrink: 0.0,
-            column_gap: 4,
             padding: Padding {
                 left: 4.into(),
                 right: 4.into(),
                 ..Default::default()
             },
-            align: AlignItems::Center,
-            bg_color: SHELL
-        ) {
-            Text (
-                "X",
-                width: 15,
-                height: 15,
-                font: font(BODY_SIZE),
-                font_size: BODY_SIZE,
-                text_color: SHELL,
-                bg_color: SHELL_TEXT,
-                paragraph: paragraph(Center, 1)
-            ) [
-                FONT_PAINT,
-            ]
-            Text (
-                "长按联机",
-                width: Dimension::Content,
-                height: 18,
-                font: font(BODY_SIZE),
-                font_size: BODY_SIZE,
-                text_color: SHELL_TEXT,
-                paragraph: paragraph(Center, 1)
-            ) [
-                FONT_PAINT,
-            ]
-        }
+            font: font(BODY_SIZE),
+            font_size: BODY_SIZE,
+            text_color: SHELL_TEXT,
+            bg_color: SHELL,
+            paragraph: paragraph(Center, 1)
+        ) [
+            FONT_PAINT,
+        ]
     }
 }
 
@@ -119,20 +100,6 @@ pub(super) fn live_label(
 ) -> Entity {
     ui! {
         caption (${ state.text(field) }, ${ color }, size, align, LABEL_LEADING)
-    }
-}
-
-#[compose]
-pub(super) fn action_label(state: model!(DisplayState), size: u16) -> Entity {
-    let content = state.clone();
-    ui! {
-        caption (
-            ${ content.text(TextField::HostButton) },
-            ${ if state.enabled() { ON_ACCENT } else { FOREGROUND } },
-            size,
-            Center,
-            LABEL_LEADING
-        )
     }
 }
 

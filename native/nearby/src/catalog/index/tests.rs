@@ -36,6 +36,38 @@ fn fixture() -> (PathBuf, IndexJob) {
 }
 
 #[test]
+fn portable_index_rebuilds_and_rejects_same_relative_paths_on_two_cards() {
+    let (root, job) = fixture();
+    let entry_path = root.join("nes/bomber.nes");
+    let digest = portable_key(&entry_path, &job.roots).unwrap();
+    assert_eq!(
+        crate::identity::encode(&digest),
+        format!("{:x}", Sha256::digest(b"nes/bomber.nes"))[..24],
+    );
+    let mut index = (*job.run()).clone();
+    assert_eq!(index.advertised_game(&digest).unwrap().path(), &entry_path);
+    assert!(
+        serde_json::to_value(&index)
+            .unwrap()
+            .get("by_portable_key")
+            .is_none()
+    );
+
+    let other = root.with_extension("other-card");
+    let mut duplicate = index.records[0].clone();
+    duplicate.entry.path = other.join("nes/bomber.nes");
+    // The two ROM roots are siblings on the device.
+    index.roots.push(other);
+    index.records.push(duplicate);
+    index.derive();
+    assert!(index.advertised_game(&digest).is_none());
+    index.records.pop();
+    index.derive();
+    assert_eq!(index.advertised_game(&digest).unwrap().path(), &entry_path);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn snapshots_share_identity_and_refresh_nested_inventory_and_names() {
     let (root, job) = fixture();
     let first = job.clone().run();

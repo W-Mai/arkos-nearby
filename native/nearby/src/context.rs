@@ -519,15 +519,22 @@ impl Context {
         let args = replace_core(&self.argv, &path);
         let matched = parse_selected(&profile.frontend, &args, false)?;
         require(
-            matched.supported
-                && matched.game_path == self.game_path
-                && matched.core_elf_bits == profile.elf_bits
-                && matched.core_sha256 == profile.core_sha256
-                && matched.frontend_sha256 == profile.frontend_sha256
-                && matched.identity.compatible(&room.room().game()),
+            matched.game_path == self.game_path,
             "Corresponding installed game, core or frontend differs",
         )?;
+        matched.check_match(room, profile)?;
         Ok(matched)
+    }
+
+    pub(crate) fn check_match(&self, room: &VerifiedRoom, profile: &Profile) -> Result<()> {
+        require(
+            self.supported
+                && self.core_elf_bits == profile.elf_bits
+                && self.core_sha256 == profile.core_sha256
+                && self.frontend_sha256 == profile.frontend_sha256
+                && self.identity.compatible(&room.room().game()),
+            "Corresponding installed game, core or frontend differs",
+        )
     }
 }
 

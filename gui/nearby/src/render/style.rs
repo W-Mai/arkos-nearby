@@ -8,7 +8,7 @@ pub(super) const TITLE_SIZE: u16 = 24;
 pub(super) const BODY_SIZE: u16 = 12;
 pub(super) const ROW_LEADING: i32 = 2;
 pub(super) const LABEL_LEADING: i32 = 6;
-pub(super) const FOCUS_BORDER: i32 = 2;
+const CONTROL_INSET: i32 = 2;
 // Outsets are percentages of the followed widget, independent of its dimensions.
 pub(super) const FOCUS_OUTSET_X_PERCENT: f32 = 3.25;
 pub(super) const FOCUS_OUTSET_Y_PERCENT: f32 = 3.5;
@@ -35,6 +35,10 @@ pub(super) const CLAY: ColorToken = ColorToken::Custom("clay");
 pub(super) const SKY: ColorToken = ColorToken::Custom("sky");
 pub(super) const HILL: ColorToken = ColorToken::Custom("hill");
 pub(super) const DEEP: ColorToken = ColorToken::Custom("deep");
+pub(super) const CARTRIDGE_PAPER: Color = Color::rgb(231, 218, 184);
+pub(super) const CARTRIDGE_BRASS: Color = Color::rgb(202, 157, 79);
+pub(super) const CARTRIDGE_REFLECTION: Color = Color::rgb(255, 227, 161);
+pub(super) const CARTRIDGE_INK: Color = Color::rgb(39, 38, 34);
 pub(super) const SHELL: ColorToken = ColorToken::Custom("shell");
 pub(super) const SHELL_EDGE: ColorToken = ColorToken::Custom("shell-edge");
 pub(super) const SHELL_FACE: ColorToken = ColorToken::Custom("shell-face");
@@ -80,6 +84,9 @@ impl Metrics {
     pub fn keycap_size(self) -> i32 {
         i32::from(self.small) + 6
     }
+    pub fn focus_border(self) -> i32 {
+        self.sized(3, 4, 4)
+    }
     pub fn footer_height(self) -> i32 {
         self.keycap_size() + 4
     }
@@ -122,6 +129,13 @@ impl Metrics {
     pub fn row_padding(self) -> Padding {
         Padding::all(self.sized(3, 4, 6))
     }
+    pub fn cartridge_title_padding(self) -> Padding {
+        Padding {
+            left: self.gap.into(),
+            right: self.gap.into(),
+            ..Default::default()
+        }
+    }
     pub fn preview_title_height(self) -> i32 {
         i32::from(TITLE_SIZE) + LABEL_LEADING
     }
@@ -159,10 +173,10 @@ impl Metrics {
     }
     pub fn card_padding(self) -> Padding {
         Padding {
-            top: FOCUS_BORDER.into(),
+            top: CONTROL_INSET.into(),
             bottom: self.sized(4, 4, 8).into(),
-            left: FOCUS_BORDER.into(),
-            right: FOCUS_BORDER.into(),
+            left: CONTROL_INSET.into(),
+            right: CONTROL_INSET.into(),
         }
     }
     pub fn header_padding(self) -> Padding {

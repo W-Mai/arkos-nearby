@@ -1,7 +1,7 @@
 use super::state::{DisplayState, PageKey};
 use mirui::prelude::*;
 use mirui::ui::widgets::FollowBounds;
-use mirui::ui::{Hidden, Parent};
+use mirui::ui::{Hidden, LayoutGeometry, Outputs, Parent};
 
 #[component]
 pub(super) struct FocusTarget {
@@ -46,6 +46,132 @@ pub(super) struct SelectionFrame {
     pub body: Entity,
     pub page: PageKey,
     pub state: model!(DisplayState),
+}
+
+#[component]
+#[derive(Clone, Copy)]
+pub(super) struct Outline {
+    #[depends_on(LayoutGeometry)]
+    pub frame: Entity,
+    // The sibling shares this coordinate space even when it is painted offscreen.
+    #[depends_on(LayoutGeometry)]
+    pub panel: Entity,
+    pub width: Fixed,
+}
+
+#[event]
+fn outline_panel(
+    node: entity!(),
+    outlines: query!(Outline),
+    parents: query!(Parent),
+    commands: commands!(),
+) {
+    if let Some((outline, parent)) = outlines.get(node).zip(parents.get(node)) {
+        commands.insert(
+            node,
+            Outline {
+                panel: parent.0,
+                ..*outline
+            },
+        );
+    }
+}
+
+#[view(component = Outline, attach = outline_panel::callback(), invalidation = Visual)]
+pub(super) fn outline(
+    outline: component!(),
+    paint: paint!(),
+    geometry: res!(Outputs<LayoutGeometry>),
+    frames: query!(SelectionFrame),
+    theme: res!(mirui::ui::theme::Theme),
+) {
+    let Some(((bounds, panel), frame)) = geometry
+        .get(outline.frame)
+        .zip(geometry.get(outline.panel))
+        .zip(frames.get(outline.frame))
+    else {
+        return;
+    };
+    let Some(border) = outline_rect(bounds, panel, frame.state.motion().expansion()) else {
+        return;
+    };
+    let width = outline.width.min(border.w / 2).min(border.h / 2);
+    if width <= Fixed::ZERO {
+        return;
+    }
+    let color = theme.resolve(super::style::ACCENT);
+    let rect = paint.rect();
+    let transform = paint
+        .transform()
+        .compose(&mirui::types::Transform::translate(rect.x, rect.y));
+    for area in [
+        Rect { h: width, ..border },
+        Rect {
+            y: border.y + border.h - width,
+            h: width,
+            ..border
+        },
+        Rect {
+            y: border.y + width,
+            w: width,
+            h: border.h - width * 2,
+            ..border
+        },
+        Rect {
+            x: border.x + border.w - width,
+            y: border.y + width,
+            w: width,
+            h: border.h - width * 2,
+        },
+    ] {
+        paint.draw(&mirui::render::command::DrawCommand::Fill {
+            area,
+            color,
+            transform,
+            quad: Some(transform.apply_rect(area)),
+            radius: Fixed::ZERO,
+            opa: 255,
+        });
+    }
+}
+
+pub(super) fn outline_rect(
+    bounds: mirui::ui::LayoutGeometryRead,
+    panel: mirui::ui::LayoutGeometryRead,
+    (x, y): (Fixed, Fixed),
+) -> Option<Rect> {
+    let to_panel = panel.transform().inverse()?;
+    let percent = Fixed::from_int(100);
+    let mut border = bounds.border_rect();
+    let expand_x = border.w * x / percent;
+    let expand_y = border.h * y / percent;
+    border.x -= expand_x;
+    border.y -= expand_y;
+    border.w += expand_x * 2;
+    border.h += expand_y * 2;
+    let corners = to_panel.compose(&bounds.transform()).apply_rect(border)?;
+    let mut border = Rect::bounding_quad(&corners);
+
+    let clip = bounds.clip();
+    if clip.w <= Fixed::ZERO || clip.h <= Fixed::ZERO {
+        return None;
+    }
+    // Leave room for the moving outline beyond the row viewport. Clamp the
+    // whole rectangle so no individual edge disappears into a scroll mask.
+    let allowed = to_panel
+        .apply_rect(clip.inflate(6.into()))
+        .and_then(|clip| Rect::bounding_quad(&clip).intersect(&panel.border_rect()))?;
+    border.w = border.w.min(allowed.w);
+    border.h = border.h.min(allowed.h);
+    border.x = border
+        .x
+        .max(allowed.x)
+        .min(allowed.x + allowed.w - border.w);
+    border.y = border
+        .y
+        .max(allowed.y)
+        .min(allowed.y + allowed.h - border.h);
+    Some(border)
 }
 
 pub(super) fn contains(

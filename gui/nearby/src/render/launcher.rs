@@ -1,21 +1,23 @@
 use super::actor::actor;
+use super::artwork::sleeve_face;
 use super::configuration::{hints as configuration_hints, panel as configuration_panel};
 use super::deck::{ActionAnchor, ActionLayout, ActorScope, Layer};
 use super::deferred::Pane;
 use super::management::{hints as management_hints, panel as management_panel};
+use super::reading::cartridge_title;
 use super::saves::{hints as saves_hints, panel as saves_panel};
 use super::wifi::{heading as wifi_heading, hints as wifi_hints, panel as wifi_panel};
 use super::{
     chrome::{footer, header},
     composition::{focus_frame, room_pages},
     deck::{Deck, FULL, catalog_share, shelf_share, transform},
-    library::library,
+    library::{cartridge_source, library},
     pixel::{Scenery::Margins, backdrop},
     state::{DisplayState, PageKey},
 };
 use super::{
     style::*,
-    widgets::{control_key, control_label, shadow, text_block},
+    widgets::{control_key, control_label, hold_badge, shadow, text_block},
 };
 use crate::launcher::Launcher;
 use crate::model::{LibraryKind, Page};
@@ -73,7 +75,7 @@ fn library_contents(route: PageKey, state: model!(DisplayState), metrics: Metric
         }
     };
     ui! {
-        focus_frame (body, route, state)
+        focus_frame (body, route, state, metrics)
     }
 }
 
@@ -121,7 +123,6 @@ pub(super) fn deck(
                     Column (id: "launcher_deck", grow: 1.0, min_height: 0, container: true) {
                         shelf_viewport (shelf, deck, metrics)
                         catalog_viewport (catalog, deck, metrics)
-                        game_feedback (state, metrics)
                     } on SizeChanged { deck.set_height(event.new.height); }
                     footer (route, state, metrics)
                 }
@@ -147,6 +148,8 @@ pub(super) fn deck(
                     mirui::ui::IgnoreHitTest,
                 ]
             }
+            game_feedback (state.clone(), deck.clone(), metrics)
+            primary_overlay (state.clone(), metrics)
             Column (
                 visible: ${ deck.panel_visible() },
                 position: Position::Absolute,
@@ -162,41 +165,49 @@ pub(super) fn deck(
                     grow: 1.0,
                     min_height: 0,
                     padding: metrics.modal_padding()
-                ) [
-                    super::material::PanelMotion::room(deck.clone()),
-                    mirui::ui::OffscreenRender::default().with_opacity(0),
-                ] {
+                ) {
                     Column (
                         grow: 1.0,
-                        min_height: 0,
-                        border_width: 2,
-                        border_color: SHELL_EDGE,
-                        bg_color: BACKGROUND
+                        min_height: 0
                     ) [
-                        ActorScope::Layer(Layer::Room),
+                        super::material::PanelMotion::room(deck.clone()),
+                        mirui::ui::OffscreenRender::default().with_opacity(0),
                     ] {
-                        room_pages (room, panel_metrics)
+                        Column (
+                            grow: 1.0,
+                            min_height: 0,
+                            border_width: 2,
+                            border_color: SHELL_EDGE,
+                            bg_color: BACKGROUND
+                        ) [ActorScope::Layer(Layer::Room)] {
+                            room_pages (room, panel_metrics)
+                        }
+                        View (height: metrics.shadow_height(), shrink: 0.0, bg_color: SHELL_EDGE)
                     }
-                    View (height: metrics.shadow_height(), shrink: 0.0, bg_color: SHELL_EDGE)
                 }
             }
-            primary_overlay (state.clone(), metrics)
             actor (state, deck, shelf, catalog, room)
         }
     }
 }
 
 #[compose]
-fn game_feedback(state: model!(DisplayState), metrics: Metrics) -> Entity {
+fn game_feedback(state: model!(DisplayState), deck: model!(Deck), metrics: Metrics) -> Entity {
     let gesture = state.launcher();
     let caption = gesture.clone();
     let charge = gesture.clone();
     let lead = gesture.clone();
+    let handoff = deck.clone();
+    let handoff_caption = deck.clone();
+    let handoff_fill = deck.clone();
+    let handoff_lead = deck.clone();
+    let dimmer = deck.clone();
     ui! {
         Column (
             visible: ${
                 gesture.progress() > 0 || gesture.opening_room()
                     || (state.launcher().enabled() && state.busy() && !state.status().is_empty())
+                    || transferring_charge(&handoff) && super::material::charge_opacity(&handoff) > Fixed::ZERO
             },
             id: "launcher_game_feedback",
             position: Position::Absolute,
@@ -206,7 +217,7 @@ fn game_feedback(state: model!(DisplayState), metrics: Metrics) -> Entity {
             height: Dimension::percent(100),
             align: AlignItems::Center,
             justify: JustifyContent::Center,
-            bg_color: Color::rgba(8, 14, 16, 110)
+            bg_color: ${ Color::rgba(8, 14, 16, (super::material::charge_opacity(&dimmer) * 110).to_int() as u8) }
         ) [
             mirui::ui::IgnoreHitTest,
         ] {
@@ -221,12 +232,14 @@ fn game_feedback(state: model!(DisplayState), metrics: Metrics) -> Entity {
                 bg_color: SHELL,
                 border_color: WARNING,
                 border_width: 2
-            ) {
+            ) [
+                super::material::RoomChargeOrigin,
+            ] {
                 Text (
                     text: ${
                         if state.busy() {
                             state.status()
-                        } else if caption.opening_room() {
+                        } else if caption.opening_room() || transferring_charge(&handoff_caption) {
                             "正在准备联机".into()
                         } else {
                             "按住 X 进入联机".into()
@@ -248,7 +261,7 @@ fn game_feedback(state: model!(DisplayState), metrics: Metrics) -> Entity {
                         top: 0,
                         left: ${
                             Dimension::Percent(
-                                if lead.progress() > 0 {
+                                if lead.progress() > 0 || transferring_charge(&handoff_lead) {
                                     Fixed::ZERO
                                 } else {
                                     lead.loading_start() * Fixed::from_int(100)
@@ -258,7 +271,9 @@ fn game_feedback(state: model!(DisplayState), metrics: Metrics) -> Entity {
                         height: Dimension::percent(100),
                         width: ${
                             Dimension::Percent(
-                                if charge.progress() > 0 {
+                                if transferring_charge(&handoff_fill) {
+                                    Fixed::from_int(100)
+                                } else if charge.progress() > 0 {
                                     Fixed::from_ratio(i32::from(charge.progress()), 10)
                                 } else {
                                     (charge.loading_end() - charge.loading_start()) * Fixed::from_int(100)
@@ -271,6 +286,10 @@ fn game_feedback(state: model!(DisplayState), metrics: Metrics) -> Entity {
             }
         }
     }
+}
+
+fn transferring_charge(deck: &super::deck::DeckHandle) -> bool {
+    deck.layer() == Layer::Room && deck.room_entry() == Some(super::deck::RoomEntry::Charge)
 }
 
 #[compose]
@@ -346,7 +365,11 @@ fn overlay_contents(
 ) -> Entity {
     let hint = state.clone();
     let presence = state.popup();
+    let face = res!(super::state::DisplayRuntime).with(|runtime| runtime.card_face.clone());
+    let edition = face.clone();
     let dimmer = presence.clone();
+    let attached = presence.clone();
+    let slot = face.clone();
     ui! {
         Column (
             position: Position::Absolute,
@@ -354,97 +377,111 @@ fn overlay_contents(
             top: 0,
             width: Dimension::percent(100),
             height: Dimension::percent(100),
-            justify: JustifyContent::Center,
-            bg_color: ${ Color::rgba(10, 12, 16, (dimmer.progress() * Fixed::from_int(170)).to_int() as u8) }
+            justify: JustifyContent::Center
         ) {
+            if ${ attached.cartridge() && slot.origin().is_some() && attached.detached_at().is_none() } {
+                cartridge_slot (face.clone())
+            }
+            View (
+                position: Position::Absolute,
+                left: 0,
+                top: 0,
+                width: Dimension::percent(100),
+                height: Dimension::percent(100),
+                bg_color: ${ Color::rgba(10, 12, 16, (dimmer.progress() * Fixed::from_int(170)).to_int() as u8) }
+            ) [
+                mirui::ui::IgnoreHitTest,
+            ]
             Column (
                 grow: 1.0,
                 min_height: 0,
                 padding: metrics.modal_padding()
-            ) [
-                super::material::PanelMotion::popup(presence.clone()),
-                mirui::ui::OffscreenRender::default().with_opacity(0),
-            ] {
-                Column (
-                    grow: 1.0,
-                    min_height: 0,
-                    padding: Padding::all(metrics.gap * 2),
-                    row_gap: metrics.gap,
-                    bg_color: BACKGROUND,
-                    border_width: 2,
-                    border_color: SHELL_EDGE
-                ) [
-                    ActorScope::Layer(Layer::Actions),
-                    super::actions_damage::ActionsPanel,
+            ) {
+                Column (grow: 1.0, min_height: 0, container: true) [
+                    super::material::PanelMotion::popup(presence.clone(), face.clone()),
+                    mirui::ui::OffscreenRender::default().with_opacity(0),
                 ] {
-                    backdrop (Margins)
-                    Row (
-                        min_width: 0,
-                        column_gap: metrics.gap,
-                        align: AlignItems::Center,
-                        height: Dimension::Content,
-                        min_height: i32::from(TITLE_SIZE) + LABEL_LEADING,
-                        shrink: 0.0,
-                        padding: Padding {
-                            left: metrics.gap.into(),
-                            right: metrics.gap.into(),
-                            ..Default::default()
-                        },
-                        bg_color: SHELL
-                    ) {
-                        Column (
-                            grow: 1.0,
+                    Column (
+                        grow: 1.0,
+                        min_height: 0,
+                        padding: Padding::all(metrics.gap * 2),
+                        row_gap: metrics.gap,
+                        bg_color: BACKGROUND,
+                        border_width: 2,
+                        border_color: SHELL_EDGE
+                    ) [
+                        ActorScope::Layer(Layer::Actions),
+                        super::actions_damage::ActionsPanel,
+                    ] {
+                        backdrop (Margins)
+                        Row (
                             min_width: 0,
+                            column_gap: metrics.gap,
+                            align: AlignItems::Center,
                             height: Dimension::Content,
-                            min_height: i32::from(TITLE_SIZE) + LABEL_LEADING
+                            min_height: i32::from(TITLE_SIZE) + LABEL_LEADING,
+                            shrink: 0.0,
+                            padding: Padding {
+                                left: metrics.gap.into(),
+                                right: metrics.gap.into(),
+                                ..Default::default()
+                            },
+                            bg_color: SHELL
                         ) {
-                            if ${ state.wifi_active() } {
-                                wifi_heading (state, metrics)
-                            } else {
-                                overlay_label (state, None)
+                            Column (
+                                grow: 1.0,
+                                min_width: 0,
+                                height: Dimension::Content,
+                                min_height: i32::from(TITLE_SIZE) + LABEL_LEADING
+                            ) {
+                                if ${ state.wifi_active() } {
+                                    wifi_heading (state, metrics)
+                                } else {
+                                    overlay_label (state, None)
+                                }
                             }
                         }
-                    }
-                    View (height: metrics.rule_height(), bg_color: WARNING, shrink: 0.0)
-                    Row (grow: 1.0, min_height: 0, column_gap: metrics.gap * 2) {
-                        if ${
-                            state.management().active() || state.saves().active()
-                                || state.configuration().active()
-                        } {
-                            configuration_or_saves_panel (state, metrics)
-                        } else {
-                            Column (grow: 1.0, min_height: 0, min_width: 0) {
-                                if ${ state.wifi_active() } {
-                                    wifi_panel (state, metrics)
-                                } else {
-                                    Column (grow: 1.0, min_height: 0, min_width: 0) {
-                                        if ${ state.overlay_kind() == "controls" } {
-                                            level_panel (state, display.settings(), metrics)
-                                        } else {
-                                            Column (grow: 1.0, min_width: 0, min_height: 0) {
-                                                if ${ state.overlay_kind() == "details" } {
-                                                    details_panel (state, metrics)
-                                                } else {
-                                                    Column (
-                                                        grow: 1.0,
-                                                        min_width: 0,
-                                                        min_height: 0,
-                                                        row_gap: metrics.gap
-                                                    ) {
-                                                        walk ${ 0_usize..state.item_count().div_ceil(2) } with line {
-                                                            Row (
-                                                                grow: 1.0,
-                                                                min_height: 0,
-                                                                column_gap: metrics.gap
-                                                            ) {
-                                                                walk 0_usize..2 with column {
-                                                                    if ${ line * 2 + column < state.item_count() } {
-                                                                        action_tile (
-                                                                            state,
-                                                                            display.settings(),
-                                                                            line * 2 + column,
-                                                                            metrics
-                                                                        )
+                        View (height: metrics.rule_height(), bg_color: WARNING, shrink: 0.0)
+                        Row (grow: 1.0, min_height: 0, column_gap: metrics.gap * 2) {
+                            if ${
+                                state.management().active() || state.saves().active()
+                                    || state.configuration().active()
+                            } {
+                                configuration_or_saves_panel (state, metrics)
+                            } else {
+                                Column (grow: 1.0, min_height: 0, min_width: 0) {
+                                    if ${ state.wifi_active() } {
+                                        wifi_panel (state, metrics)
+                                    } else {
+                                        Column (grow: 1.0, min_height: 0, min_width: 0) {
+                                            if ${ state.overlay_kind() == "controls" } {
+                                                level_panel (state, display.settings(), metrics)
+                                            } else {
+                                                Column (grow: 1.0, min_width: 0, min_height: 0) {
+                                                    if ${ state.overlay_kind() == "details" } {
+                                                        details_panel (state, metrics)
+                                                    } else {
+                                                        Column (
+                                                            grow: 1.0,
+                                                            min_width: 0,
+                                                            min_height: 0,
+                                                            row_gap: metrics.gap
+                                                        ) {
+                                                            walk ${ 0_usize..state.item_count().div_ceil(2) } with line {
+                                                                Row (
+                                                                    grow: 1.0,
+                                                                    min_height: 0,
+                                                                    column_gap: metrics.gap
+                                                                ) {
+                                                                    walk 0_usize..2 with column {
+                                                                        if ${ line * 2 + column < state.item_count() } {
+                                                                            action_tile (
+                                                                                state,
+                                                                                display.settings(),
+                                                                                line * 2 + column,
+                                                                                metrics
+                                                                            )
+                                                                        }
                                                                     }
                                                                 }
                                                             }
@@ -457,55 +494,156 @@ fn overlay_contents(
                                 }
                             }
                         }
-                    }
-                    Row (
-                        height: metrics.footer_height(),
-                        shrink: 0.0,
-                        column_gap: metrics.gap * 2,
-                        align: AlignItems::Center
-                    ) {
-                        if ${ state.wifi_active() } {
-                            wifi_hints (state, metrics)
-                        } else {
-                            Row (grow: 1.0, min_width: 0) {
-                                if ${
-                                    state.management().active() || state.saves().active()
-                                        || state.configuration().active()
-                                } {
-                                    configuration_or_saves_hints (state, metrics)
-                                } else {
-                                    Row (
-                                        grow: 1.0,
-                                        min_width: 0,
-                                        column_gap: metrics.gap * 2,
-                                        align: AlignItems::Center
-                                    ) {
-                                        if ${ state.overlay_kind() == "controls" && state.selected() < 2 } {
-                                            control_key ("左右", metrics, true)
-                                            control_label ("调节", metrics)
-                                        } else {
-                                            control_key ("A", metrics, true)
-                                            control_label (
-                                                ${ hint.confirm_label() },
-                                                metrics
-                                            )
-                                        }
-                                        if ${ state.detail_expanded() } {
-                                            control_key ("上下", metrics, false)
-                                            control_label ("滚动", metrics)
-                                        }
-                                        control_key ("B", metrics, false)
-                                        control_label ("返回", metrics)
-                                        Column (grow: 1.0, min_width: 0) {
-                                            action_reason (state, metrics)
+                        Row (
+                            height: metrics.footer_height(),
+                            shrink: 0.0,
+                            column_gap: metrics.gap * 2,
+                            align: AlignItems::Center
+                        ) {
+                            if ${ state.wifi_active() } {
+                                wifi_hints (state, metrics)
+                            } else {
+                                Row (grow: 1.0, min_width: 0) {
+                                    if ${
+                                        state.management().active() || state.saves().active()
+                                            || state.configuration().active()
+                                    } {
+                                        configuration_or_saves_hints (state, metrics)
+                                    } else {
+                                        Row (
+                                            grow: 1.0,
+                                            min_width: 0,
+                                            column_gap: metrics.gap * 2,
+                                            align: AlignItems::Center
+                                        ) {
+                                            if ${ state.overlay_kind() == "controls" && state.selected() < 2 } {
+                                                control_key ("左右", metrics, true)
+                                                control_label ("调节", metrics)
+                                            } else {
+                                                control_key ("A", metrics, true)
+                                                control_label (
+                                                    ${ hint.confirm_label() },
+                                                    metrics
+                                                )
+                                            }
+                                            if ${ state.detail_expanded() } {
+                                                control_key ("上下", metrics, false)
+                                                control_label ("滚动", metrics)
+                                            }
+                                            control_key ("B", metrics, false)
+                                            control_label ("返回", metrics)
+                                            Column (grow: 1.0, min_width: 0) {
+                                                action_reason (state, metrics)
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                    View (height: metrics.shadow_height(), shrink: 0.0, bg_color: SHELL_EDGE)
                 }
-                View (height: metrics.shadow_height(), shrink: 0.0, bg_color: SHELL_EDGE)
+            }
+            if ${ presence.cartridge() && face.origin().is_some() && presence.shows_front() } {
+                PageView (
+                    position: Position::Absolute,
+                    top: 0,
+                    left: 0,
+                    width: Dimension::percent(100),
+                    height: Dimension::percent(100),
+                    page: ${ Pane::Cartridge(edition.epoch()) }
+                ) [
+                    mirui::ui::IgnoreHitTest,
+                ] on CreatePage(create_cartridge_front::callback(face.clone(), presence.clone(), metrics))
+            }
+        }
+    }
+}
+
+#[compose]
+fn cartridge_slot(face: model!(super::material::CardFace)) -> Entity {
+    let top = face.clone();
+    let width = face.clone();
+    let height = face.clone();
+    ui! {
+        View (
+            position: Position::Absolute,
+            left: ${ face.origin().unwrap_or(Rect::ZERO).x },
+            top: ${ top.origin().unwrap_or(Rect::ZERO).y },
+            width: ${ width.origin().unwrap_or(Rect::ZERO).w },
+            height: ${ height.origin().unwrap_or(Rect::ZERO).h },
+            bg_color: SHELL_EDGE
+        ) [
+            mirui::ui::IgnoreHitTest,
+        ]
+    }
+}
+
+#[event]
+fn create_cartridge_front(
+    _event: event!(CreatePage<Pane>),
+    face: model!(super::material::CardFace),
+    presence: model!(crate::launcher::popup::Presence),
+    metrics: Metrics,
+) -> Entity {
+    let bounds = face.cover();
+    let platform = face.platform();
+    let title = face.title();
+    let pose = face.cartridge_pose();
+    let rect = face.origin().unwrap_or(Rect::ZERO);
+    let (ink, backdrop): (mirui::ui::theme::ThemedColor, _) = if pose.paper() >= Fixed::HALF {
+        (CARTRIDGE_INK.into(), CARTRIDGE_PAPER.into())
+    } else {
+        (SHELL_TEXT.into(), SHELL.into())
+    };
+    ui! {
+        Column (
+            position: Position::Absolute,
+            left: rect.x,
+            top: rect.y,
+            width: rect.w,
+            height: rect.h,
+            min_width: 0,
+            min_height: 0
+        ) [
+            super::material::CartridgeFront,
+            super::material::PanelMotion::front(presence.clone(), face.clone()),
+            mirui::ui::OffscreenRender::default(),
+        ] {
+            if face.shelf() {
+                Column (
+                    grow: 1.0,
+                    min_width: 0,
+                    min_height: 0,
+                    container: true,
+                    padding: Padding::all(super::shelf::CARD_INSET),
+                    bg_color: SHELL,
+                    border_color: SHELL_EDGE,
+                    border_width: 2
+                ) {
+                    View (grow: 1.0, min_width: 0, min_height: 0, clip_children: true) {
+                        Column (grow: 1.0, min_width: 0, min_height: 0, transform: ${ pose.cover() }) {
+                            cartridge_source (bounds, platform)
+                        }
+                    }
+                    if face.netplay() {
+                        Row (position: Position::Absolute, top: 4, left: 4) {
+                            hold_badge ()
+                        }
+                    }
+                    Row (
+                        height: super::shelf::LABEL_HEIGHT,
+                        shrink: 0.0,
+                        min_width: 0,
+                        bg_color: backdrop,
+                        padding: metrics.cartridge_title_padding()
+                    ) {
+                        cartridge_title (title, false, ink, backdrop)
+                    }
+                }
+                View (height: super::shelf::SHADOW, shrink: 0.0, bg_color: SHELL_EDGE)
+            } else {
+                sleeve_face (bounds, face.sleeve_pose(), platform, metrics, false)
             }
         }
     }
@@ -1436,7 +1574,7 @@ fn shelf_viewport(state: model!(DisplayState), deck: model!(Deck), metrics: Metr
     };
     ui! {
         Column (position: Position::Absolute, width: Dimension::percent(100), top: 0, height: ${ Dimension::Percent(shelf_share(deck.expansion()) * Fixed::from_int(100)) }, clip_children: true, min_height: 0, container: true) {
-            Column (position: Position::Absolute, top: 0, width: Dimension::percent(100), height: @(id("launcher_deck").height as height) { height }, transform: ${ super::deck::shelf_transform(deck.expansion(), deck.height()) }, padding: Padding::all(metrics.gap), min_height: 0) [ActorScope::Layer(Layer::Shelf)] {
+            Column (position: Position::Absolute, top: 0, width: Dimension::percent(100), height: @(id("launcher_deck").height as height) { height }, transform: ${ super::deck::shelf_transform(deck.expansion(), deck.height()) }, padding: Padding::all(metrics.gap / 2), min_height: 0) [ActorScope::Layer(Layer::Shelf)] {
                 shelf_snapshot_page (route, state, metrics)
             }
         }
@@ -1492,7 +1630,7 @@ fn shelf_snapshot_page(route: PageKey, state: model!(DisplayState), metrics: Met
         }
     };
     ui! {
-        focus_frame (body, route, state)
+        focus_frame (body, route, state, metrics)
     }
 }
 

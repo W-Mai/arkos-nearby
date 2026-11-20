@@ -54,7 +54,9 @@ impl Fixture {
             .unwrap()
     }
     fn operate(&mut self, record: &Record, op: Operation) -> Result<Option<launch::Intent>> {
-        self.store.operate(&record.key, &record.revision, op)
+        self.store
+            .operate(&record.key, &record.revision, op)
+            .map(|applied| applied.launch)
     }
 }
 impl Drop for Fixture {
@@ -175,4 +177,40 @@ fn image_decode_failure_does_not_remove_the_paired_file_from_a_backup() {
     let backup = f.find(Kind::Backup);
     f.operate(&backup, Operation::Restore).unwrap();
     assert_eq!(fs::read(image).unwrap(), b"damaged image bytes");
+}
+
+#[test]
+fn copy_destinations_are_real_records_and_keep_source_and_other_slots_intact() {
+    let mut f = Fixture::new();
+    let state = f.find(Kind::State);
+    let other = f.root.join("game/game.state2");
+    fs::write(&other, b"other slot").unwrap();
+    let apply = f
+        .store
+        .operate(&state.key, &state.revision, Operation::Backup)
+        .unwrap();
+    let id = apply.copied_to.unwrap();
+    let records = f.store.scan().unwrap().records;
+    let backup = records.iter().find(|r| r.key == id).unwrap();
+    assert_eq!(backup.kind, Kind::Backup);
+    assert!(!backup.time_label.is_empty());
+    assert_eq!(
+        fs::read(&state.path).unwrap(),
+        fs::read(&backup.path).unwrap()
+    );
+    fs::write(&state.path, b"newer").unwrap();
+    let restored = f
+        .store
+        .operate(&backup.key, &backup.revision, Operation::Restore)
+        .unwrap();
+    assert_eq!(restored.copied_to.as_deref(), Some(state.key.as_str()));
+    let records = f.store.scan().unwrap().records;
+    assert!(
+        records
+            .iter()
+            .any(|r| r.key == state.key && r.slot == Some(1))
+    );
+    assert_eq!(fs::read(&backup.path).unwrap(), b"state one");
+    assert_eq!(fs::read(&state.path).unwrap(), b"state one");
+    assert_eq!(fs::read(other).unwrap(), b"other slot");
 }

@@ -6,9 +6,7 @@ use super::{
     pixel::{self, art},
     state::{DisplayState, TextField},
     style::*,
-    widgets::{
-        action_label, control_key, guidance, label, live_label, paragraph, shadow, text_block,
-    },
+    widgets::{caption, control_key, guidance, label, live_label, paragraph, shadow, text_block},
 };
 use TextField::Headline;
 use mirui::prelude::*;
@@ -234,23 +232,49 @@ pub(super) fn network_panel(state: model!(DisplayState), metrics: Metrics) -> En
                 }
                 shadow (metrics)
             }
-            Column (
-                height: metrics.action_height(),
-                shrink: 0.0,
-                transform: ${ state.card_motion().card_transform(0) }
-            ) {
-                Column (
-                    grow: 1.0,
-                    bg_color: ${ if state.enabled() { ACCENT } else { PANEL } },
-                    justify: JustifyContent::Center
-                ) [
-                    Section::FocusHost,
-                    FocusTarget::fixed(0),
-                ] {
-                    action_label (state, TITLE_SIZE)
+            Row (height: metrics.action_height(), shrink: 0.0, column_gap: metrics.gap) {
+                network_action (state, metrics, 0)
+                if ${ state.manages_network() } {
+                    network_action (state, metrics, 1)
                 }
-                shadow (metrics)
             }
+        }
+    }
+}
+
+#[compose]
+fn network_action(state: model!(DisplayState), metrics: Metrics, index: usize) -> Entity {
+    ui! {
+        Column (
+            grow: 1.0,
+            min_width: 0,
+            transform: ${ state.card_motion().card_transform(index) }
+        ) {
+            Column (
+                grow: 1.0,
+                min_width: 0,
+                justify: JustifyContent::Center,
+                bg_color: ${ if state.selected() == Some(index) { ACCENT } else { PANEL } }
+            ) [
+                FocusTarget::fixed(index),
+            ] {
+                caption (
+                    ${
+                        if index == 0 {
+                            state.host_button()
+                        } else if state.confirming_disconnect() {
+                            "确认断开".into()
+                        } else {
+                            "断开组网".into()
+                        }
+                    },
+                    ${ if state.selected() == Some(index) { ON_ACCENT } else { FOREGROUND } },
+                    TITLE_SIZE,
+                    Center,
+                    LABEL_LEADING
+                )
+            }
+            shadow (metrics)
         }
     }
 }

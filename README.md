@@ -77,7 +77,7 @@ Howff 用 Wi-Fi Direct 连接两台 R36S。中文图形界面支持手柄操作�
 
 进入 **Options → Howff Nearby → 仅组网**，一台创建房间，另一台选中房间加入。连接完成后，两台按 **A「返回系统」**，再启动支持局域网联机的游戏，在游戏内创建或查找房间。
 
-再次打开 Howff Nearby 可以查看连接和设备地址，按 **B「断开并恢复 Wi-Fi」** 结束组网。
+在启动器按 **Select** 或重新打开 Howff Nearby，可查看已连接的设备和地址。按 **B** 或选中返回按钮按 **A**，连接继续保持。要恢复原 Wi-Fi，向右选择 **断开组网**，再选择 **确认断开**。
 
 <div align="center">
   <img src="docs/screenshots/network-mode.png" alt="仅组网与选择游戏入口" width="640" />

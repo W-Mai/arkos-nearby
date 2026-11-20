@@ -5,6 +5,7 @@ use mirui::prelude::*;
 pub(super) const FULL: Fixed = Fixed::from_ratio(13, 16);
 const MINIATURE: Fixed = Fixed::from_ratio(36, 100);
 const SLIDE: TweenConfig = TweenConfig::new(540, &ease::IN_OUT_CUBIC);
+const MAX_ROOM_STEP_MS: u64 = 24;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Layer {
@@ -13,6 +14,12 @@ pub(super) enum Layer {
     Catalog,
     Room,
     Actions,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RoomEntry {
+    Charge,
+    Action(usize),
 }
 
 #[component]
@@ -40,6 +47,7 @@ pub(super) enum ActionLayout {
     SavesList,
     SavesModal,
     SavesProgress,
+    SaveCopy,
     WifiList,
     WifiOptions,
     WifiKeyboard,
@@ -93,10 +101,15 @@ pub(super) struct Deck {
     #[observe]
     pub panel_visible: bool,
     #[observe]
+    pub room_entry: Option<RoomEntry>,
+    room_origin: Option<Rect>,
+    #[observe]
     pub height: Fixed,
     slide: Track,
     modal: crate::launcher::popup::Track,
     now: u64,
+    room_now: u64,
+    launcher_entry: RoomEntry,
     pause_background: bool,
     slide_clock: super::modal::AnimationClock,
     slide_now: u64,
@@ -110,10 +123,14 @@ impl Default for Deck {
             expansion: Fixed::ZERO,
             panel: Fixed::ZERO,
             panel_visible: false,
+            room_entry: None,
+            room_origin: None,
             height: Fixed::ZERO,
             slide: Track::new(SLIDE),
             modal: crate::launcher::popup::Track::visibility(),
             now: 0,
+            room_now: 0,
+            launcher_entry: RoomEntry::Charge,
             pause_background: false,
             slide_clock: super::modal::AnimationClock::default(),
             slide_now: 0,
@@ -142,20 +159,51 @@ impl Deck {
         };
         if view.launcher.enabled {
             self.enabled = true;
+            self.launcher_entry = if view.launcher.overlay_kind == "game" {
+                view.launcher
+                    .items
+                    .iter()
+                    .position(|item| item.action == crate::model::MenuAction::Multiplayer)
+                    .map_or(RoomEntry::Charge, RoomEntry::Action)
+            } else {
+                RoomEntry::Charge
+            };
             self.slide
                 .set(view.launcher.tab == 1, self.slide_now, SLIDE);
+        }
+        if view.return_to_launcher && view.current_game && self.enabled && !self.panel_visible {
+            self.room_entry = Some(self.launcher_entry);
+            self.room_origin = None;
         }
         self.modal.show(view.return_to_launcher);
         self.panel_visible = self.modal.visible();
     }
     pub fn tick(&mut self, now: u64) {
+        let elapsed = now.saturating_sub(self.now);
         self.now = now;
         if let Some(local) = self.slide_clock.sample(now, self.pause_background) {
             self.slide_now = local;
             self.expansion = self.slide.value(local);
         }
-        self.panel = self.modal.tick(now);
+        self.room_now = if self.room_entry.is_some() {
+            self.room_now + elapsed.min(MAX_ROOM_STEP_MS)
+        } else {
+            now
+        };
+        self.panel = self.modal.tick(self.room_now);
         self.panel_visible = self.modal.visible();
+        if !self.panel_visible {
+            self.room_entry = None;
+            self.room_origin = None;
+        }
+    }
+    pub fn pin_room_origin(&mut self, origin: Rect) {
+        if self.room_entry.is_some() && self.room_origin.is_none() {
+            self.room_origin = Some(origin);
+        }
+    }
+    pub fn room_origin(&self) -> Option<Rect> {
+        self.room_origin
     }
     pub fn pause_background(&mut self, paused: bool) {
         self.pause_background = paused;

@@ -376,6 +376,7 @@ fn live() -> Result<(), String> {
     let mut next_frame = Instant::now();
     let mut first_frame_sent = false;
     let mut presented_generation = None;
+    let mut game_menu_opening = input::GameMenuOpening::default();
     let mut metrics = FrameMetrics::default();
     while !quit.load(Ordering::Relaxed) {
         status_monitor.present(&device_status);
@@ -383,7 +384,10 @@ fn live() -> Result<(), String> {
         let mut latest = None;
         loop {
             match rx.try_recv() {
-                Ok(next) => latest = Some(next),
+                Ok(next) => {
+                    sound.favorite_result(next.library.favorite_change.as_ref());
+                    latest = Some(next);
+                }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
             }
@@ -421,10 +425,15 @@ fn live() -> Result<(), String> {
                 output.flush().map_err(|error| error.to_string())?;
                 first_frame_sent = true;
             }
-            let generation = view.as_ref().unwrap().input_generation;
+            let presented = view.as_ref().unwrap();
+            let generation = presented.input_generation;
             if presented_generation != Some(generation) {
                 input::send(generation.bind(serde_json::json!({"event":"presented"})))?;
                 presented_generation = Some(generation);
+            }
+            if let Some(back) = game_menu_opening.presented(presented) {
+                render::response::dispatched(back.payload);
+                input::send(back)?;
             }
         }
         if scene.is_some() && !rendered && Instant::now() >= next_frame {
@@ -595,6 +604,7 @@ fn live() -> Result<(), String> {
             {
                 scene.press(render::now(&app));
             }
+            game_menu_opening.observe(view.as_ref().unwrap(), action);
             render::response::dispatched(action);
             input::send(generation.bind(action))?;
         }

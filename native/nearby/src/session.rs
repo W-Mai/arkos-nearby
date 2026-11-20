@@ -277,6 +277,13 @@ fn receipt(state: &State) -> Result<ReadyPeer> {
     )?;
     Ok(peer)
 }
+// The room identity has already been checked. Only the ready player sees the handoff.
+fn start_for_claim(status: &Value, claim: Option<&str>) -> bool {
+    claim.is_some()
+        && status["peer"]["claim_id"].as_str() == claim
+        && (status["start_requested"] == true || status["native_ready"] == true)
+}
+
 pub fn live_peer(state: &State) -> Result<ReadyPeer> {
     let peer = receipt(state)?;
     let observed = crate::readiness::ObservedPeer::resolve(
@@ -292,18 +299,19 @@ pub fn live_peer(state: &State) -> Result<ReadyPeer> {
     Ok(peer)
 }
 pub fn status(context: Option<&Context>) -> Result<Value> {
-    let state = match state() {
-        Ok(state) => state,
-        Err(_) => {
-            return Ok(json!({"phase":"idle","role":null,"room":null,"ready":false,"step":"idle"}));
-        }
+    state_status(state().ok().as_ref(), context)
+}
+
+fn state_status(state: Option<&State>, context: Option<&Context>) -> Result<Value> {
+    let Some(state) = state else {
+        return Ok(json!({"phase":"idle","role":null,"room":null,"ready":false,"step":"idle"}));
     };
     if state.purpose == SessionPurpose::NetworkOnly {
-        return crate::network::status(&state, context.is_none());
+        return Ok(crate::network::status(state, context.is_none()));
     }
     let host = state.role == "host";
     let ready_peer = (host && !state.closed() && state.phase != "restoring")
-        .then(|| receipt(&state).ok())
+        .then(|| receipt(state).ok())
         .flatten();
     let ready = if state.closed() || state.phase == "restoring" {
         false
@@ -601,7 +609,6 @@ pub fn begin_for(role: &str, intent: &SessionIntent, selected: Option<RoomEntry>
             write(&root.join("context.json"), context)?;
         }
         if matches!(intent, SessionIntent::DiscoverGame(_)) {
-            write(&root.join("discover-game.json"), &true)?;
             write(&root.join("origin-game.json"), &intent.context())?;
         }
         let before = platform_radio::capture()?;
@@ -626,6 +633,12 @@ pub fn begin_for(role: &str, intent: &SessionIntent, selected: Option<RoomEntry>
         } else {
             selected.ok_or("Choose a specific room before joining")?
         };
+        if matches!(intent, SessionIntent::DiscoverGame(_)) {
+            let preview = read::<Value>(&Path::new(BASE).join("scan.json"))
+                .ok()
+                .and_then(|cache| crate::discovery::preview_game(&cache, &entry, monotonic()));
+            write(&root.join("discover-game.json"), &preview)?;
+        }
         let state = State {
             id: id.clone(),
             self_mac: owner,
@@ -685,8 +698,12 @@ pub fn action(name: &str, context: &Context, payload: &Value) -> Result<Value> {
     )
 }
 pub fn status_for(intent: &SessionIntent) -> Result<Value> {
-    let mut value = status(intent.context())?;
-    if let Ok(state) = state() {
+    status_for_state(state().ok().as_ref(), intent)
+}
+
+fn status_for_state(state: Option<&State>, intent: &SessionIntent) -> Result<Value> {
+    let mut value = state_status(state, intent.context())?;
+    if let Some(state) = state {
         value["network_only"] = (state.purpose == SessionPurpose::NetworkOnly).into();
         if let Ok(summary) = read::<Value>(&state.root().join("room-summary.json")) {
             value["game_title"] = summary["title"].clone();
@@ -823,8 +840,7 @@ pub fn action_for(name: &str, intent: &SessionIntent, payload: &Value) -> Result
                     && state.established(),
                 "A connected network-only session is required",
             )?;
-            crate::network::require_live(&state)?;
-            status_for(intent)
+            Ok(json!({"id":id}))
         }
         "cancel" => {
             let id = payload["session_id"]
@@ -834,7 +850,14 @@ pub fn action_for(name: &str, intent: &SessionIntent, payload: &Value) -> Result
                 hex(id, 32) && state()?.id == id,
                 "Cancel belongs to another session",
             )?;
-            recover(id, "cancel")
+            recover(
+                id,
+                if payload["preserve_established"] == true {
+                    "menu_back"
+                } else {
+                    "cancel"
+                },
+            )
         }
         _ => Err("Unknown fixed room action".into()),
     }
@@ -848,15 +871,30 @@ pub struct NativeBackend {
 /// Manual discovery retains the selected intent through cancellation and recovery.
 pub struct DiscoveryBackend {
     origin: Option<Context>,
+    opening_network: Option<Value>,
     intent: Mutex<SessionIntent>,
     queries: Mutex<()>,
 }
 
 impl DiscoveryBackend {
+    fn active_network_status(current: Option<&State>) -> Option<Value> {
+        current
+            .filter(|s| s.purpose == SessionPurpose::NetworkOnly && !s.network_released())
+            .map(|s| crate::network::status(s, true))
+    }
+
+    fn observe(current: Option<&State>, intent: &mut SessionIntent) -> Result<Value> {
+        if let Some(status) = Self::active_network_status(current) {
+            *intent = SessionIntent::NetworkOnly;
+            return Ok(status);
+        }
+        status_for_state(current, intent)
+    }
+
     pub fn shared(origin: Option<Context>) -> Arc<dyn Backend> {
-        let intent = state()
-            .ok()
-            .filter(|state| !state.closed() || !state.network_restored)
+        let active = state().ok().filter(|state| !state.network_released());
+        let opening_network = Self::active_network_status(active.as_ref());
+        let intent = active
             .and_then(|state| {
                 if state.purpose == SessionPurpose::NetworkOnly {
                     Some(SessionIntent::NetworkOnly)
@@ -875,6 +913,7 @@ impl DiscoveryBackend {
             .unwrap_or_else(|| SessionIntent::DiscoverGame(origin.clone().map(Box::new)));
         Arc::new(Self {
             origin,
+            opening_network,
             intent: Mutex::new(intent),
             queries: Mutex::new(()),
         })
@@ -882,6 +921,9 @@ impl DiscoveryBackend {
 }
 
 impl Backend for DiscoveryBackend {
+    fn opening_network(&self) -> Option<&Value> {
+        self.opening_network.as_ref()
+    }
     fn call(&self, action: &str, payload: &Value) -> Result<Value> {
         if matches!(action, "scan" | "scan_refresh") {
             let _lock = self.queries.lock().map_err(|_| "Scan lock failed")?;
@@ -899,6 +941,9 @@ impl Backend for DiscoveryBackend {
                 .intent
                 .lock()
                 .map_err(|_| "Discovery state lock failed")?;
+            if action == "status" {
+                return Self::observe(state().ok().as_ref(), &mut intent);
+            }
             if action == "join" {
                 let room: RoomEntry = serde_json::from_value(payload["room"].clone())?;
                 *intent = if room.purpose() == SessionPurpose::NetworkOnly {
@@ -915,9 +960,7 @@ impl Backend for DiscoveryBackend {
             }
             intent.clone()
         };
-        let mut value = action_for(action, &intent, payload)?;
-        value["network_only"] = (intent.purpose() == SessionPurpose::NetworkOnly).into();
-        Ok(value)
+        action_for(action, &intent, payload)
     }
     fn failure_snapshot(&self) -> Value {
         self.intent
@@ -1022,7 +1065,8 @@ pub fn worker(id: &str) -> Result<()> {
         if local.purpose == SessionPurpose::NetworkOnly {
             return crate::network::worker(&local);
         }
-        let deferred = local.root().join("discover-game.json").is_file();
+        let discovery = local.root().join("discover-game.json");
+        let deferred = discovery.is_file();
         let context: Option<Context> = if deferred {
             read(&local.root().join("context.json")).ok()
         } else {
@@ -1074,7 +1118,16 @@ pub fn worker(id: &str) -> Result<()> {
                 &json!({"title":verified.room().content.title,"core":verified.room().core.name}),
             )?;
             let matched = if deferred {
-                crate::catalog::matching::resolve(&local, &verified, &profile, context.as_ref())?
+                let preview = read::<Option<crate::discovery::LocalGame>>(&discovery)
+                    .ok()
+                    .flatten();
+                crate::catalog::matching::resolve(
+                    &local,
+                    &verified,
+                    &profile,
+                    context.as_ref(),
+                    preview.as_ref(),
+                )?
             } else {
                 context
                     .as_ref()
@@ -1100,6 +1153,7 @@ pub fn worker(id: &str) -> Result<()> {
         let mut failures = 0;
         let mut missing_since = None;
         let mut native_ready = false;
+        let mut received_start = false;
         loop {
             local = current(id)?;
             let now = monotonic();
@@ -1154,6 +1208,10 @@ pub fn worker(id: &str) -> Result<()> {
                         {
                             failures = 0;
                             native_ready = status["native_ready"] == true;
+                            if !received_start && start_for_claim(&status, local.claim.as_deref()) {
+                                received_start = true;
+                                progress(id, None, "starting", "已收到房主开局信号。")?;
+                            }
                         }
                         _ => failures += 1,
                     }
@@ -1244,7 +1302,7 @@ pub fn worker(id: &str) -> Result<()> {
                     }
                     update(id, |state| state.claim_deadline = sent + 30.0)?;
                     ready_at = monotonic();
-                    if !launched {
+                    if !launched && !received_start {
                         progress(
                             id,
                             Some("ready"),
@@ -1295,6 +1353,17 @@ pub fn recover(id: &str, reason: &str) -> Result<Value> {
     if local.id != id || local.phase == "closed" || reason == "startup" && local.established() {
         return status(None);
     }
+    // The radio worker may establish the group after the UI submitted Back.
+    // Decide under the recovery lock, before changing the lease or radio.
+    if reason == "menu_back" && local.purpose == SessionPurpose::NetworkOnly && local.established()
+    {
+        return Ok(json!({"id":id,"return_with_network":true}));
+    }
+    let reason = if reason == "menu_back" {
+        "cancel"
+    } else {
+        reason
+    };
     platform_radio::validate_recovery(&local)?;
     platform_radio::refresh_original(&mut local);
     let played = local.phase == "playing";
@@ -1372,16 +1441,64 @@ pub fn recover(id: &str, reason: &str) -> Result<Value> {
 mod native_admission_tests {
     use super::native_admission;
 
-    #[test]
-    fn network_ownership_is_released_only_after_complete_recovery_for_both_purposes() {
-        let mut state: super::State = serde_json::from_value(serde_json::json!({
+    fn room_state() -> super::State {
+        serde_json::from_value(serde_json::json!({
             "id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "self_mac":"02:00:00:00:00:01",
             "role":"host", "phase":"closed", "stage":"", "step":"", "context_key":[],
             "room":{"id":"room", "ssid":"room", "bssid":"02:00:00:00:00:01", "signal":0, "token":"token", "name":"room", "same_game_hint":false},
             "original_uuid":"", "radio_before":"enabled", "services_before":{"NetworkManager.service":{"active":true,"enabled":"enabled"},"wpa_supplicant.service":{"active":true,"enabled":"enabled"}},
             "driver_owned":false, "mounts":[], "deadline":0.0, "claim_deadline":0.0,
             "network_restored":true, "recovery_errors":[], "timings":[], "stage_started":0.0
-        })).unwrap();
+        })).unwrap()
+    }
+
+    #[test]
+    fn discovery_adopts_a_group_established_after_opening_the_game_or_room_list() {
+        use super::{DiscoveryBackend, SessionIntent, SessionPurpose};
+        use crate::flow::{Flow, Page};
+        let mut state = room_state();
+        state.purpose = SessionPurpose::NetworkOnly;
+        state.phase = "network_connected".into();
+        state.network_restored = false;
+        for role in ["host", "client"] {
+            state.role = role.into();
+            let owner_page = if role == "host" {
+                Page::Host
+            } else {
+                Page::Joined
+            };
+            let game = crate::contracts::context();
+            let mut intent = SessionIntent::DiscoverGame(Some(Box::new(game.clone())));
+            assert_eq!(
+                DiscoveryBackend::observe(None, &mut intent).unwrap()["phase"],
+                "idle"
+            );
+            // A game-scoped query really does report the retained group as a mismatch.
+            assert_eq!(
+                super::status_for_state(Some(&state), &intent).unwrap()["context_matches"],
+                false
+            );
+            let status = DiscoveryBackend::observe(Some(&state), &mut intent).unwrap();
+            assert_eq!(intent.purpose(), SessionPurpose::NetworkOnly);
+            assert_eq!(status["context_matches"], true);
+            for mut flow in [Flow::network(), Flow::new(Some(game))] {
+                let now = || crate::system::monotonic() + 1.0;
+                flow.dispatch("right", now());
+                flow.dispatch("confirm", now());
+                assert_eq!(flow.page, Page::Rooms);
+                let browse_generation = flow.generation;
+                flow.status(browse_generation, status.clone());
+                flow.scan(browse_generation, serde_json::json!({"rooms":[]}));
+                assert_eq!(flow.page, owner_page);
+                assert!(!flow.scans());
+                assert_eq!(flow.view()["network_only"], true);
+            }
+        }
+    }
+
+    #[test]
+    fn network_ownership_is_released_only_after_complete_recovery_for_both_purposes() {
+        let mut state = room_state();
         for purpose in [
             super::SessionPurpose::Game,
             super::SessionPurpose::NetworkOnly,
@@ -1446,5 +1563,23 @@ mod native_admission_tests {
             b"content\xff\n[INFO] [Netplay] connected"
         ));
         assert!(!native_admission("other", &host));
+    }
+}
+
+#[cfg(test)]
+mod launch_relay_tests {
+    use super::*;
+
+    #[test]
+    fn launch_relay_observes_only_the_ready_claim() {
+        let mut status =
+            json!({"peer":{"claim_id":"current"}, "start_requested":true, "native_ready":false});
+        assert!(start_for_claim(&status, Some("current")));
+        assert!(!start_for_claim(&status, Some("old")));
+        assert!(!start_for_claim(&status, None));
+        status["start_requested"] = false.into();
+        assert!(!start_for_claim(&status, Some("current")));
+        status["native_ready"] = true.into();
+        assert!(start_for_claim(&status, Some("current")));
     }
 }

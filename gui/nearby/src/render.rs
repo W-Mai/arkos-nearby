@@ -10,8 +10,10 @@ use style::{ACCENT_DIM, BACKGROUND, Metrics};
 mod actions_damage;
 mod actor;
 mod artwork;
+mod binding;
 pub(crate) mod branding;
 mod cache;
+mod cartridge;
 mod choices;
 mod chrome;
 mod composition;
@@ -74,9 +76,14 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     app.with_widget(page_view::view::<deferred::Pane>());
     app.with_widget(selection::target::view());
     app.with_widget(selection::frame::view());
+    app.with_widget(selection::outline::view());
     app.with_widget(launcher::details_scroll::view());
     app.with_widget(material::panel_motion::view());
+    app.with_widget(material::measure_source::view());
+    app.with_widget(material::card_placement::view());
     app.with_widget(reading::marquee::view());
+    app.with_widget(reading::fold_title::view());
+    app.add_resource(reading::title_gradients());
     app.with_widget(configuration::config_scroll::view());
     app.with_widget(management::management_scroll::view());
     app.with_widget(saves::save_reading::view());
@@ -166,6 +173,13 @@ pub fn update(scene: &mut Scene, view: &View) -> Result<(), String> {
                     } else {
                         Default::default()
                     };
+                // Browser snapshots contain rows; shortcut availability belongs to the live launcher.
+                snapshot.launcher.netplay = view.launcher.netplay
+                    && !view.busy
+                    && !view.launcher.navigation
+                    && snapshot.entries.get(snapshot.selected).is_some_and(|row| {
+                        !row.directory && !row.key.is_empty() && row.key == view.launcher.key
+                    });
                 snapshot.launcher.enabled = true;
                 snapshot.launcher.tab = tab;
                 snapshot.launcher.navigation =
@@ -307,6 +321,8 @@ pub fn paint_at<B: Surface, F: RendererFactory<B>>(
 }
 
 pub fn tick<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result<(), String> {
+    material::retain_room_origin(&app.world);
+    material::retain_card_face(&mut app.world);
     modal::before_tick(app);
     suspension::before_tick(app);
     static_snapshot::before_tick(app);

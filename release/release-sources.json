@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "runtime_version": "0.16.0",
+  "runtime_version": "0.17.0",
   "profile": "arkos4clone-4.4.189-rtl8188eu",
   "kernel_sha256": "73a123c06c67c002605bef637ef458aa43448a501c48ce27756f16e846d57f7a",
   "renderer": {
     "version": "0.56.0",
     "mirx_version": "0.56.0",
-    "sha256": "05dd00f589b3989ee53ef8ef9cb18af766dc4e3cb2c71fd80678eb372e7845c8",
-    "source_sha256": "83a251476b989b4c7fbb1953234535f93687de68bead0cb7ad02a56db30eed7a",
+    "sha256": "bdbc6bd307c35489c1cc6253521b81bd324bf6fc819e5c1fb9329f048c451da7",
+    "source_sha256": "e6def46295457bf788f7886acf04f9f983d4f11391bda12162abe30a5aca63c0",
     "cargo_lock_sha256": "238e56d69f7db2fb2be04516ac5ea9f243d9fb0004c96d37cad173772d87c1cd",
     "mirui_crate_sha256": "c1fe6aa364fb4d7feb43e085cec92dd7480e8a35758dd9234277584c61f500b9",
     "mirui_macros_crate_sha256": "a6e7004d8a3a6be495a765c36418b120dbe011a0de889f26fbfcd9bf686fb1c4",
@@ -187,7 +187,7 @@
     "plugin_id": "arkos-platform",
     "target": "aarch64-unknown-linux-musl",
     "mirui_abi": "mirui-0.56.0",
-    "payload_sha256": "d3466d56e6f610b3a797b9954cca159a427b161ab234d4dc2d277e41ff6312c9",
+    "payload_sha256": "29738a6ac14a2ed09a0e793fae1622b55edf174b5b6f006b844e6869cc59eb1f",
     "source": "native/platform-plugin",
     "source_sha256": "b45f8bd847148a2a6762813ef92acd7c12592eda38fe9e49915f802a93e363ad",
     "cargo_lock_sha256": "6bab160b3a79cd7c6735d2e23992d43c733ca94af105219e3d66b0955e6dbb2f"

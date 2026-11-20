@@ -1,17 +1,19 @@
 use mirui::prelude::*;
-use mirui::ui::widgets::{Image, Text, TextAlign::Start};
+use mirui::ui::widgets::{Image, TextAlign::Start};
 
 use super::keyboard::keycap as keyboard_keycap;
 use super::{
     artwork::cover,
+    cartridge::SlotLayout,
     consoles::console,
-    lists::{game_rows, games},
+    lists::games,
     pixel::Scenery,
+    reading::cartridge_title,
     rows::Row,
     selection::FocusTarget,
     state::DisplayState,
     style::*,
-    widgets::{caption, hold_badge, paragraph},
+    widgets::{caption, hold_badge},
 };
 use crate::model::LibraryKind;
 
@@ -24,7 +26,7 @@ const KEYS: [&str; 40] = [
 const CARTRIDGE_EDGE: i32 = 2;
 const CARTRIDGE_RAIL: i32 = 2;
 const CARTRIDGE_CAP: i32 = 8;
-const CARTRIDGE_CONTACTS: usize = 8;
+const CARTRIDGE_CONTACTS: usize = super::cartridge::CONTACT_COUNT;
 
 #[compose]
 pub(super) fn library(kind: LibraryKind, state: model!(DisplayState), metrics: Metrics) -> Entity {
@@ -57,6 +59,7 @@ fn shelf(
             min_height: 0,
             min_width: 0,
             bg_color: BACKGROUND,
+            clip_children: true,
             padding: Padding::all(super::shelf::INSET),
             row_gap: 4
         ) [
@@ -69,8 +72,7 @@ fn shelf(
                     grow: 1.0,
                     min_width: 0,
                     min_height: 0,
-                    container: true,
-                    clip_children: true
+                    container: true
                 ) {
                     shelf_sheet (state, grid, metrics, false)
                     walk ${ (!grid.departing().is_empty()).then_some(()) } with _departing {
@@ -136,11 +138,7 @@ fn shelf_sheet(
                             .take(grid.plan().grid.columns)
                             .collect::<Vec<_>>()
                     } with item by item.0 {
-                        if departing {
-                            retiring_cartridge (item.1, grid, metrics)
-                        } else {
-                            cartridge (state, item.1, item.0, grid, metrics)
-                        }
+                        cartridge (state, item.1, item.0, grid, metrics, departing)
                     }
                 }
             }
@@ -165,108 +163,200 @@ fn cartridge(
     member: mirui::core::model::ModelItemId,
     grid: model!(super::shelf::Shelf),
     metrics: Metrics,
+    departing: bool,
 ) -> Entity {
-    let movement = row.clone();
-    let focus = row.clone();
-    let badge = row.clone();
+    let geometry = grid.clone();
+    let frame = grid.clone();
+    let shell_top = grid.clone();
+    let shell_left = grid.clone();
+    let shell_width = grid.clone();
+    let shell_height = grid.clone();
+    let label_state = state.clone();
+    let stroke = metrics.focus_border();
+    let origin = if departing {
+        super::material::CardOrigin::Retiring
+    } else {
+        super::material::CardOrigin::Shelf(row.clone())
+    };
+    let motion = row.clone();
+    let cover = row.clone();
     let directory = row.clone();
-    let name = row.clone();
+    let pins = row.clone();
+    let label = row.clone();
+    let badge = row.clone();
     ui! {
         Column (
-            width: ${ grid.plan().card_width },
+            width: ${ geometry.plan().card_width },
             shrink: 0.0,
             min_width: 0,
             min_height: 0,
-            transform: ${ state.card_motion().cartridge_transform(movement.index()) }
-        ) {
+            container: true,
+            bg_color: SHELL_EDGE
+        ) [
+            origin,
+        ] {
+            if !departing {
+                View (
+                    position: Position::Absolute,
+                    top: 0, left: 0, width: Dimension::percent(100),
+                    height: ${ SlotLayout::new(frame.plan(), stroke).frame_height }
+                ) [
+                    FocusTarget::row(row.clone()),
+                    mirui::ui::IgnoreHitTest,
+                ]
+            }
+            if ${ !pins.directory() } {
+                exposed_contacts (grid.clone(), pins.clone(), departing, stroke)
+            }
             Column (
-                grow: 1.0,
+                position: Position::Absolute,
+                top: ${ SlotLayout::new(shell_top.plan(), stroke).shell_top },
+                left: ${ SlotLayout::new(shell_left.plan(), stroke).shell_left },
+                width: ${ SlotLayout::new(shell_width.plan(), stroke).shell_width },
+                height: ${ SlotLayout::new(shell_height.plan(), stroke).shell_height },
                 min_width: 0,
                 min_height: 0,
                 padding: Padding::all(super::shelf::CARD_INSET),
                 container: true,
                 bg_color: SHELL,
                 border_width: 2,
-                border_color: ${ if state.card_motion().selected == Some(focus.index()) { ACCENT } else { SHELL_EDGE } }
+                border_color: SHELL_EDGE,
+                transform: ${ grid.pose(motion.index(), departing).shell(metrics.tiny) }
             ) [
-                FocusTarget::row(row.clone()),
+                super::cartridge::Shell,
             ] {
+                View (position: Position::Absolute, width: 0, height: 0) [
+                    super::material::MeasureCard(true),
+                    mirui::ui::IgnoreHitTest,
+                ]
                 if ${ directory.directory() } {
                     library_icon (metrics)
                 } else {
-                    cartridge_content (state.clone(), row, member, metrics)
+                    View (grow: 1.0, min_width: 0, min_height: 0, clip_children: true) {
+                        Column (
+                            grow: 1.0, min_width: 0, min_height: 0,
+                            transform: ${ grid.pose(cover.index(), departing).cover() }
+                        ) {
+                            if departing {
+                                cartridge_source (row.cover_bounds(), ${ row.platform() })
+                            } else {
+                                cartridge_content (state.clone(), row, member)
+                            }
+                        }
+                    }
                 }
                 if ${
-                    state.playable_selection() && state.selected() == Some(badge.index())
+                    !departing && state.shows_netplay_hint() && state.selected() == Some(badge.index())
                         && !badge.directory()
                 } {
                     Row (position: Position::Absolute, top: 4, left: 4) {
                         hold_badge ()
                     }
                 }
-                cartridge_label (name, metrics)
+                cartridge_label (label_state, label.clone(), ${ grid.pose(label.index(), departing).paper() }, metrics, departing)
             }
-            View (height: super::shelf::SHADOW, shrink: 0.0, bg_color: SHELL_EDGE)
         }
     }
 }
 
 #[compose]
-fn cartridge_label(row: model!(Row), metrics: Metrics) -> Entity {
-    let enabled = row.clone();
+fn exposed_contacts(
+    grid: model!(super::shelf::Shelf),
+    row: model!(Row),
+    departing: bool,
+    stroke: i32,
+) -> Entity {
+    let motion = grid.clone();
+    let position = row.clone();
     ui! {
         Row (
-            height: super::shelf::LABEL_HEIGHT,
-            shrink: 0.0,
-            min_width: 0,
-            container: true,
-            padding: Padding {
-                left: metrics.gap.into(),
-                right: super::shelf::LABEL_ACTOR_SPACE.into(),
-                ..Default::default()
-            }
+            position: Position::Absolute,
+            left: Dimension::percent(18),
+            top: ${ SlotLayout::new(grid.plan(), stroke).contacts_top },
+            width: Dimension::percent(64),
+            height: super::cartridge::CONTACT_HEIGHT,
+            clip_children: true,
+            bg_color: SHELL_EDGE
         ) {
-            Text (
-                text: ${ row.label(true) },
-                grow: 1.0,
-                min_width: 0,
-                font: font(TITLE_SIZE),
-                font_size: TITLE_SIZE,
-                text_color: ${ if enabled.available() { SHELL_TEXT } else { DIVIDER } },
-                paragraph: paragraph(mirui::ui::widgets::TextAlign::Start, 1)
+            Row (
+                position: Position::Absolute, left: 0, top: 0,
+                width: Dimension::percent(100), height: super::cartridge::CONTACT_HEIGHT,
+                column_gap: CARTRIDGE_EDGE,
+                transform: ${ motion.pose(position.index(), departing).contact_offset() }
             ) [
-                FONT_PAINT,
-            ]
+                super::cartridge::Contacts,
+            ] {
+                walk 0..CARTRIDGE_CONTACTS with index {
+                    View (
+                        grow: 1.0,
+                        bg_color: ${
+                            if grid.pose(row.index(), departing).reflection().is_some_and(|phase| {
+                                usize::from(phase) == index
+                            }) { CARTRIDGE_REFLECTION } else { CARTRIDGE_BRASS }
+                        }
+                    )
+                }
+            }
         }
     }
 }
 
 #[compose]
-fn retiring_cartridge(
+fn cartridge_label(
+    state: model!(DisplayState),
     row: model!(Row),
-    grid: model!(super::shelf::Shelf),
+    paper: prop!(Fixed),
     metrics: Metrics,
+    departing: bool,
 ) -> Entity {
+    let enabled = row.clone();
+    let visibility = paper.clone();
+    let paper_title = row.clone();
+    let paper_ink = mirui::ui::theme::ThemedColor::from(CARTRIDGE_INK);
+    let paper_backdrop = mirui::ui::theme::ThemedColor::from(CARTRIDGE_PAPER);
+    let shell_backdrop = mirui::ui::theme::ThemedColor::from(SHELL);
+    let selected = row.clone();
+    let scroll = mirui::ui::Prop::new(move || {
+        !departing && !selected.directory() && state.selected() == Some(selected.index())
+    });
+    let inset = metrics.cartridge_title_padding();
     ui! {
-        Column (width: ${ grid.plan().card_width }, shrink: 0.0, min_width: 0, min_height: 0) {
-            Column (
-                grow: 1.0,
-                min_width: 0,
-                min_height: 0,
-                padding: Padding::all(super::shelf::CARD_INSET),
-                container: true,
-                bg_color: SHELL,
-                border_width: 2,
-                border_color: SHELL_EDGE
+        Row (
+            height: super::shelf::LABEL_HEIGHT, shrink: 0.0, min_width: 0,
+            container: true, padding: inset
+        ) {
+            cartridge_title (
+                ${ row.label(true) },
+                scroll.clone(),
+                ${ mirui::ui::theme::ThemedColor::from(if enabled.available() { SHELL_TEXT } else { DIVIDER }) },
+                shell_backdrop
+            )
+            View (
+                position: Position::Absolute, top: 0, left: 0,
+                width: Dimension::percent(100), height: Dimension::percent(100),
+                visible: ${ visibility.get() > Fixed::ZERO }
             ) {
-                if ${ row.directory() } {
-                    library_icon (metrics)
-                } else {
-                    cartridge_source (row, metrics)
+                Row (
+                    position: Position::Absolute, top: 0, left: 0,
+                    width: ${ Dimension::Percent(paper.get() * 100) },
+                    height: Dimension::percent(100), clip_children: true
+                ) {
+                    Row (
+                        position: Position::Absolute, top: 0, left: 0,
+                        width: @(width as full) { full },
+                        height: Dimension::percent(100),
+                        padding: inset, bg_color: CARTRIDGE_PAPER
+                    ) {
+                        cartridge_title (${ paper_title.label(true) }, scroll, paper_ink, paper_backdrop)
+                        Image (
+                            src: path!(M 0 0 H 4 V 4 Z), viewbox: 4,
+                            position: Position::Absolute, top: 0,
+                            left: @(width as full) { full - Fixed::from_int(4) },
+                            width: 4, height: 4, color: SHELL
+                        ) [mirui::ui::IgnoreHitTest]
+                    }
                 }
-                cartridge_label (row, metrics)
             }
-            View (height: super::shelf::SHADOW, shrink: 0.0, bg_color: SHELL_EDGE)
         }
     }
 }
@@ -314,7 +404,7 @@ fn search(state: model!(DisplayState), metrics: Metrics) -> Entity {
                     }
                 }
             } else {
-                game_rows (state, metrics)
+                games (state, metrics, false)
             }
         }
     }
@@ -437,7 +527,6 @@ fn cartridge_content(
     state: model!(DisplayState),
     row: model!(Row),
     member: mirui::core::model::ModelItemId,
-    metrics: Metrics,
 ) -> Entity {
     let picture = row.static_picture();
     let image = picture.clone();
@@ -460,7 +549,7 @@ fn cartridge_content(
                     member,
                 },
             ] {
-                cartridge_source (row, metrics)
+                cartridge_source (row.cover_bounds(), ${ row.platform() })
             }
             View (
                 position: Position::Absolute,
@@ -499,8 +588,10 @@ fn static_cartridge_image(picture: model!(super::static_snapshot::Picture), toke
 }
 
 #[compose]
-fn cartridge_source(row: model!(Row), _metrics: Metrics) -> Entity {
-    let platform = row.clone();
+pub(super) fn cartridge_source(
+    bounds: model!(super::artwork::CoverBounds),
+    platform: prop!(super::consoles::Platform),
+) -> Entity {
     ui! {
         Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: 0) {
             Column (
@@ -538,36 +629,13 @@ fn cartridge_source(row: model!(Row), _metrics: Metrics) -> Entity {
                         bg_color: SHELL_EDGE,
                         padding: Padding::all(CARTRIDGE_EDGE)
                     ) {
-                        cover (
-                            row.cover_bounds(),
-                            ${ platform.platform() }
-                        )
+                        cover (bounds, platform)
                     }
                     cartridge_grip ()
                 }
-                Row (
-                    height: CARTRIDGE_CAP,
-                    shrink: 0.0,
-                    justify: JustifyContent::Center,
-                    align: AlignItems::FlexEnd
-                ) {
-                    Row (
-                        width: Dimension::percent(64),
-                        height: 4,
-                        padding: Padding {
-                            left: CARTRIDGE_RAIL.into(),
-                            right: CARTRIDGE_RAIL.into(),
-                            ..Default::default()
-                        },
-                        column_gap: CARTRIDGE_EDGE,
-                        bg_color: SHELL_EDGE
-                    ) {
-                        walk 0..CARTRIDGE_CONTACTS with _index {
-                            Column (grow: 1.0, min_width: 0, bg_color: WARNING) {
-                                View (height: CARTRIDGE_EDGE, bg_color: CLAY)
-                            }
-                        }
-                    }
+                Column (height: CARTRIDGE_CAP, shrink: 0.0, justify: JustifyContent::Center) {
+                    View (height: 1, bg_color: SHELL_FACE)
+                    View (height: 1, bg_color: SHELL_EDGE)
                 }
             }
         }

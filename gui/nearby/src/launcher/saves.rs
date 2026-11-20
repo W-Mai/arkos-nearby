@@ -2,6 +2,7 @@ use crate::model::Action;
 use howff_menu::details::Fact;
 use howff_menu::input::{Generation, Sourced};
 use howff_menu::saves::{Kind, Operation, Record, Request, SourceMatch, Tab, View};
+use mirui::anim::{Tween, TweenConfig, ease};
 use mirui::prelude::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -20,6 +21,17 @@ pub enum FactContext {
     Preview,
     Panel,
     Reading,
+}
+
+const COPY_OUT: TweenConfig = TweenConfig::new(280, &ease::IN_OUT_CUBIC);
+const COPY_IN: TweenConfig = TweenConfig::new(260, &ease::OUT_CUBIC);
+const SEATED_MS: u64 = 220;
+
+struct Transfer {
+    key: String,
+    completed: u64,
+    travel: Tween,
+    since: Option<u64>,
 }
 
 #[model]
@@ -61,6 +73,17 @@ pub struct Manager {
     now: u64,
     changed_at: u64,
     request: Option<Request>,
+    transfer: Option<Transfer>,
+    #[observe]
+    pub copying: Option<Operation>,
+    #[observe]
+    pub copy_title: String,
+    #[observe]
+    pub copy_target: String,
+    #[observe]
+    pub copy_progress: Fixed,
+    #[observe]
+    pub delivered: bool,
 }
 impl Default for Manager {
     fn default() -> Self {
@@ -92,6 +115,12 @@ impl Default for Manager {
             now: 0,
             changed_at: 0,
             request: None,
+            transfer: None,
+            copying: None,
+            copy_title: String::new(),
+            copy_target: String::new(),
+            copy_progress: Fixed::ZERO,
+            delivered: false,
         }
     }
 }
@@ -139,9 +168,23 @@ impl Manager {
     pub fn sync(&mut self, view: Option<&View>) {
         self.shown = view.is_some();
         let Some(view) = view else {
+            self.end_transfer();
             return;
         };
         let fresh = self.view.as_ref().is_none_or(|old| old.epoch != view.epoch);
+        if fresh {
+            self.end_transfer();
+        } else if !view.busy
+            && view.error.is_empty()
+            && !self.delivered
+            && self
+                .transfer
+                .as_ref()
+                .is_some_and(|flight| flight.completed == view.completed)
+        {
+            // A view queued before the worker accepted this request can still arrive.
+            return;
+        }
         let complete = self.view.as_ref().is_some_and(|old| old.busy && !view.busy);
         let error =
             self.view.as_ref().map(|v| &v.error) != Some(&view.error) && !view.error.is_empty();
@@ -170,7 +213,35 @@ impl Manager {
             self.restore(&key);
             self.changed_at = self.now;
         }
+        if complete && self.transfer.is_some() {
+            let destination = view.copied_to.as_ref().and_then(|key| {
+                view.document
+                    .as_ref()?
+                    .records
+                    .iter()
+                    .find(|record| &record.key == key)
+            });
+            if let Some(dest) = destination
+                && view.error.is_empty()
+                && let Some(flight) = self.transfer.as_mut()
+                && flight.completed != view.completed
+                && flight.key == view.return_key
+            {
+                if dest.tab() == Tab::Backups {
+                    self.backup_parent = (self.tab, flight.key.clone());
+                }
+                self.tab = dest.tab();
+                self.restore(&dest.key);
+                let flight = self.transfer.as_mut().unwrap();
+                flight.travel.retarget(Fixed::ONE, COPY_IN);
+                flight.since = None;
+                self.delivered = true;
+            } else {
+                self.end_transfer();
+            }
+        }
         if error {
+            self.end_transfer();
             self.remember();
             self.page = Page::Failure;
             self.selected = 0;
@@ -250,6 +321,24 @@ impl Manager {
         if !record.can(operation) {
             return;
         }
+        if matches!(operation, Operation::Backup | Operation::Restore) {
+            self.copying = Some(operation);
+            self.copy_title = record.title.clone();
+            self.copy_target = match (operation, record.slot) {
+                (Operation::Backup, _) => "存档备份".into(),
+                (_, Some(-1)) => "自动存档".into(),
+                (_, Some(slot)) => format!("槽位 {slot}"),
+                _ => "当前进度".into(),
+            };
+            self.copy_progress = Fixed::ZERO;
+            self.delivered = false;
+            self.transfer = Some(Transfer {
+                key: record.key.clone(),
+                completed: self.view.as_ref().unwrap().completed,
+                travel: Tween::preset(Fixed::ZERO, Fixed::from_ratio(2, 3), COPY_OUT),
+                since: None,
+            });
+        }
         self.request = Some(Request::Manage {
             epoch,
             key: record.key,
@@ -281,6 +370,9 @@ impl Manager {
         }
     }
     pub fn input(&mut self, action: Action) {
+        if self.delivered {
+            self.end_transfer();
+        }
         let previous = (self.page, self.tab, self.selected);
         if self.busy() {
             if action == Action::Back
@@ -416,7 +508,25 @@ impl Manager {
     pub fn resize_preview(&mut self, size: LayoutSize) {
         self.preview_size = size;
     }
+    fn end_transfer(&mut self) {
+        if self.transfer.take().is_some() {
+            self.copying = None;
+            self.delivered = false;
+            self.copy_progress = Fixed::ZERO;
+            self.copy_title.clear();
+            self.copy_target.clear();
+        }
+    }
     pub fn tick(&mut self, now: u64) {
+        if let Some(flight) = self.transfer.as_mut() {
+            let since = *flight.since.get_or_insert(now);
+            let elapsed = now.saturating_sub(since);
+            flight.travel.elapsed_ms = elapsed.min(u64::from(flight.travel.duration_ms)) as u16;
+            self.copy_progress = flight.travel.value();
+            if self.delivered && elapsed >= u64::from(flight.travel.duration_ms) + SEATED_MS {
+                self.end_transfer();
+            }
+        }
         self.now = now;
         self.age = now.saturating_sub(self.changed_at).min(800) as u16;
         if self.busy() {
@@ -1015,5 +1125,53 @@ mod input_contract {
         assert_eq!(model.selected, 3);
         model.request = Some(Request::Close { epoch: 1 });
         assert_eq!(model.take_input().unwrap().generation, generation);
+    }
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::*;
+    #[test]
+    fn only_the_requested_write_can_finish_a_copy() {
+        let mut m = Manager::default();
+        let mut v = tests::fixture();
+        m.sync(Some(&v));
+        m.input(Action::Refresh);
+        m.input(Action::Back);
+        assert!(m.take_request().is_none());
+        m.input(Action::Refresh);
+        m.input(Action::Confirm);
+        assert!(matches!(
+            m.take_request(),
+            Some(Request::Manage {
+                operation: Operation::Backup,
+                ..
+            })
+        ));
+        m.input(Action::Confirm);
+        assert!(m.take_request().is_none());
+        m.sync(Some(&v));
+        m.tick(10);
+        m.tick(60000);
+        assert!(m.busy());
+        assert!(m.copy_progress > Fixed::ZERO && m.copy_progress < Fixed::ONE);
+        assert!(!m.delivered);
+        v.error = "写入失败".into();
+        m.sync(Some(&v));
+        assert_eq!(m.page, Page::Failure);
+        assert!(m.copying.is_none());
+        assert_eq!(m.view.as_ref().unwrap().document, v.document);
+        m.input(Action::Back);
+        assert_eq!(m.record().unwrap().key, "state0");
+        v.error.clear();
+        m.sync(Some(&v));
+        m.input(Action::Refresh);
+        m.input(Action::Confirm);
+        m.input(Action::Back);
+        assert!(matches!(m.take_request(), Some(Request::Close { .. })));
+        m.sync(None);
+        v.epoch += 1;
+        m.sync(Some(&v));
+        assert!(!m.delivered && m.copying.is_none());
     }
 }

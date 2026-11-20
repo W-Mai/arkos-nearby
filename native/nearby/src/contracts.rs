@@ -219,6 +219,47 @@ fn launch_requires_the_hosts_ready_phase_and_cannot_repeat_after_start() {
 }
 
 #[test]
+fn launch_relay_is_local_to_each_game_participant() {
+    use crate::flow::{Flow, Operation};
+    use serde_json::json;
+    let session = "4b1b995eabff42d688974e94a702bea3";
+    let guest_id = "b".repeat(32);
+    let now = || crate::system::monotonic() + 1.0;
+    let mut host = Flow::new(Some(context()));
+    let mut guest = Flow::new(Some(context()));
+    let host_ready = json!({"id":session,"session":session,"role":"host","phase":"hosting","step":"host_ready","context_matches":true,"ready":true});
+    let waiting = json!({"id":guest_id,"session":session,"role":"client","phase":"ready","step":"waiting_start","context_matches":true,"ready":true});
+    host.status(0, host_ready);
+    guest.status(0, waiting.clone());
+    assert!(host.view()["launch_session"].is_null());
+    host.dispatch("confirm", now());
+    let sent = host.view();
+    let relay = sent["launch_session"].as_str().unwrap();
+    assert_eq!(relay.len(), 32);
+    assert!(relay.bytes().all(|b| b.is_ascii_hexdigit()));
+    assert!(!sent.to_string().contains(session));
+    assert!(guest.view()["launch_session"].is_null());
+    let mut received = waiting.clone();
+    received["step"] = "starting".into();
+    // A stale status from an earlier generation cannot trigger the catch.
+    guest.status(guest.generation + 1, received.clone());
+    assert!(guest.view()["launch_session"].is_null());
+    guest.status(guest.generation, received.clone());
+    assert_eq!(guest.view()["launch_session"], relay);
+    guest.status(guest.generation, received);
+    assert_eq!(guest.view()["launch_session"], relay);
+    assert!(!guest.view().to_string().contains(session));
+    assert!(!guest.view().to_string().contains(&guest_id));
+    assert!(guest.exit_code.is_none());
+    let start = host.request.take().unwrap();
+    assert_eq!(start.operation, Operation::Start);
+    host.complete(&start, json!({"id":session,"session":session}), false);
+    assert_eq!(host.exit_code, Some(0));
+    guest.dispatch("back", now());
+    assert!(guest.view()["launch_session"].is_null());
+}
+
+#[test]
 fn network_completion_can_detach_but_cannot_offer_game_start() {
     use crate::flow::{Flow, FlowExit, Operation, Page};
     for role in ["host", "client"] {
@@ -240,6 +281,85 @@ fn network_completion_can_detach_but_cannot_offer_game_start() {
         assert_eq!(flow.outcome, Some(FlowExit::KeepNetwork));
         assert!(flow.request.is_none());
     }
+}
+
+#[test]
+fn established_groups_require_an_explicit_session_bound_disconnect() {
+    use crate::flow::{Flow, FlowExit, Operation, Page};
+    let now = || crate::system::monotonic() + 1.0;
+    let id = "a".repeat(32);
+    for role in ["host", "client"] {
+        for step in ["network_connected", "network_reconnecting"] {
+            let status = serde_json::json!({"id":id,"role":role,"network_only":true,"phase":"network_connected","step":step,"context_matches":true,"connected":step=="network_connected"});
+            for back in ["back", "confirm"] {
+                let mut flow = Flow::network();
+                flow.status(0, status.clone());
+                if back == "back" {
+                    flow.dispatch("right", now());
+                }
+                flow.dispatch(back, now());
+                let keep = flow.request.take().unwrap();
+                assert_eq!(keep.operation, Operation::Detach);
+                assert_eq!(keep.payload["session_id"], id);
+                flow.dispatch("back", now());
+                flow.complete(&keep, serde_json::json!({"id":id}), false);
+                assert_eq!(flow.outcome, Some(FlowExit::KeepNetwork));
+                assert!(flow.request.is_none());
+            }
+            let mut flow = Flow::lobby(None);
+            flow.status(flow.generation, status.clone());
+            for cancel in ["back", "confirm"] {
+                flow.dispatch("right", now());
+                let opened_at = flow.input_epoch;
+                flow.dispatch("confirm", now());
+                assert!(flow.input_epoch > opened_at);
+                assert_eq!(flow.view()["confirm_disconnect"], true);
+                assert_eq!(flow.view()["selected"], 0);
+                flow.status(flow.generation, status.clone());
+                flow.dispatch("right", opened_at);
+                assert_eq!(flow.view()["selected"], 0);
+                flow.dispatch(cancel, now());
+                assert_eq!(flow.view()["confirm_disconnect"], false);
+                assert_eq!(flow.view()["selected"], 0);
+                assert!(flow.request.is_none());
+            }
+            for action in ["right", "confirm", "right", "confirm"] {
+                flow.dispatch(action, now());
+            }
+            let end = flow.request.take().unwrap();
+            assert_eq!(flow.page, Page::Leaving);
+            assert_eq!(end.operation, Operation::Cancel);
+            assert_eq!(end.payload["session_id"], id);
+            assert_eq!(end.payload["preserve_established"], false);
+            flow.dispatch("back", now());
+            flow.complete(
+                &end,
+                serde_json::json!({"id":id,"phase":"closed","network_restored":true}),
+                false,
+            );
+            assert_eq!(flow.page, Page::Lobby);
+            assert!(flow.request.is_none());
+        }
+    }
+}
+
+#[test]
+fn backing_out_as_setup_completes_keeps_the_established_session() {
+    use crate::flow::{Flow, FlowExit, Operation};
+    let mut flow = Flow::network();
+    let id = "a".repeat(32);
+    flow.status(0, serde_json::json!({"id":id,"role":"host","network_only":true,"phase":"hosting","step":"approval_pending","context_matches":true}));
+    flow.dispatch("back", crate::system::monotonic() + 1.0);
+    let back = flow.request.take().unwrap();
+    assert_eq!(back.operation, Operation::Cancel);
+    assert_eq!(back.payload["preserve_established"], true);
+    flow.complete(
+        &back,
+        serde_json::json!({"id":id,"return_with_network":true}),
+        false,
+    );
+    assert_eq!(flow.outcome, Some(FlowExit::KeepNetwork));
+    assert!(flow.request.is_none());
 }
 
 #[test]
@@ -551,6 +671,7 @@ fn renderer_contract_contains_display_fields_without_launch_authority() {
     let expected: std::collections::BTreeSet<_> = [
         "artwork",
         "player_names",
+        "launch_session",
         "room_game",
         "page",
         "title",
@@ -566,6 +687,7 @@ fn renderer_contract_contains_display_fields_without_launch_authority() {
         "status",
         "phase",
         "back_label",
+        "confirm_disconnect",
         "network_only",
         "connected",
         "local_address",

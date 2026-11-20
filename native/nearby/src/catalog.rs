@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::context::{self, Context};
 use crate::{Result, require};
@@ -16,6 +17,7 @@ pub(crate) mod matching;
 pub(crate) mod metadata;
 pub(crate) mod shelf;
 mod store;
+pub(crate) use index::portable_key;
 pub use index::{Index, IndexJob, SearchJob, SearchResult};
 
 #[cfg(test)]
@@ -38,6 +40,62 @@ pub struct Entry {
 #[cfg(test)]
 mod library_tests {
     use super::*;
+
+    #[test]
+    fn favorite_feedback_only_advances_after_a_persisted_change() {
+        let root = std::env::temp_dir().join(crate::system::random_id().unwrap());
+        fs::create_dir(&root).unwrap();
+        let game = Entry {
+            path: root.join("game.nes"),
+            name: "Game".into(),
+            directory: false,
+            frontend: "retroarch".into(),
+            core: "fceumm".into(),
+            platform: "nes".into(),
+            count: 0,
+            image: None,
+            extensions: String::new(),
+        };
+        let key = game.key();
+        let mut browser = Browser::with_inventory(IndexJob::local().unwrap(), true).unwrap();
+        browser.levels.push(Level {
+            kind: LibraryPage::Directory,
+            path: None,
+            entries: vec![game],
+            selected: 0,
+            offset: 0,
+            total: 1,
+        });
+        let receipt = |browser: &Browser| {
+            serde_json::from_value::<Option<howff_menu::FavoriteChange>>(
+                browser.view()["library"]["favorite_change"].clone(),
+            )
+            .unwrap()
+        };
+        assert!(receipt(&browser).is_none());
+        browser.toggle_favorite(&root);
+        let added = receipt(&browser).unwrap();
+        assert_eq!(added.key, key);
+        assert!(
+            added.favorite
+                && library::Library::load(&root)
+                    .unwrap()
+                    .favorites
+                    .contains_key(&key)
+        );
+        let lock = crate::system::Lock::try_acquire(&root.join("library.lock")).unwrap();
+        browser.toggle_favorite(&root);
+        assert_eq!(receipt(&browser).as_ref(), Some(&added));
+        assert!(browser.is_favorite());
+        drop(lock);
+        browser.toggle_favorite(&root);
+        let removed = receipt(&browser).unwrap();
+        assert_eq!(removed.key, key);
+        assert!(removed.sequence > added.sequence && !removed.favorite);
+        assert!(browser.status.is_empty());
+        assert!(library::Library::load(&root).unwrap().favorites.is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn pending_library_work_and_errors_are_distinct_from_game_preparation() {
@@ -454,6 +512,7 @@ pub struct Browser {
     pub indexing: bool,
     index: Option<Arc<Index>>,
     personal: library::Library,
+    favorite_change: Option<howff_menu::FavoriteChange>,
     queries: index::Queries,
     query: String,
     keyboard: bool,
@@ -605,6 +664,31 @@ impl Browser {
     pub fn searching(&self) -> bool {
         self.kind() == LibraryPage::Search
     }
+    fn toggle_favorite(&mut self, root: &Path) {
+        static NEXT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+        const WRITE_ERROR: &str = "无法保存收藏，请重试。";
+
+        let Some(entry) = self.game() else { return };
+        match library::Library::toggle(root, &entry) {
+            Ok(personal) => {
+                let key = entry.key();
+                self.favorite_change = Some(howff_menu::FavoriteChange {
+                    sequence: NEXT_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+                    favorite: personal.favorites.contains_key(&key),
+                    key,
+                });
+                self.personal = personal;
+                if self.status == WRITE_ERROR {
+                    self.status.clear();
+                }
+                if self.kind() == LibraryPage::Favorites {
+                    self.favorites();
+                }
+            }
+            Err(_) => self.status = WRITE_ERROR.into(),
+        }
+    }
+
     pub fn is_favorite(&self) -> bool {
         self.game()
             .is_some_and(|entry| self.personal.favorites.contains_key(&entry.key()))
@@ -666,6 +750,7 @@ impl Browser {
             indexing: true,
             index: None,
             personal: personal.unwrap_or_default(),
+            favorite_change: None,
             queries: index::Queries::default(),
             query: String::new(),
             keyboard: false,
@@ -1179,23 +1264,7 @@ impl Browser {
             return Ok(None);
         }
         if action == "refresh" && self.kind() != LibraryPage::Platforms {
-            if let Some(entry) = self
-                .levels
-                .last()
-                .and_then(|level| level.entries.get(level.selected))
-                .filter(|entry| !entry.directory)
-                .cloned()
-            {
-                match library::Library::toggle(Path::new(arkos::PATHS.personal), &entry) {
-                    Ok(value) => {
-                        self.personal = value;
-                        if self.kind() == LibraryPage::Favorites {
-                            self.favorites();
-                        }
-                    }
-                    Err(_) => self.status = "无法保存收藏，请重试。".into(),
-                }
-            }
+            self.toggle_favorite(Path::new(arkos::PATHS.personal));
             return Ok(None);
         }
         if action == "back" {
@@ -1437,7 +1506,7 @@ impl Browser {
         };
         json!({
             "platforms":self.kind()==LibraryPage::Platforms,
-            "library":{"kind":level.kind,"load":load,"query":self.query,"keyboard":self.keyboard && self.kind()==LibraryPage::Search,"key_selected":self.key_selected,"row_selected":level.selected.saturating_sub(first),"sort":self.personal.favorite_sort,"position":if level.entries.is_empty(){0}else{level.offset+level.selected+1},"total":level.total},
+            "library":{"favorite_change":self.favorite_change,"kind":level.kind,"load":load,"query":self.query,"keyboard":self.keyboard && self.kind()==LibraryPage::Search,"key_selected":self.key_selected,"row_selected":level.selected.saturating_sub(first),"sort":self.personal.favorite_sort,"position":if level.entries.is_empty(){0}else{level.offset+level.selected+1},"total":level.total},
             "artwork":level.entries.get(level.selected).and_then(|entry|entry.image.as_ref()).map(|path|path.to_string_lossy().into_owned()).unwrap_or_default(),
             "artwork_neighbors":artwork_neighbors,
             "page":"games","title":match self.kind() {LibraryPage::Platforms=>"选择游戏平台",LibraryPage::Favorites=>"收藏夹",LibraryPage::Search=>"搜索游戏",LibraryPage::Directory=>"选择游戏"},

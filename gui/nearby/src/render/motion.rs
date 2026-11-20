@@ -24,6 +24,10 @@ pub(crate) mod timing {
     pub const STARS_MS: u16 = 420;
     pub const GUEST_TURN_MS: u16 = 56;
     pub const HOST_HOP_DELAY_MS: u16 = 70;
+    pub const RELAY_LIFT_MS: u16 = 56;
+    pub const RELAY_FLIGHT_MS: u16 = 208;
+    pub const RELAY_CATCH_MS: u16 = 160;
+    pub const RELAY_RELEASE_MS: u16 = RELAY_LIFT_MS + RELAY_FLIGHT_MS;
     pub const SIGNAL_STAGGER_MS: u16 = 55;
     pub const ACTIVITY_MS: u16 = 450;
     pub const ACTIVITY_STAGGER_MS: u16 = 105;
@@ -75,6 +79,7 @@ pub(super) struct Frame {
     pub host_presence: Fixed,
     pub host_facing_left: bool,
     pub host_ack_age: u16,
+    pub relay_age: Option<u16>,
     pub guest_walking: bool,
     pub visitor: bool,
     pub guest_presence: Fixed,
@@ -105,6 +110,7 @@ impl Default for Frame {
             host_presence: Fixed::ONE,
             host_facing_left: false,
             host_ack_age: SETTLED_MS,
+            relay_age: None,
             guest_walking: false,
             visitor: false,
             guest_presence: Fixed::ZERO,
@@ -144,6 +150,8 @@ pub(super) struct Timeline {
     host: Travel,
     host_presence: Travel,
     host_ack_at: Option<u64>,
+    relay_session: String,
+    relay_at: Option<u64>,
     guest: Travel,
     guest_presence: Travel,
     guest_present: bool,
@@ -367,6 +375,19 @@ impl Timeline {
             page_changed,
         );
         let phase = copy::phase(view);
+        if phase == Phase::Failed {
+            self.relay_session.clear();
+        }
+        let relay_age = view.relay_session().map(|session| {
+            if self.relay_session != session {
+                self.relay_session = session.to_owned();
+                self.relay_at = Some(now);
+            }
+            age(now, self.relay_at)
+        });
+        if relay_age.is_none() {
+            self.relay_at = None;
+        }
         let guest = match phase {
             _ if !self.guest_present => anchors::GUEST_GATE,
             Phase::Connecting if self.host_ack_at.is_some() => anchors::GUEST_CHECK,
@@ -378,6 +399,13 @@ impl Timeline {
             | Phase::Notifying
             | Phase::PeerPreparing
             | Phase::NetworkConfirming => anchors::GUEST_CHECK,
+            Phase::Starting
+                if relay_age.is_some()
+                    && (view.page == Page::Host
+                        || relay_age.is_some_and(|age| age < timing::RELAY_CATCH_MS)) =>
+            {
+                anchors::GUEST_HOME
+            }
             Phase::Starting => anchors::GUEST_APPROACH,
             Phase::Leaving | Phase::Closed => anchors::GUEST_EXIT,
             Phase::Failed | Phase::RestoreFailed if continues_session => self.guest.value(now),
@@ -394,6 +422,12 @@ impl Timeline {
             }
         };
         let (host, host_presence) = match phase {
+            Phase::Starting
+                if relay_age.is_some_and(|age| age < timing::RELAY_RELEASE_MS)
+                    || (relay_age.is_some() && view.page == Page::Joined) =>
+            {
+                (anchors::HOST_HOME, Fixed::ONE)
+            }
             Phase::Starting => (anchors::HOST_START, Fixed::ONE),
             Phase::Leaving | Phase::Closed => (anchors::HOST_EXIT, Fixed::ZERO),
             Phase::Failed | Phase::RestoreFailed if continues_session => {
@@ -487,6 +521,7 @@ impl Timeline {
             host_presence: host_gate.value(),
             host_facing_left,
             host_ack_age,
+            relay_age,
             guest_walking: walking_to_seat || crossing_gate,
             visitor: self.guest_present || presence.value() > Fixed::ZERO,
             guest_presence: presence.value(),
@@ -512,6 +547,7 @@ impl Frame {
     pub(super) fn settled(self) -> bool {
         self.selection >= SETTLED_MS
             && self.phase_age >= SETTLED_MS
+            && self.relay_age.is_none_or(|age| age >= SETTLED_MS)
             && self.pulse >= timing::FOCUS_PULSE_MS
             && self.press >= timing::PRESS_FADE_MS
             && self.wave.is_none()
@@ -541,17 +577,6 @@ impl Frame {
             self.selection
         };
         Transform::translate(recoil(age).into(), (hop(age, 3.0) + pressed).into())
-    }
-
-    pub(super) fn cartridge_transform(self, index: usize) -> Transform {
-        if self.selected != Some(index) {
-            return Transform::IDENTITY;
-        }
-        let press = if self.press < timing::PRESS_MS { 2 } else { 0 };
-        Transform::translate(
-            recoil(self.selection).into(),
-            Fixed::from_int(-3 + press + hop(self.selection, 3.0)),
-        )
     }
 
     pub(super) fn card_color(self, index: usize) -> ColorToken {
@@ -601,8 +626,10 @@ impl Frame {
     }
     pub(super) fn session(self) -> Self {
         Self {
+            page: self.page,
             phase: self.phase,
             phase_age: self.phase_age,
+            relay_age: self.relay_age,
             ready: self.ready,
             connected: self.connected,
             network_only: self.network_only,

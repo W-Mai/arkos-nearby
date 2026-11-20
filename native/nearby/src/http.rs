@@ -145,7 +145,12 @@ pub fn serve(id: &str) -> Result<()> {
                         }
                         ("GET", "/room-status") => {
                             let mut status = controller.status(monotonic());
-                            status["native_ready"] = crate::game::listening(&current(id)?).into();
+                            let session = current(id)?;
+                            status["start_requested"] =
+                                (matches!(session.phase.as_str(), "launching" | "playing")
+                                    || session.root().join("start-game").is_file())
+                                .into();
+                            status["native_ready"] = crate::game::listening(&session).into();
                             Ok(status)
                         }
                         ("POST", "/identity-challenge") => {

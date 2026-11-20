@@ -57,6 +57,58 @@ mod tests {
     }
 
     #[test]
+    fn reopening_discovery_uses_the_network_owner_before_scanning() {
+        use super::FlowExit;
+        let id = "a".repeat(32);
+        for role in ["host", "client"] {
+            let in_room = if role == "host" {
+                Page::Host
+            } else {
+                Page::Joined
+            };
+            let connected = json!({"id":id,"role":role,"phase":"network_connected","step":"network_connected","network_only":true,"connected":true,"context_matches":true});
+            for mut flow in [
+                Flow::lobby(None),
+                Flow::network(),
+                Flow::new(Some(crate::contracts::context())),
+            ] {
+                let discovery = flow.generation;
+                flow.status(discovery, connected.clone());
+                flow.scan(discovery, rooms());
+                assert_eq!(flow.page, in_room);
+                assert!(!flow.scans());
+                assert_eq!(flow.view()["connected"], true);
+                flow.dispatch("confirm", crate::system::monotonic() + 1.0);
+                let request = flow.request.take().unwrap();
+                flow.complete(&request, connected.clone(), false);
+                assert_eq!(flow.outcome, Some(FlowExit::KeepNetwork));
+                assert!(flow.into_lobby_resume().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn manual_branch_retains_only_discovery_navigation() {
+        use super::FlowExit;
+        for outcome in [
+            FlowExit::NetworkOnly,
+            FlowExit::SelectGame,
+            FlowExit::CurrentGame,
+        ] {
+            let mut flow = Flow::lobby(None);
+            flow.scan(flow.generation, rooms());
+            flow.dispatch("down", crate::system::monotonic() + 1.0);
+            let selected = flow.view()["rooms"][1]["key"].clone();
+            flow.outcome = Some(outcome);
+            let mut resumed = flow.into_lobby_resume().unwrap();
+            assert_eq!(resumed.page, Page::Lobby);
+            assert_eq!(resumed.view()["rooms"][1]["key"], selected);
+            assert_eq!(resumed.view()["selected"], 1);
+            assert!(resumed.session_id.is_none());
+        }
+    }
+
+    #[test]
     fn repeated_room_views_reuse_the_sorted_projection() {
         let mut flow = flow();
         flow.scan(flow.generation, rooms());
@@ -172,6 +224,8 @@ pub struct Flow {
     candidate: usize,
     pub outcome: Option<FlowExit>,
     network_only: bool,
+    confirm_disconnect: bool,
+    disconnect_selected: bool,
     pub context: Option<Context>,
     pub page: Page,
     pub generation: u64,
@@ -266,6 +320,8 @@ impl Flow {
             candidate: 0,
             outcome: None,
             network_only: false,
+            confirm_disconnect: false,
+            disconnect_selected: false,
             context,
             page,
             generation: 0,
@@ -318,12 +374,18 @@ impl Flow {
     pub fn scans(&self) -> bool {
         matches!(self.page, Page::Rooms | Page::Lobby) || self.lobby && self.page == Page::Mode
     }
-    pub fn resume_lobby(&mut self) {
+    pub fn into_lobby_resume(mut self) -> Option<Self> {
+        // Only retain the discovery list while visiting a manual branch.
+        // Leaving with an active session resolves its owner again on the next entry.
+        match self.outcome? {
+            FlowExit::KeepNetwork => return None,
+            FlowExit::CurrentGame | FlowExit::SelectGame | FlowExit::NetworkOnly => {}
+        }
         self.outcome = None;
         self.exit_code = None;
         self.network_only = false;
         self.set_page(Page::Lobby);
-        self.refresh_requested = true;
+        Some(self)
     }
     fn entry_page(&self) -> bool {
         self.page == Page::Choice || self.lobby && matches!(self.page, Page::Lobby | Page::Mode)
@@ -344,6 +406,8 @@ impl Flow {
     }
     fn set_page(&mut self, page: Page) {
         self.page = page;
+        self.confirm_disconnect = false;
+        self.disconnect_selected = false;
         self.generation += 1;
         self.input_epoch = monotonic();
         self.scanning = None;
@@ -418,7 +482,7 @@ impl Flow {
             operation,
             Operation::Start | Operation::Cancel | Operation::Approve | Operation::Detach
         ) {
-            payload = json!({"session_id": self.session_id});
+            payload["session_id"] = json!(self.session_id);
         }
         if operation == Operation::SelectGame {
             payload["session_id"] = json!(self.session_id);
@@ -429,9 +493,12 @@ impl Flow {
             self.peer_seen = false;
             self.peer_left = false;
         }
+        if operation == Operation::Cancel && payload.get("preserve_established").is_none() {
+            payload["preserve_established"] = true.into();
+        }
         self.phase = match operation {
             Operation::SelectGame => "checking",
-            Operation::Detach => "network_connected",
+            Operation::Detach => self.phase.as_str(),
             Operation::Create => "creating",
             Operation::Join => "connecting",
             Operation::Start => "starting",
@@ -484,7 +551,37 @@ impl Flow {
             self.exit_code = Some(if self.single_player { 230 } else { 0 });
         }
     }
+    fn established_network(&self) -> bool {
+        self.network_only && self.state["phase"] == "network_connected"
+    }
+    fn network_actions(&self) -> bool {
+        self.established_network()
+            && matches!(
+                self.phase.as_str(),
+                "network_connected" | "network_reconnecting"
+            )
+            && matches!(self.page, Page::Host | Page::Joined)
+    }
+    fn disconnect_confirmation(&mut self, open: bool) {
+        self.confirm_disconnect = open;
+        self.disconnect_selected = false;
+        self.input_epoch = monotonic();
+    }
     fn back(&mut self) {
+        if self.operation == Some(Operation::Detach) {
+            return;
+        }
+        if self.confirm_disconnect {
+            self.disconnect_confirmation(false);
+            return;
+        }
+        if self.pending_back.is_none() && self.established_network() && self.operation.is_none() {
+            self.begin(Operation::Detach, json!({}));
+            return;
+        }
+        self.leave();
+    }
+    fn leave(&mut self) {
         if self.pending_back.is_some() {
             if matches!(self.phase.as_str(), "restore_failed" | "room_active")
                 && self.operation.is_none()
@@ -598,6 +695,25 @@ impl Flow {
             "confirm" => 0,
             _ => return,
         };
+        if self.network_actions() {
+            match (direction, self.confirm_disconnect, self.disconnect_selected) {
+                (-1 | 1, _, _) => self.disconnect_selected = direction > 0,
+                (0, false, false) => self.begin(Operation::Detach, json!({})),
+                (0, false, true) => self.disconnect_confirmation(true),
+                (0, true, false) => self.disconnect_confirmation(false),
+                (0, true, true) => {
+                    self.pending_back = Some(Some(if self.lobby {
+                        Page::Lobby
+                    } else {
+                        Page::Choice
+                    }));
+                    self.set_page(Page::Leaving);
+                    self.begin(Operation::Cancel, json!({"preserve_established":false}));
+                }
+                _ => {}
+            }
+            return;
+        }
         if direction != 0 {
             if matches!(self.page, Page::Choice | Page::Mode) {
                 self.choice = (self.choice as i32 + direction).clamp(
@@ -640,13 +756,6 @@ impl Flow {
                     FlowExit::SelectGame
                 });
                 self.exit_code = Some(0);
-            }
-            Page::Host | Page::Joined
-                if self.network_only
-                    && self.phase == "network_connected"
-                    && truth(&self.state, "connected") =>
-            {
-                self.begin(Operation::Detach, json!({}));
             }
             Page::Choice if self.choice == 0 => {
                 self.set_page(Page::Host);
@@ -823,8 +932,10 @@ impl Flow {
             return;
         }
         if self.session_id.is_none() {
+            let browsing_network = truth(&value, "network_only")
+                && matches!(self.page, Page::Rooms | Page::Unavailable);
             if self.operation.is_some()
-                || !self.entry_page()
+                || !(self.entry_page() || browsing_network)
                 || matches!(backend_phase, "idle" | "closed")
                 || backend_phase == "failed" && !errors(&value)
                 || !hex(&id, 32)
@@ -843,6 +954,7 @@ impl Flow {
         if self.session_id.as_deref() != Some(&id) {
             return;
         }
+        let previous_network_actions = self.network_actions();
         self.state = value;
         if self.state["network_only"].is_boolean() {
             self.network_only = truth(&self.state, "network_only");
@@ -861,6 +973,13 @@ impl Flow {
             string(&self.state, "step")
         }
         .into();
+        if previous_network_actions != self.network_actions() {
+            self.input_epoch = monotonic();
+        }
+        if !self.network_actions() {
+            self.confirm_disconnect = false;
+            self.disconnect_selected = false;
+        }
         if self.phase == "restore_failed" {
             self.pending_back = Some(Some(
                 if matches!(self.page, Page::Joined | Page::Candidates) {
@@ -931,7 +1050,11 @@ impl Flow {
             return;
         }
         if request.operation == Operation::Cancel {
-            if failed || !self.restored() {
+            if !failed && self.state["return_with_network"] == true {
+                self.pending_back = None;
+                self.outcome = Some(FlowExit::KeepNetwork);
+                self.exit_code = Some(0);
+            } else if failed || !self.restored() {
                 self.phase = "restore_failed".into();
                 self.message = "退出尚未完成，按 A 重试恢复网络。".into();
             } else {
@@ -988,6 +1111,8 @@ impl Flow {
         };
         let selected = if self.page == Page::Candidates {
             self.candidate.min(3)
+        } else if self.network_actions() {
+            usize::from(self.disconnect_selected)
         } else if matches!(self.page, Page::Choice | Page::Mode) {
             self.choice
         } else {
@@ -1009,16 +1134,19 @@ impl Flow {
         if self.page == Page::Joined && players[0].is_empty() {
             players[0] = string(&room["listing"], "owner").into();
         }
-        let back = if self.page == Page::Lobby {
+        let back = if self.confirm_disconnect {
+            "取消"
+        } else if self.established_network()
+            || self.page == Page::Mode
+            || self.network_only && self.page == Page::Choice
+        {
+            "返回"
+        } else if self.page == Page::Lobby {
             if self.context.is_some() {
                 "单机游玩"
             } else {
                 "退出"
             }
-        } else if self.network_only && self.phase == "network_connected" {
-            "断开并恢复 Wi-Fi"
-        } else if self.page == Page::Mode || self.network_only && self.page == Page::Choice {
-            "返回"
         } else if self.phase == "room_active" {
             "关闭房间"
         } else if self.phase == "restore_failed" {
@@ -1063,6 +1191,21 @@ impl Flow {
             && (self.operation.is_some()
                 || self.message == string(&self.state, "stage")
                 || self.phase == "host_ready");
-        json!({"routine_stage":routine_stage,"room_game":string(listing,"game"),"artwork":string(listing,"artwork"),"player_names":players,"lobby":self.lobby,"current_game":self.context.is_some(),"entries":if self.page == Page::Candidates { self.state["candidates"].as_array().cloned().unwrap_or_default().into_iter().skip(self.candidate.saturating_sub(3)).take(4).collect::<Vec<_>>() } else { vec![] },"network_only":self.network_only,"local_address":self.state["local_address"].as_str().unwrap_or(""),"peers":self.state["peers"].as_array().cloned().unwrap_or_default(),"connected":truth(&self.state,"connected"),"page":self.page.name(),"title":title,"core":core,"selected":selected,"room_selected":room_selected,"rooms":rows,"room_name":if room.is_null() { String::new() } else { room_name(room) },"ready":truth(&self.state,"ready") && self.state["context_matches"] != false && self.pending_back.is_none() && matches!(self.phase.as_str(),"host_ready"|"waiting_start"|"starting"),"busy":self.operation.is_some(),"refreshing":self.scans() && self.scanning.unwrap_or(monotonic()<self.refreshing_until),"status":label(&self.message),"phase":self.phase,"back_label":back})
+        let launch_session = (self.phase == "starting"
+            && !self.network_only
+            && self.pending_back.is_none()
+            && matches!(self.page, Page::Host | Page::Joined))
+        .then(|| self.state["session"].as_str())
+        .flatten()
+        .map(|session| {
+            let digest = Sha256::new()
+                .chain_update(b"howff/ui/start-relay/v1\0")
+                .chain_update(session.as_bytes())
+                .finalize();
+            let mut token = format!("{digest:x}");
+            token.truncate(32);
+            token
+        });
+        json!({"confirm_disconnect":self.confirm_disconnect,"launch_session":launch_session,"routine_stage":routine_stage,"room_game":string(listing,"game"),"artwork":string(listing,"artwork"),"player_names":players,"lobby":self.lobby,"current_game":self.context.is_some(),"entries":if self.page == Page::Candidates { self.state["candidates"].as_array().cloned().unwrap_or_default().into_iter().skip(self.candidate.saturating_sub(3)).take(4).collect::<Vec<_>>() } else { vec![] },"network_only":self.network_only,"local_address":self.state["local_address"].as_str().unwrap_or(""),"peers":self.state["peers"].as_array().cloned().unwrap_or_default(),"connected":truth(&self.state,"connected"),"page":self.page.name(),"title":title,"core":core,"selected":selected,"room_selected":room_selected,"rooms":rows,"room_name":if room.is_null() { String::new() } else { room_name(room) },"ready":truth(&self.state,"ready") && self.state["context_matches"] != false && self.pending_back.is_none() && matches!(self.phase.as_str(),"host_ready"|"waiting_start"|"starting"),"busy":self.operation.is_some(),"refreshing":self.scans() && self.scanning.unwrap_or(monotonic()<self.refreshing_until),"status":label(&self.message),"phase":self.phase,"back_label":back})
     }
 }

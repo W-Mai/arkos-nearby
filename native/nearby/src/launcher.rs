@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 pub enum Intent {
     Play(Entry),
     SavedPlay(Entry, String),
-    RestorePlay(Entry),
+    RestorePlay(Entry, String),
     Multiplayer(Entry),
     Discovery,
     Network,
@@ -47,8 +47,9 @@ fn exit_items(connected_network: bool) -> Vec<MenuItem> {
             MenuAction::KeepNetworkExit,
             "保留直连，返回原系统",
         ));
+    } else {
+        items.push(MenuItem::available(MenuAction::Exit, "退出并恢复 Wi-Fi"));
     }
-    items.push(MenuItem::available(MenuAction::Exit, "退出并恢复 Wi-Fi"));
     items
 }
 
@@ -61,6 +62,7 @@ enum Overlay {
     Exit,
     Power,
     Network,
+    ConfirmRestorePlay,
     Details(Section),
     Wifi,
     Configuration,
@@ -73,6 +75,7 @@ pub struct Controller {
     tab: usize,
     overlay: Option<Overlay>,
     selection: usize,
+    disconnect_for_play: Option<String>,
     entry: Option<Entry>,
     controls: controls::Controls,
     tools: tools::Tools,
@@ -96,6 +99,7 @@ impl Controller {
             tab: 0,
             overlay: None,
             selection: 0,
+            disconnect_for_play: None,
             entry: None,
             controls: controls::Controls::default(),
             tools: tools::Tools::default(),
@@ -215,6 +219,10 @@ impl Controller {
                 MenuItem::available(Poweroff, "确认关机"),
                 MenuItem::available(Reboot, "确认重启"),
             ],
+            Some(Overlay::ConfirmRestorePlay) => vec![
+                MenuItem::available(Back, "保留组网"),
+                MenuItem::available(RestorePlay, "断开并开始游戏"),
+            ],
             Some(Overlay::Network) => vec![
                 MenuItem::available(Play, "保留直连，开始游戏"),
                 MenuItem::available(RestorePlay, "恢复 Wi-Fi 后开始"),
@@ -286,6 +294,7 @@ impl Controller {
             Some(Overlay::Exit) => "返回原系统",
             Some(Overlay::Power) => "电源",
             Some(Overlay::Network) => "当前保留着直连网络",
+            Some(Overlay::ConfirmRestorePlay) => "断开组网后开始游戏？",
             Some(Overlay::Details(Section::Overview)) => "游戏详情",
             Some(Overlay::Details(Section::Core)) => "运行核心",
             Some(Overlay::Details(Section::Firmware)) => "BIOS 文件",
@@ -293,7 +302,7 @@ impl Controller {
             Some(Overlay::Details(Section::Storage)) => "存储空间",
             None => "",
         };
-        view["launcher"] = json!({"enabled":true,"tab":self.tab,"navigation":false,"key":game.as_ref().map(Entry::key).unwrap_or_default(),"netplay":game.as_ref().is_some_and(Entry::netplay),"overlay":title,"overlay_kind":match self.overlay {Some(Overlay::Game)=>"game",Some(Overlay::System)=>"system",Some(Overlay::Controls)=>"controls",Some(Overlay::Tools)=>"tools",Some(Overlay::Exit)=>"exit",Some(Overlay::Power)=>"power",Some(Overlay::Network)=>"network",Some(Overlay::Details(_))=>"details",Some(Overlay::Wifi)=>"wifi",Some(Overlay::Configuration)=>"configuration",Some(Overlay::Saves)=>"saves",Some(Overlay::Management)=>"management",None=>""},"items":options,"selected":self.selection,"retained":Self::retained()});
+        view["launcher"] = json!({"enabled":true,"tab":self.tab,"navigation":false,"key":game.as_ref().map(Entry::key).unwrap_or_default(),"netplay":game.as_ref().is_some_and(Entry::netplay),"overlay":title,"overlay_kind":match self.overlay {Some(Overlay::Game)=>"game",Some(Overlay::System)=>"system",Some(Overlay::Controls)=>"controls",Some(Overlay::Tools)=>"tools",Some(Overlay::Exit)=>"exit",Some(Overlay::Power)=>"power",Some(Overlay::Network)=>"network",Some(Overlay::ConfirmRestorePlay)=>"confirm_restore_play",Some(Overlay::Details(_))=>"details",Some(Overlay::Wifi)=>"wifi",Some(Overlay::Configuration)=>"configuration",Some(Overlay::Saves)=>"saves",Some(Overlay::Management)=>"management",None=>""},"items":options,"selected":self.selection,"retained":Self::retained()});
         view["launcher"]["notice"] = self.status.clone().into();
         if self.overlay == Some(Overlay::Management) {
             view["launcher"]["management"] =
@@ -353,6 +362,10 @@ impl Controller {
         if self.overlay.is_some() {
             return Ok(None);
         }
+        self.game_intent(action, key)
+    }
+
+    fn game_intent(&mut self, action: &str, key: &str) -> Result<Option<Intent>> {
         let Some(entry) = self.game().filter(|e| e.key() == key) else {
             return Ok(None);
         };
@@ -480,6 +493,26 @@ impl Controller {
                 return Ok(None);
             }
             let selected = item.action;
+            if overlay == Overlay::Network && selected == MenuAction::RestorePlay {
+                self.disconnect_for_play = crate::session::state()
+                    .ok()
+                    .filter(|state| {
+                        state.purpose == crate::purpose::SessionPurpose::NetworkOnly
+                            && !state.closed()
+                    })
+                    .map(|state| state.id);
+                if self.disconnect_for_play.is_none() {
+                    self.overlay = None;
+                    return Ok(self.entry.clone().map(Intent::Play));
+                }
+                self.overlay = Some(Overlay::ConfirmRestorePlay);
+                self.selection = 0;
+                return Ok(None);
+            }
+            if overlay == Overlay::ConfirmRestorePlay && selected == MenuAction::Back {
+                self.close_overlay(overlay);
+                return Ok(None);
+            }
             if overlay == Overlay::Tools
                 && matches!(selected, MenuAction::OpenWifi | MenuAction::NetworkInfo)
             {
@@ -552,7 +585,9 @@ impl Controller {
             if overlay == Overlay::Controls && selected != MenuAction::ShowTools {
                 return Ok(None);
             }
-            self.overlay = None;
+            if selected != MenuAction::Multiplayer {
+                self.overlay = None;
+            }
             return match selected {
                 MenuAction::Play if overlay != Overlay::Network => {
                     let key = self.entry.as_ref().map(Entry::key).unwrap_or_default();
@@ -560,7 +595,7 @@ impl Controller {
                 }
                 MenuAction::Multiplayer => {
                     let key = self.entry.as_ref().map(Entry::key).unwrap_or_default();
-                    self.gesture("multiplayer", &key)
+                    self.game_intent("multiplayer", &key)
                 }
                 MenuAction::ToggleFavorite => {
                     self.browser().dispatch("refresh")?;
@@ -600,16 +635,12 @@ impl Controller {
                 MenuAction::KeepNetworkExit => Ok(Some(Intent::KeepNetworkExit)),
                 MenuAction::Poweroff => Ok(Some(Intent::Power(PowerAction::Poweroff))),
                 MenuAction::Reboot => Ok(Some(Intent::Power(PowerAction::Reboot))),
-                MenuAction::Play | MenuAction::RestorePlay => {
-                    Ok(self
-                        .entry
-                        .clone()
-                        .map(if selected == MenuAction::RestorePlay {
-                            Intent::RestorePlay
-                        } else {
-                            Intent::Play
-                        }))
-                }
+                MenuAction::Play => Ok(self.entry.clone().map(Intent::Play)),
+                MenuAction::RestorePlay => Ok(self
+                    .entry
+                    .clone()
+                    .zip(self.disconnect_for_play.take())
+                    .map(|(entry, network)| Intent::RestorePlay(entry, network))),
                 MenuAction::CycleTheme | MenuAction::ToggleSound | MenuAction::Back => Ok(None),
                 MenuAction::Volume
                 | MenuAction::Brightness
@@ -667,6 +698,12 @@ impl Controller {
         Ok(None)
     }
     fn close_overlay(&mut self, overlay: Overlay) {
+        if overlay == Overlay::ConfirmRestorePlay {
+            self.disconnect_for_play = None;
+            self.overlay = Some(Overlay::Network);
+            self.selection = 0;
+            return;
+        }
         if let Overlay::Details(section) = overlay {
             if self.detail_expanded {
                 self.detail_expanded = false;
@@ -833,7 +870,7 @@ impl Controller {
             self.wifi.credentials(request);
         }
     }
-    pub fn restore_network(&mut self) -> Result<()> {
+    fn restore_network(&self, reason: &str, selected: Option<&str>) -> Result<()> {
         if !Path::new(crate::session::BASE)
             .join("session.json")
             .exists()
@@ -842,7 +879,13 @@ impl Controller {
         }
         let s = crate::session::state()?;
         if !s.closed() || !s.network_restored {
-            crate::session::recover(&s.id, "launcher_exit")?;
+            require(
+                selected.is_none_or(|id| id == s.id),
+                "组网已更换，请重新选择",
+            )?;
+            if crate::session::recover(&s.id, reason)?["return_with_network"] == true {
+                return Ok(());
+            }
         }
         require(
             crate::session::state().is_ok_and(|s| s.closed() && s.network_restored),
@@ -877,13 +920,13 @@ fn run_page(application: bool) -> Result<i32> {
         let refresh_library = !matches!(&intent, Intent::Tool(tool) if *tool != tools::Tool::Files);
         let result = (|| -> Result<bool> {
             match intent {
-                Intent::Play(ref entry) | Intent::RestorePlay(ref entry) => {
+                Intent::Play(ref entry) | Intent::RestorePlay(ref entry, _) => {
                     display
                         .as_mut()
                         .unwrap()
                         .launcher_busy(&mut controller, "正在准备游戏")?;
-                    if matches!(intent, Intent::RestorePlay(_)) {
-                        controller.restore_network()?;
+                    if let Intent::RestorePlay(_, ref id) = intent {
+                        controller.restore_network("launcher_exit", Some(id))?;
                     }
                     let prepared = recipes::prepare(entry.path())?;
                     drop(display.take());
@@ -910,11 +953,14 @@ fn run_page(application: bool) -> Result<i32> {
                     if Controller::retained() {
                         menu.run_network()?;
                         if Controller::retained() {
+                            controller.overlay = None;
                             return Ok(false);
                         }
                     }
                     menu.launcher_busy(&mut controller, "正在准备联机")?;
-                    let context = entry.prepare()?;
+                    let context = entry.prepare();
+                    controller.overlay = None;
+                    let context = context?;
                     menu.run_with_fallback(
                         Some(context.clone()),
                         Some(crate::session::NativeBackend::shared(context)),
@@ -976,7 +1022,14 @@ fn run_page(application: bool) -> Result<i32> {
                         keep_network_exit_allowed(state.purpose, state.established()),
                         "直连网络尚未连接",
                     )?;
-                    crate::network::require_live(&state)?;
+                    drop(display.take());
+                    return Ok(true);
+                }
+                Intent::Exit
+                    if crate::session::state().is_ok_and(|state| {
+                        keep_network_exit_allowed(state.purpose, state.established())
+                    }) =>
+                {
                     drop(display.take());
                     return Ok(true);
                 }
@@ -985,7 +1038,14 @@ fn run_page(application: bool) -> Result<i32> {
                         .as_mut()
                         .unwrap()
                         .launcher_busy(&mut controller, "正在退出并恢复网络")?;
-                    controller.restore_network()?;
+                    controller.restore_network(
+                        if matches!(intent, Intent::Exit) {
+                            "menu_back"
+                        } else {
+                            "launcher_exit"
+                        },
+                        None,
+                    )?;
                     drop(display.take());
                     if let Intent::Power(action) = intent {
                         crate::platform::system::power(action)?;
@@ -1124,7 +1184,7 @@ mod menu_tests {
             let items = exit_items(connected);
             let actions: Vec<_> = items.iter().map(|item| item.action).collect();
             assert_eq!(actions.first(), Some(&MenuAction::Back));
-            assert_eq!(actions.last(), Some(&MenuAction::Exit));
+            assert_eq!(actions.contains(&MenuAction::Exit), !connected);
             assert_eq!(actions.contains(&MenuAction::KeepNetworkExit), connected);
             assert!(items.iter().all(MenuItem::enabled));
             for item in items {
@@ -1148,6 +1208,7 @@ mod menu_tests {
             tab: 0,
             overlay: None,
             selection: 0,
+            disconnect_for_play: None,
             entry: None,
             controls: Default::default(),
             tools: Default::default(),
@@ -1231,6 +1292,7 @@ mod menu_tests {
                 tab: 0,
                 overlay: None,
                 selection: 0,
+                disconnect_for_play: None,
                 entry: None,
                 controls: controls::Controls::default(),
                 tools: tools::Tools::default(),
@@ -1270,6 +1332,7 @@ mod menu_tests {
                 tab: 0,
                 overlay: Some(Overlay::Controls),
                 selection: 0,
+                disconnect_for_play: None,
                 entry: None,
                 controls: controls::Controls::default(),
                 tools: tools::Tools::default(),

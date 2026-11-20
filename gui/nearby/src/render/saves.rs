@@ -66,10 +66,16 @@ pub(super) fn panel_contents(state: model!(Manager), metrics: Metrics) -> Entity
                     tab (state, index, metrics)
                 }
             }
-            if ${ !state.busy() && !state.modal() && !state.status().is_empty() } {
+            if ${
+                state.copying().is_none() && !state.busy() && !state.modal()
+                    && !state.status().is_empty()
+            } {
                 text_block (${ notice.status() }, ACCENT, BODY_SIZE, Start, 0, 1)
             }
-            if ${ state.busy() } {
+            walk ${ state.copying().map(|_| ()) } with _transfer {
+                chip_transfer (state, metrics)
+            }
+            if ${ state.busy() && state.copying().is_none() } {
                 Column (
                     grow: 1.0,
                     min_width: 0,
@@ -98,7 +104,8 @@ pub(super) fn panel_contents(state: model!(Manager), metrics: Metrics) -> Entity
                         ]
                     }
                 }
-            } else {
+            }
+            if ${ !state.busy() && state.copying().is_none() } {
                 Column (grow: 1.0, min_width: 0, min_height: 0, container: true) {
                     Row (
                         grow: 1.0,
@@ -229,6 +236,189 @@ pub(super) fn panel_contents(state: model!(Manager), metrics: Metrics) -> Entity
                     }
                 }
             }
+        }
+    }
+}
+const CHIP: i32 = 24;
+const SOURCE_X: i32 = 73;
+const SOCKET_X: i32 = 36;
+
+#[component]
+pub(super) enum ChipPart {
+    Source,
+    Copy,
+}
+
+#[compose]
+fn chip_transfer(state: model!(Manager), metrics: Metrics) -> Entity {
+    let list_layout = ActionLayout::SavesList;
+    let rise = metrics.save_row_height() / 2;
+    let destination = state.clone();
+    let position = state.clone();
+    let route = state.clone();
+    ui! {
+        Row (
+            grow: 1.0,
+            min_height: 0,
+            min_width: 0,
+            container: true,
+            column_gap: metrics.gap * 2,
+            clip_children: true
+        ) {
+            Column (
+                width: Dimension::percent(46),
+                min_width: 0,
+                min_height: 0,
+                row_gap: metrics.gap,
+                clip_children: true
+            ) {
+                if ${ state.delivered() } {
+                    Column (grow: 1.0, min_width: 0, min_height: 0, row_gap: metrics.gap) {
+                        walk ${ state.list_window() } with index by index {
+                            row (state, index, metrics, list_layout, false)
+                        }
+                    }
+                } else {
+                    Row (
+                        height: metrics.save_row_height(),
+                        bg_color: PANEL,
+                        align: AlignItems::Center,
+                        padding: Padding::all(metrics.gap)
+                    ) {
+                        text_block (
+                            ${ destination.copy_target() },
+                            SECONDARY,
+                            BODY_SIZE,
+                            Start,
+                            0,
+                            1
+                        )
+                    }
+                }
+            } on SizeChanged {
+                state
+                    .viewport(
+                        event.new.height + Fixed::from_int(metrics.gap),
+                        metrics.save_row_extent(),
+                    );
+            }
+            Column (
+                grow: 1.0,
+                min_width: 0,
+                padding: Padding {
+                    top: (rise + CHIP + metrics.gap).into(),
+                    ..Default::default()
+                }
+            ) {
+                text_block (${ state.copy_title() }, FOREGROUND, BODY_SIZE, Center, 0, 2)
+            }
+            View (
+                position: Position::Absolute,
+                left: Dimension::percent(SOURCE_X),
+                top: rise + CHIP,
+                width: CHIP,
+                height: 2,
+                bg_color: DIVIDER
+            )
+            if ${ !state.delivered() } {
+                Image (
+                    position: Position::Absolute,
+                    left: Dimension::percent(SOCKET_X),
+                    top: (metrics.save_row_height() - CHIP) / 2,
+                    width: CHIP,
+                    height: CHIP,
+                    viewbox: 24,
+                    color: SECONDARY,
+                    src: path!(
+                        M 1 2 H 8 V 4 H 3 V 8 H 1 Z M 16 2 H 23 V 8 H 21 V 4 H 16 Z M 1 16 H 3 V 20 H 21
+                        V 16 H 23 V 22 H 1 Z
+                    )
+                )
+            }
+            View (
+                position: Position::Absolute,
+                top: rise,
+                left: Dimension::percent(SOURCE_X),
+                width: CHIP,
+                height: CHIP
+            ) [
+                ChipPart::Source,
+            ] {
+                save_chip (false)
+            }
+            View (
+                position: Position::Absolute,
+                left: ${
+                    Dimension::Percent(
+                        Fixed::from_int(SOURCE_X)
+                            + Fixed::from_int(SOCKET_X - SOURCE_X) * position.copy_progress(),
+                    )
+                },
+                top: ${
+                    {
+                        let p = route.copy_progress();
+                        let line = if route.delivered() {
+                            route.list_selection().saturating_sub(route.list_window().start)
+                        } else {
+                            0
+                        };
+                        let seat = line as i32 * metrics.save_row_extent()
+                            + (metrics.save_row_height() - CHIP) / 2;
+                        Fixed::from_int(rise) + Fixed::from_int(seat - rise) * p
+                            - Fixed::from_int(22) * Fixed::sin_deg(p * Fixed::from_int(180))
+                    }
+                },
+                width: CHIP,
+                height: CHIP
+            ) [
+                ChipPart::Copy,
+                ActionAnchor(0, ActionLayout::SaveCopy),
+            ] {
+                save_chip (true)
+            }
+        }
+    }
+}
+
+#[compose]
+fn save_chip(copy: bool) -> Entity {
+    ui! {
+        View (grow: 1.0, container: true) {
+            Image (
+                position: Position::Absolute,
+                width: CHIP,
+                height: CHIP,
+                viewbox: 24,
+                color: WARNING,
+                src: path!(
+                    M 4 0 H 6 V 24 H 4 Z M 9 0 H 11 V 24 H 9 Z M 14 0 H 16 V 24 H 14 Z M 19 0 H 21 V
+                    24 H 19 Z
+                )
+            )
+            Image (
+                position: Position::Absolute,
+                width: CHIP,
+                height: CHIP,
+                viewbox: 24,
+                color: SHELL_EDGE,
+                src: path!(M 1 4 H 20 L 23 7 V 20 H 1 Z)
+            )
+            Image (
+                position: Position::Absolute,
+                width: CHIP,
+                height: CHIP,
+                viewbox: 24,
+                color: if copy { ACCENT } else { SHELL_FACE },
+                src: path!(M 3 6 H 18 L 21 9 V 17 H 3 Z)
+            )
+            Image (
+                position: Position::Absolute,
+                width: CHIP,
+                height: CHIP,
+                viewbox: 24,
+                color: SHELL_TEXT,
+                src: path!(M 5 8 H 13 V 10 H 5 Z M 5 12 H 9 V 14 H 5 Z)
+            )
         }
     }
 }

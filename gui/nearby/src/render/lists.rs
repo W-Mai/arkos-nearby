@@ -236,7 +236,7 @@ pub(super) fn games(state: model!(DisplayState), metrics: Metrics, platforms: bo
             ) {
                 View (width: 4, height: 18, shrink: 0.0, bg_color: ACCENT)
                 title_strip (state, platforms)
-                if ${ state.playable_selection() && !platforms } {
+                if ${ state.shows_netplay_hint() && !platforms } {
                     hold_badge ()
                 }
             }

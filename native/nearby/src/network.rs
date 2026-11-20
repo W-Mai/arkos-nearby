@@ -641,17 +641,7 @@ fn snapshot(state: &State) -> Result<Value> {
     Ok(value)
 }
 
-pub fn require_live(state: &State) -> Result<()> {
-    let value = snapshot(state)?;
-    require(
-        value["peers"]
-            .as_array()
-            .is_some_and(|peers| !peers.is_empty()),
-        "The network has no connected peers",
-    )
-}
-
-pub fn status(state: &State, matches: bool) -> Result<Value> {
+pub fn status(state: &State, matches: bool) -> Value {
     let snapshot = snapshot(state).unwrap_or_else(|_| json!({}));
     let connected = state.established()
         && snapshot["peers"]
@@ -685,9 +675,7 @@ pub fn status(state: &State, matches: bool) -> Result<Value> {
     } else {
         &state.stage
     };
-    Ok(
-        json!({"id":state.id,"purpose":"network_only","phase":state.phase,"role":state.role,"room":state.room,"ready":false,"connected":connected,"peer_present":connected,"step":step,"stage":stage,"context_matches":matches,"error":state.error,"end_reason":state.end_reason,"network_restored":state.network_restored,"recovery_errors":state.recovery_errors,"local_address":snapshot["local_ipv4"],"peers":peers}),
-    )
+    json!({"id":state.id,"purpose":"network_only","network_only":true,"phase":state.phase,"role":state.role,"room":state.room,"ready":false,"connected":connected,"peer_present":connected,"step":step,"stage":stage,"context_matches":matches,"error":state.error,"end_reason":state.end_reason,"network_restored":state.network_restored,"recovery_errors":state.recovery_errors,"local_address":snapshot["local_ipv4"],"peers":peers})
 }
 
 pub fn leave(state: &State) {

@@ -58,7 +58,13 @@ pub(super) fn follow(
         Source::Catalog => &runtime.catalog,
         Source::Room => &runtime.room,
     };
-    if session_owns_actor(state.page_key().page) {
+    let popup = runtime.state.launcher().popup();
+    let on_cartridge = popup.cartridge() && runtime.card_face.origin().is_some();
+    // The cursor is a screen-space sprite. Seat it on the focused action
+    // when the back is readable; it cannot stand on the thin turning edge.
+    let hide_cursor = on_cartridge
+        && (popup.progress() < Fixed::from_ratio(3, 4) || popup.detached_at().is_some());
+    if hide_cursor || session_owns_actor(state.page_key().page) {
         for (entity, _, hidden, _) in frames {
             if hidden.is_none() {
                 commands.insert(entity, Hidden);
@@ -124,7 +130,9 @@ pub(super) fn follow(
                 ActionLayout::WifiOptions
             }
         } else if menu.saves.is_some() {
-            if runtime.state.launcher().saves().busy() {
+            if runtime.state.launcher().saves().copying().is_some() {
+                ActionLayout::SaveCopy
+            } else if runtime.state.launcher().saves().busy() {
                 ActionLayout::SavesProgress
             } else if runtime.state.launcher().saves().modal() {
                 ActionLayout::SavesModal
@@ -149,6 +157,7 @@ pub(super) fn follow(
             if matches!(
                 layout,
                 ActionLayout::WifiProgress
+                    | ActionLayout::SaveCopy
                     | ActionLayout::SavesProgress
                     | ActionLayout::ManagementProgress
             ) {
@@ -195,10 +204,12 @@ pub(super) fn follow(
     }
     for (entity, _, hidden, bounds) in frames {
         if let Some(target) = target {
-            let direct = state.shelf().sliding()
+            let direct = (on_cartridge && (hidden.is_some() || popup.progress() < Fixed::ONE))
+                || state.shelf().sliding()
                 || matches!(
                     action_layout,
                     ActionLayout::WifiProgress
+                        | ActionLayout::SaveCopy
                         | ActionLayout::SavesProgress
                         | ActionLayout::ManagementProgress
                 );
@@ -252,7 +263,9 @@ fn actor_body(state: model!(DisplayState), deck: model!(super::deck::Deck)) -> E
             position: Position::Absolute,
             left: ${
                 Dimension::Percent(
-                    if deck.layer() == Layer::Actions
+                    if carrying_chip(&state, &deck) {
+                        Fixed::from_int(100)
+                    } else if deck.layer() == Layer::Actions
                         && (state.launcher().wifi_page().pending()
                             || state.launcher().saves().active() && state.launcher().saves().busy())
                     {
@@ -268,7 +281,9 @@ fn actor_body(state: model!(DisplayState), deck: model!(super::deck::Deck)) -> E
             },
             top: ${
                 Dimension::percent(
-                    if deck.layer() == Layer::Actions
+                    if carrying_chip(&state, &deck) {
+                        100
+                    } else if deck.layer() == Layer::Actions
                         && (state.launcher().wifi_page().pending()
                             || state.launcher().saves().active() && state.launcher().saves().busy())
                     {
@@ -285,19 +300,33 @@ fn actor_body(state: model!(DisplayState), deck: model!(super::deck::Deck)) -> E
             transform: ${
                 mirui::types::Transform::translate(
                         Fixed::from_int(
-                            if deck.layer() == Layer::Actions
+                            if carrying_chip(&state, &deck) {
+                                -8
+                            } else if deck.layer() == Layer::Actions
                                 && (state.launcher().wifi_page().pending()
                                     || state.launcher().saves().active()
                                         && state.launcher().saves().busy())
                             {
                                 -16
+                            } else if shelf_actor(&state, &deck) && !deck.actor_stage() {
+                                -30
                             } else if compact_actor(&state, &deck) {
                                 -24
                             } else {
                                 -16
                             },
                         ),
-                        Fixed::from_int(if compact_actor(&state, &deck) { -36 } else { -48 }),
+                        Fixed::from_int(
+                            if carrying_chip(&state, &deck) {
+                                -20
+                            } else if shelf_actor(&state, &deck) && !deck.actor_stage() {
+                                -42 - super::shelf::LABEL_HEIGHT
+                            } else if compact_actor(&state, &deck) {
+                                -36
+                            } else {
+                                -48
+                            },
+                        ),
                     )
                     .compose(
                         &mirui::types::Transform::scale(
@@ -313,6 +342,10 @@ fn actor_body(state: model!(DisplayState), deck: model!(super::deck::Deck)) -> E
             },
         ]
     }
+}
+
+fn carrying_chip(state: &super::state::DisplayHandle, deck: &super::deck::DeckHandle) -> bool {
+    deck.layer() == Layer::Actions && state.launcher().saves().copying().is_some()
 }
 
 fn shelf_actor(state: &super::state::DisplayHandle, deck: &super::deck::DeckHandle) -> bool {

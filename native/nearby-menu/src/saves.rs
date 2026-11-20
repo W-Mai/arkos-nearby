@@ -108,6 +108,7 @@ pub struct View {
     pub error: String,
     pub notice: String,
     pub completed: u64,
+    pub copied_to: Option<String>,
     pub return_tab: Tab,
     pub return_key: String,
 }

@@ -102,22 +102,26 @@ static CUES: &[AudioCue] = &[
         ),
     ),
     AudioCue::new(
-        Cue::Start.id(),
+        Cue::RelaySend.id(),
         Score::new(
             1000,
-            276,
+            77,
             false,
             &[
-                NoteEvent::new(0, 22, 60, 58, Waveform::Square),
-                NoteEvent::new(25, 22, 72, 58, Waveform::Square),
-                NoteEvent::new(50, 22, 76, 58, Waveform::Square),
-                NoteEvent::new(75, 22, 79, 58, Waveform::Square),
-                NoteEvent::new(100, 22, 84, 58, Waveform::Square),
-                NoteEvent::new(125, 22, 88, 58, Waveform::Square),
-                NoteEvent::new(150, 28, 91, 58, Waveform::Square),
-                NoteEvent::new(180, 95, 96, 58, Waveform::Square),
-                NoteEvent::new(0, 12, 60, 22, Waveform::Noise),
-                NoteEvent::new(0, 95, 48, 35, Waveform::Triangle),
+                NoteEvent::new(0, 25, 68, 53, Waveform::Square),
+                NoteEvent::new(25, 48, 80, 50, Waveform::Triangle),
+            ],
+        ),
+    ),
+    AudioCue::new(
+        Cue::RelayCatch.id(),
+        Score::new(
+            1000,
+            90,
+            false,
+            &[
+                NoteEvent::new(0, 30, 80, 50, Waveform::Square),
+                NoteEvent::new(32, 54, 73, 51, Waveform::Triangle),
             ],
         ),
     ),
@@ -172,6 +176,32 @@ static CUES: &[AudioCue] = &[
             &[
                 NoteEvent::new(0, 42, 74, 42, Waveform::Square),
                 NoteEvent::new(63, 78, 67, 48, Waveform::Triangle),
+            ],
+        ),
+    ),
+    AudioCue::new(
+        Cue::LabelOn.id(),
+        Score::new(
+            1000,
+            72,
+            false,
+            &[
+                NoteEvent::new(0, 9, 62, 27, Waveform::Noise),
+                NoteEvent::new(10, 22, 72, 46, Waveform::Square),
+                NoteEvent::new(35, 35, 84, 38, Waveform::Triangle),
+            ],
+        ),
+    ),
+    AudioCue::new(
+        Cue::LabelOff.id(),
+        Score::new(
+            1000,
+            74,
+            false,
+            &[
+                NoteEvent::new(0, 16, 82, 42, Waveform::Square),
+                NoteEvent::new(14, 30, 67, 38, Waveform::Triangle),
+                NoteEvent::new(43, 29, 48, 23, Waveform::Noise),
             ],
         ),
     ),

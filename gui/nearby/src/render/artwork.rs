@@ -78,6 +78,14 @@ impl CoverBounds {
         self.source.clone()
     }
 
+    fn binding(&self) -> CoverBinding {
+        CoverBinding {
+            source: self.source.clone(),
+            resource: self.resource.clone(),
+            signal: self.signal.clone(),
+        }
+    }
+
     fn resolved(&self) -> Option<Handle<Texture<'static>>> {
         self.signal.as_ref()?.get();
         let texture = self.resource.as_ref()?.get();
@@ -86,6 +94,14 @@ impl CoverBounds {
 }
 
 impl CoverBoundsHandle {
+    pub(super) fn share_artwork(&self, other: &Self) {
+        let binding = other.binding();
+        self.bind(binding.source, binding.resource, binding.signal);
+    }
+
+    pub(super) fn clear_artwork(&self) {
+        self.bind(String::new(), None, None);
+    }
     fn image(&self) -> Option<Handle<Texture<'static>>> {
         self.binding_revision();
         self.resolved()
@@ -109,6 +125,12 @@ impl CoverBoundsHandle {
             String::new()
         }
     }
+}
+
+struct CoverBinding {
+    source: String,
+    resource: Option<ResourceHandle<Texture<'static>>>,
+    signal: Option<Rc<mirui::core::reactive::Signal<()>>>,
 }
 
 pub(super) fn save_source(
@@ -459,6 +481,14 @@ fn update(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CartridgePart {
+    Shell,
+    Label,
+    Fold,
+    Contacts,
+}
+
 #[compose]
 pub(super) fn preview(state: model!(DisplayState), metrics: Metrics) -> Entity {
     ui! {
@@ -471,10 +501,107 @@ pub(super) fn preview(state: model!(DisplayState), metrics: Metrics) -> Entity {
             justify: JustifyContent::Center,
             row_gap: metrics.gap
         ) {
-            cover (
-                state.cover_bounds(),
-                ${ state.selected_platform() }
-            )
+            Column (
+                grow: 1.0,
+                min_width: 0,
+                min_height: 0,
+                transform: ${ state.sleeve_pose().tilt() }
+            ) [
+                CartridgePart::Shell,
+                super::material::CardOrigin::Preview(state.clone()),
+                mirui::ui::OffscreenRender::default(),
+            ] {
+                sleeve_face (
+                    state.cover_bounds(),
+                    ${ state.sleeve_pose() },
+                    ${ state.selected_platform() },
+                    metrics,
+                    true
+                )
+            }
+        }
+    }
+}
+
+#[compose]
+pub(super) fn sleeve_face(
+    bounds: model!(CoverBounds),
+    pose: prop!(super::binding::Pose),
+    platform: prop!(super::consoles::Platform),
+    metrics: Metrics,
+    measure_source: bool,
+) -> Entity {
+    let corner = metrics.gap * 3;
+    let label = pose.clone();
+    let folded = pose.clone();
+    let fold = pose.clone();
+    let contacts = pose.clone();
+    let absolute = bounds.clone();
+    let height = bounds.clone();
+    ui! {
+        Column (
+            grow: 1.0,
+            min_width: 0,
+            min_height: 0,
+            padding: Padding::all(metrics.gap),
+            bg_color: ${ if pose.get().mounted() { SHELL } else { PANEL } }
+        ) [
+            super::material::MeasureCard(measure_source),
+        ] {
+            Column (
+                grow: 1.0,
+                min_width: 0,
+                min_height: 0,
+                transform: ${ label.get().label(metrics) }
+            ) [
+                CartridgePart::Label,
+            ] {
+                cover (bounds, platform)
+                View (
+                    position: Position::Absolute,
+                    top: 0,
+                    left: ${ (absolute.size().width - Fixed::from_int(corner)).max(Fixed::ZERO) },
+                    width: corner,
+                    height: corner,
+                    visible: ${ folded.get().folded() },
+                    transform: ${ fold.get().fold() }
+                ) [
+                    CartridgePart::Fold,
+                ] {
+                    Image (
+                        position: Position::Absolute,
+                        width: corner,
+                        height: corner,
+                        viewbox: 16,
+                        src: path!(M 0 0 H 16 V 16 Z),
+                        color: WARNING
+                    )
+                    Image (
+                        position: Position::Absolute,
+                        width: corner,
+                        height: corner,
+                        viewbox: 16,
+                        src: path!(M 0 0 H 3 L 16 13 V 16 Z),
+                        color: SHELL_EDGE
+                    )
+                }
+            }
+            Image (
+                position: Position::Absolute,
+                left: metrics.gap,
+                top: ${ height.size().height + Fixed::from_int(metrics.gap) },
+                visible: ${ contacts.get().mounted() },
+                width: 22,
+                height: 22,
+                viewbox: 22,
+                color: WARNING,
+                src: path!(
+                    M 0 0 H 2 V 3 H 0 Z M 5 0 H 7 V 3 H 5 Z M 10 0 H 12 V 3 H 10 Z M 15 0 H 17 V 3 H
+                    15 Z M 20 0 H 22 V 3 H 20 Z
+                )
+            ) [
+                CartridgePart::Contacts,
+            ]
         }
     }
 }

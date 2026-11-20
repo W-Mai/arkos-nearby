@@ -93,11 +93,17 @@ enum Character {
     Host,
     Guest,
     HostSignal { lift: i32, reach: i32 },
+    GuestCatch { lift: i32, reach: i32 },
 }
 
 impl Character {
     fn host(frame: Frame) -> Self {
-        let (age, lift, reach) = if frame.phase == Phase::Starting {
+        let (age, lift, reach) = if let Some(age) = frame.relay_age {
+            if frame.page == Page::Joined {
+                return Self::Host;
+            }
+            (age, 8, 12)
+        } else if frame.phase == Phase::Starting {
             (frame.phase_age, 7, 12)
         } else {
             (frame.host_ack_age, 14, 6)
@@ -273,7 +279,7 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
         Color::rgba(color.r, color.g, color.b, alpha)
     }
     fn person(&mut self, x: i32, y: i32, character: Character, step: u16, facing_left: bool) {
-        let guest = character == Character::Guest;
+        let guest = matches!(character, Character::Guest | Character::GuestCatch { .. });
         // Rectangles below are local pixel-art data; stage placement is layout-derived.
         let color = if guest { actor::GUEST } else { actor::HOST };
         let light = if guest {
@@ -297,7 +303,8 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
             (true, -12, 20 + i32::from(f % 2) * 2),
             (false, 8, 20 - i32::from(f % 2) * 2),
         ] {
-            if let Character::HostSignal { lift, reach } = character
+            if let Character::HostSignal { lift, reach } | Character::GuestCatch { lift, reach } =
+                character
                 && left == facing_left
             {
                 for joint in 0..=3 {
@@ -480,6 +487,10 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
                 self.fill(mid - 3, y - 5, 6, 12, WARNING);
             }
             HostReady | WaitingStart | NetworkConnected | Starting => {
+                if let Some(age) = frame.relay_age {
+                    self.relay(ends, y, frame.page, age);
+                    return;
+                }
                 let [a, b] = ends.map(tip);
                 self.fill(a, y, b - a + 1, 3, ACCENT);
                 // Each tip rises with its player's hand as the ready animation lands.
@@ -505,6 +516,41 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
             }
             _ => {}
         }
+    }
+
+    fn relay(&mut self, [left, right]: [i32; 2], y: i32, page: Page, age: u16) {
+        // Two local halves of the same throw. The guest stays idle until its
+        // worker has received the host's signal for this game and player.
+        self.fill(left, y, right - left + 1, 2, DIVIDER);
+        let sending = page == Page::Host;
+        let travel = if sending {
+            timing::progress(
+                age.saturating_sub(timing::RELAY_LIFT_MS),
+                timing::RELAY_FLIGHT_MS,
+            )
+        } else {
+            0.58 + 0.42 * timing::progress(age, timing::RELAY_CATCH_MS)
+        };
+        let end = if sending {
+            timing::RELAY_RELEASE_MS
+        } else {
+            timing::RELAY_CATCH_MS
+        };
+        if age > end {
+            if !sending {
+                self.stars(right, y - 3, age - end);
+            }
+            return;
+        }
+        let advance = travel * (2.0 - travel);
+        let x = left + (advance * (right - left) as f32).round() as i32;
+        let arc = (4.0 * advance * (1.0 - advance) * 9.0).round() as i32;
+        let y = y - arc;
+        let tail = (x - left).min(12);
+        self.fill(x - tail, y - 1, tail, 3, ACCENT);
+        self.fill(x - 2, y - 4, 5, 9, WARNING);
+        self.fill(x - 4, y - 2, 9, 5, WARNING);
+        self.fill(x - 1, y - 1, 3, 3, ON_ACCENT);
     }
 
     fn session(&mut self, w: i32, h: i32, frame: Frame) {
@@ -597,13 +643,26 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
             self.person(
                 guest,
                 floor - 34 + hops[1],
-                Character::Guest,
+                if frame.page == Page::Joined
+                    && let Some(age) = frame.relay_age.filter(|age| *age <= timing::RELAY_CATCH_MS)
+                {
+                    Character::GuestCatch {
+                        lift: -motion::hop(age, 6.0),
+                        reach: -motion::hop(age, 9.0),
+                    }
+                } else {
+                    Character::Guest
+                },
                 if frame.guest_walking {
                     frame.phase_age
                 } else {
                     0
                 },
-                frame.guest_facing_left,
+                frame.guest_facing_left
+                    || frame.page == Page::Joined
+                        && frame
+                            .relay_age
+                            .is_some_and(|age| age <= timing::RELAY_CATCH_MS),
             );
         }
         self.fill(

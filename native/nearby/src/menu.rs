@@ -16,6 +16,9 @@ use crate::system::{mkdir, monotonic, wall_time, write};
 pub trait Backend: Send + Sync + 'static {
     fn call(&self, action: &str, payload: &Value) -> Result<Value>;
     fn failure_snapshot(&self) -> Value;
+    fn opening_network(&self) -> Option<&Value> {
+        None
+    }
 }
 
 enum Event {
@@ -313,6 +316,7 @@ impl MenuSession {
             false,
         )? {
             Outcome::Exit(code) => Ok(code),
+            Outcome::Mode(FlowExit::KeepNetwork) => Ok(0),
             Outcome::Mode(_) => Err("Game flow returned a mode selection".into()),
             Outcome::Selected(_) => Err("Room flow returned a game selection".into()),
         }
@@ -400,7 +404,15 @@ impl MenuSession {
             if !single_player {
                 flow.manual();
             }
-            let mut last_status = 0.0;
+            let mut last_status = if let Some(status) = backend
+                .as_ref()
+                .and_then(|backend| backend.opening_network())
+            {
+                flow.status(flow.generation, status.clone());
+                monotonic()
+            } else {
+                0.0
+            };
             let mut last_scan = 0.0;
             let mut next_refresh = 0.0;
             let mut status_pending = false;
@@ -560,9 +572,8 @@ impl MenuSession {
                 Some(mode) => Outcome::Mode(mode),
                 None => Outcome::Exit(flow.exit_code.unwrap_or(0)),
             };
-            if mode_picker && flow.outcome.is_some() {
-                flow.resume_lobby();
-                self.lobby_flow = Some(flow);
+            if mode_picker {
+                self.lobby_flow = flow.into_lobby_resume();
             }
             Ok(outcome)
         })();

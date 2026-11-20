@@ -373,3 +373,119 @@ fn room_sounds_follow_confirmed_availability_across_repeated_reports() {
         assert_eq!(played, expected);
     }
 }
+
+#[test]
+fn favorite_audio_follows_committed_game_membership() {
+    use crate::model::{GameRow, LauncherItem, LibraryKind, MenuAction};
+    let mut view = view(Page::Games, Phase::Idle);
+    view.launcher.enabled = true;
+    view.launcher.tab = 1;
+    view.launcher.key = "a".into();
+    view.entries = vec![GameRow {
+        key: "a".into(),
+        ..Default::default()
+    }];
+    let (mut app, state, sink) = setup();
+    state.favorite_result(None);
+    state.present(&view, 0);
+    state.input(Action::Auxiliary, 100);
+    view.status = "write failed".into();
+    state.present(&view, 105);
+    state.input(Action::Auxiliary, 250);
+    state.input(Action::Down, 251);
+    view.core = "another presentation".into();
+    state.present(&view, 252);
+    view.entries.push(GameRow {
+        key: "b".into(),
+        ..Default::default()
+    });
+    view.selected = 1;
+    view.launcher.key = "b".into();
+    state.present(&view, 253);
+    view.entries[0].favorite = true;
+    state.favorite_result(Some(&howff_menu::FavoriteChange {
+        sequence: 1,
+        key: "a".into(),
+        favorite: true,
+    }));
+    state.present(&view, 255);
+    state.present(&view, 260);
+    view.selected = 0;
+    view.launcher.key = "a".into();
+    view.library.kind = LibraryKind::Favorites;
+    view.library.total = 2;
+    view.launcher.tab = 0;
+    view.launcher.overlay = "game".into();
+    view.launcher.items = vec![LauncherItem::available(
+        MenuAction::ToggleFavorite,
+        "Remove",
+    )];
+    state.present(&view, 300);
+    state.input(Action::Confirm, 400);
+    view.launcher.overlay.clear();
+    view.library.total = 1;
+    view.entries[0] = GameRow {
+        directory: true,
+        key: "library".into(),
+        ..Default::default()
+    };
+    state.favorite_result(Some(&howff_menu::FavoriteChange {
+        sequence: 2,
+        key: "a".into(),
+        favorite: false,
+    }));
+    state.present(&view, 405);
+    state.input(Action::Auxiliary, 600);
+    app.render().unwrap();
+    let played = sink
+        .0
+        .borrow()
+        .iter()
+        .filter_map(|c| match c {
+            AudioCommand::Play { cue, .. } => Some(*cue),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        played,
+        [
+            Cue::Focus.id(),
+            Cue::LabelOn.id(),
+            Cue::LabelOff.id(),
+            Cue::Confirm.id()
+        ]
+    );
+}
+
+#[test]
+fn coalesced_favorite_commits_play_once_each_after_the_initial_snapshot() {
+    use howff_menu::FavoriteChange;
+    let (mut app, state, sink) = setup();
+    let mut current = view(Page::Games, Phase::Idle);
+    let change = |sequence, favorite| FavoriteChange {
+        sequence,
+        key: "rom-a".into(),
+        favorite,
+    };
+    state.favorite_result(Some(&change(1, false)));
+    state.present(&current, 0);
+    state.favorite_result(Some(&change(2, true)));
+    state.favorite_result(Some(&change(3, false)));
+    state.favorite_result(Some(&change(3, false)));
+    state.favorite_result(None);
+    state.favorite_result(Some(&change(2, true)));
+    state.present(&current, 1);
+    current.title = "Moved".into();
+    state.present(&current, 2);
+    app.render().unwrap();
+    let played = sink
+        .0
+        .borrow()
+        .iter()
+        .filter_map(|c| match c {
+            AudioCommand::Play { cue, .. } => Some(*cue),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(played, [Cue::LabelOn.id(), Cue::LabelOff.id()]);
+}

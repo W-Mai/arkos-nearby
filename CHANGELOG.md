@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-20
+
+- Show the local game from the room preview as soon as its content and core pass compatibility checks.
+- Show larger favorite cartridges with centered short titles, fading overflow and scrolling for selected long titles.
+- Flip the selected cartridge into its game actions. Open multiplayer from the held-X prompt or the selected game action with a continuous transition.
+- Keep the moving focus outline visible above scrolling rows.
+- Keep a direct network connected when closing the room panel. Choose Disconnect and confirm to end the session and restore Wi-Fi.
+- Animate the start signal between room players and show saves moving to their backup or restore slots.
+
 ## [0.16.0] - 2026-11-19
 
 - Show the host name, game title and matching game artwork in nearby rooms. The discovery title moves between the beacon and room list as rooms appear and disappear.

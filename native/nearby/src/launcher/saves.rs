@@ -69,6 +69,7 @@ fn worker(incoming: Receiver<Work>, outgoing: SyncSender<Reply>) {
     let mut view = View::default();
     while let Ok(work) = incoming.recv() {
         let mut launch = None;
+        view.copied_to = None;
         let result = (|| -> Result<()> {
             match work {
                 Work::Open(epoch, entry) => {
@@ -98,7 +99,7 @@ fn worker(incoming: Receiver<Work>, outgoing: SyncSender<Reply>) {
                         } => {
                             view.return_tab = tab;
                             view.return_key = key.clone();
-                            let intent = crate::session::try_while_idle(|| {
+                            let applied = crate::session::try_while_idle(|| {
                                 require(
                                     crate::context::parse_selected(
                                         &context.frontend,
@@ -110,7 +111,8 @@ fn worker(incoming: Receiver<Work>, outgoing: SyncSender<Reply>) {
                                 snapshot.graph.unchanged()?;
                                 store.operate(&key, &revision, operation)
                             })?;
-                            if let Some(intent) = intent {
+                            view.copied_to = applied.copied_to;
+                            if let Some(intent) = applied.launch {
                                 launch = Some(launch::issue(context, store.paths(), intent)?);
                             }
                             view.notice = match operation {

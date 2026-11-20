@@ -1,28 +1,18 @@
 //! Presentation metadata carried by the group's WPS probe response.
+use crate::catalog::{Index, IndexJob, portable_key};
 use crate::context::Context;
 use crate::session::{RoomEntry, State};
 use crate::system::{command, read};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Listing {
     pub owner: String,
     pub game: String,
     pub artwork: String,
-}
-
-fn portable_key(path: &Path, roots: &[PathBuf]) -> Option<String> {
-    let relative = roots.iter().find_map(|root| path.strip_prefix(root).ok())?;
-    Some(
-        format!(
-            "{:x}",
-            Sha256::digest(relative.as_os_str().as_encoded_bytes())
-        )[..24]
-            .into(),
-    )
 }
 
 // These WPS fields are plain config lines with a maximum of 32 UTF-8 bytes.
@@ -52,7 +42,10 @@ pub(crate) fn host_fields(state: &State) -> String {
         "device_name={}\nmanufacturer=Howff\nmodel_name={}\nmodel_number={}\nserial_number={}\n",
         field(&owner),
         field(if game.is_empty() { "Howff" } else { game }),
-        key.as_deref().unwrap_or("network"),
+        key.as_ref()
+            .map(|key| crate::identity::encode(key))
+            .as_deref()
+            .unwrap_or("network"),
         state.room.token
     )
 }
@@ -121,33 +114,42 @@ fn advert(room: &RoomEntry, bss: &str) -> Option<Advert> {
     })
 }
 
-fn local_game(key: &str) -> Option<(String, String)> {
-    if !crate::protocol::hex(key, 24) {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LocalGame {
+    pub path: PathBuf,
+    pub name: String,
+}
+
+pub(crate) fn preview_game(cache: &Value, room: &RoomEntry, now: f64) -> Option<LocalGame> {
+    let record = &cache["listings"][&room.id];
+    if room.purpose() != crate::purpose::SessionPurpose::Game
+        || now >= record["expires"].as_f64()?
+    {
         return None;
     }
-    let roots = crate::platform::content::roots().ok()?;
-    let job = crate::catalog::IndexJob::local().ok()?;
-    let index = job.cached().unwrap_or_else(|| job.run());
-    let mut matches = index
-        .entries()
-        .filter(|e| !e.directory() && portable_key(e.path(), &roots).as_deref() == Some(key));
-    let entry = matches.next()?;
-    if matches.next().is_some() {
-        return None;
-    }
-    Some((
-        entry.name().into(),
-        entry
-            .image()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-    ))
+    LocalGame::deserialize(record.get("local_game")?).ok()
+}
+
+fn local_game<'a>(
+    key: &str,
+    index: &'a OnceLock<Option<Arc<Index>>>,
+) -> Option<&'a crate::catalog::Entry> {
+    let key = crate::identity::decode(key, 12).ok()?.try_into().ok()?;
+    index
+        .get_or_init(|| {
+            let job = IndexJob::local().ok()?;
+            Some(job.cached().unwrap_or_else(|| job.run()))
+        })
+        .as_ref()?
+        .advertised_game(&key)
 }
 
 pub(crate) fn enrich(cache: &mut Value, rows: &mut Value, now: f64) {
     let Some(rows) = rows.as_array_mut() else {
         return;
     };
+    let index = OnceLock::new();
     let mut next = serde_json::Map::new();
     for row in rows.iter_mut() {
         let Ok(room) = serde_json::from_value::<RoomEntry>(row.clone()) else {
@@ -160,24 +162,32 @@ pub(crate) fn enrich(cache: &mut Value, rows: &mut Value, now: f64) {
             let ad = command("wpa_cli", &["-i", "wlan0", "bss", &room.bssid], 2, true)
                 .ok()
                 .and_then(|bss| advert(&room, &bss));
+            let mut hint = None;
             let mut listing = Listing::default();
             let ttl = if let Some(ad) = ad {
                 listing.owner = ad.owner;
                 if room.purpose() == crate::purpose::SessionPurpose::Game {
-                    let (local_title, artwork) = local_game(&ad.key).unwrap_or_default();
-                    listing.game = if ad.game.is_empty() {
-                        local_title
-                    } else {
-                        ad.game
-                    };
-                    listing.artwork = artwork;
+                    listing.game = ad.game;
+                    if let Some(entry) = local_game(&ad.key, &index) {
+                        if listing.game.is_empty() {
+                            listing.game = entry.name().into();
+                        }
+                        listing.artwork = entry
+                            .image()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        hint = Some(LocalGame {
+                            path: entry.path().into(),
+                            name: entry.name().into(),
+                        });
+                    }
                 }
                 60.0
             } else {
                 listing.owner = crate::identity::remembered_name(&room.bssid).unwrap_or_default();
                 2.0
             };
-            json!({"expires":now+ttl,"listing":listing})
+            json!({"expires":now+ttl,"listing":listing,"local_game":hint})
         };
         row["listing"] = record["listing"].clone();
         next.insert(room.id, record);
@@ -188,6 +198,38 @@ pub(crate) fn enrich(cache: &mut Value, rows: &mut Value, now: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn local_preview_requires_a_current_matching_game_room() {
+        let room = RoomEntry::observed(
+            "DIRECT-NP-012345-0123456789abc",
+            "12:34:56:78:9a:bc",
+            75,
+            "",
+        )
+        .unwrap();
+        let mut cache = json!({"listings":{room.id.clone():{
+            "expires": 30.0,
+            "local_game": {"path":"/roms/nes/game.nes","name":"Local title"}
+        }}});
+        assert_eq!(
+            preview_game(&cache, &room, 29.0).unwrap().path,
+            Path::new("/roms/nes/game.nes")
+        );
+        assert!(preview_game(&cache, &room, 30.0).is_none());
+        let mut other = room.clone();
+        other.id.push_str("-other");
+        assert!(preview_game(&cache, &other, 29.0).is_none());
+        other = room.clone();
+        other.ssid = "DIRECT-NW-0123456789abc".into();
+        assert!(preview_game(&cache, &other, 29.0).is_none());
+        cache["listings"][&room.id]
+            .as_object_mut()
+            .unwrap()
+            .remove("local_game");
+        assert!(preview_game(&cache, &room, 29.0).is_none());
+    }
 
     #[test]
     fn scan_metadata_is_bound_to_the_observed_group() {

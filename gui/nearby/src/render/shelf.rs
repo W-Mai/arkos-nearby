@@ -1,4 +1,4 @@
-use super::rows::Row;
+use super::{cartridge, rows::Row};
 use crate::model::{LibraryKind, Page, View};
 use howff_menu::input::Generation;
 use mirui::anim::{Tween, TweenConfig, ease};
@@ -7,14 +7,13 @@ use mirui::prelude::*;
 use serde::Serialize;
 
 pub(super) const WINDOW_BUDGET: usize = howff_menu::shelf::MAX_WINDOW_ITEMS;
-pub(super) const INSET: i32 = 12;
-pub(super) const GAP: i32 = 12;
+pub(super) const INSET: i32 = 8;
+pub(super) const GAP: i32 = 8;
 pub(super) const CARD_INSET: i32 = 2;
 pub(super) const LABEL_HEIGHT: i32 = 30;
-pub(super) const LABEL_ACTOR_SPACE: i32 = 24;
 pub(super) const SHADOW: i32 = 5;
 const MIN_CARD_WIDTH: i32 = 160;
-const MAX_CARD_WIDTH: i32 = 280;
+const MAX_CARD_WIDTH: i32 = 304;
 const IMAGE_CHROME_WIDTH: i32 = 28;
 const IMAGE_CHROME_HEIGHT: i32 = 52;
 const PAGE_MARK_HEIGHT: i32 = 4;
@@ -60,7 +59,7 @@ impl Plan {
             card_height: available_height,
         };
         let mut score = 0;
-        let minimum_height = (MIN_CARD_WIDTH - IMAGE_CHROME_WIDTH) * 3 / 4 + IMAGE_CHROME_HEIGHT;
+        let minimum_height = (MIN_CARD_WIDTH - IMAGE_CHROME_WIDTH) * 2 / 3 + IMAGE_CHROME_HEIGHT;
         let row_limit = ((available_height + GAP) / (minimum_height + GAP)).max(1) as usize;
         let column_limit = ((available_width + GAP) / (MIN_CARD_WIDTH + GAP)).max(1) as usize;
         for rows in 1..=row_limit.min(WINDOW_BUDGET) {
@@ -69,14 +68,16 @@ impl Plan {
                     continue;
                 }
                 let row_height = (available_height - GAP * (rows as i32 - 1)) / rows as i32;
-                let height_limit = (row_height - IMAGE_CHROME_HEIGHT) * 4 / 3 + IMAGE_CHROME_WIDTH;
+                // Fill the row with landscape artwork in a 4:3 to 3:2 window.
+                let height_limit = (row_height - IMAGE_CHROME_HEIGHT) * 3 / 2 + IMAGE_CHROME_WIDTH;
                 let card_width = ((available_width - GAP * (columns as i32 - 1)) / columns as i32)
                     .min(MAX_CARD_WIDTH)
                     .min(height_limit);
                 if card_width < MIN_CARD_WIDTH {
                     continue;
                 }
-                let card_height = (card_width - IMAGE_CHROME_WIDTH) * 3 / 4 + IMAGE_CHROME_HEIGHT;
+                let card_height =
+                    row_height.min((card_width - IMAGE_CHROME_WIDTH) * 3 / 4 + IMAGE_CHROME_HEIGHT);
                 let candidate =
                     (rows * columns).min(total.max(1)) as i32 * 1000 + card_width - rows as i32;
                 if candidate > score {
@@ -122,6 +123,11 @@ pub(super) struct Shelf {
     markers: [MarkerMotion; PAGE_MARKERS],
     now: u64,
     last_tick: u64,
+    cartridges: cartridge::Cartridges,
+    #[observe]
+    pub poses: [cartridge::Pose; WINDOW_BUDGET],
+    #[observe]
+    pub departing_poses: [cartridge::Pose; WINDOW_BUDGET],
 }
 
 #[derive(Clone, Copy)]
@@ -191,6 +197,9 @@ impl Shelf {
             }; PAGE_MARKERS],
             now: 0,
             last_tick: 0,
+            cartridges: Default::default(),
+            poses: [cartridge::Pose::default(); WINDOW_BUDGET],
+            departing_poses: [cartridge::Pose::default(); WINDOW_BUDGET],
         }
     }
 
@@ -265,6 +274,9 @@ impl Shelf {
 #[model]
 impl Shelf {
     pub fn change_window(&mut self, old: &View, new: &View, rows: &mut ModelList<Row>) {
+        if old.library.sort != new.library.sort {
+            self.cartridges = Default::default();
+        }
         let Some((from, to)) = window(old).zip(window(new)) else {
             self.finish_slide();
             return;
@@ -307,6 +319,7 @@ impl Shelf {
                     .unwrap_or_else(|_| unreachable!("identical shelf window capacities"));
             }
         }
+        self.departing_poses = self.poses;
         self.slide = Some(Slide {
             origin: from,
             first_frame: true,
@@ -317,8 +330,11 @@ impl Shelf {
         self.offsets = (start, start - distance);
     }
 
-    pub fn tick(&mut self, now: u64) {
+    pub fn tick(&mut self, now: u64, reflect: bool) {
         let delta = now.saturating_sub(std::mem::replace(&mut self.last_tick, now));
+        self.poses = self
+            .cartridges
+            .step(now, delta.min(48) as u16, reflect && self.active);
         let step = match &mut self.slide {
             Some(slide) if slide.first_frame => {
                 slide.first_frame = false;
@@ -374,6 +390,16 @@ impl Shelf {
             .position
             .max(view.selected.saturating_add(1))
             .min(self.total);
+        if let Some(start) = window(view) {
+            self.cartridges.set_count(view.entries.len());
+            if self.cartridges.select(
+                start,
+                view.selected.min(view.entries.len() - 1),
+                self.last_tick,
+            ) {
+                self.poses = self.cartridges.step(self.last_tick, 0, false);
+            }
+        }
         self.update(fit);
     }
 
@@ -400,6 +426,19 @@ impl Shelf {
 }
 
 impl ShelfHandle {
+    pub fn pose(&self, index: usize, departing: bool) -> cartridge::Pose {
+        let poses = if departing {
+            self.departing_poses()
+        } else {
+            self.poses()
+        };
+        poses
+            .get(index)
+            .copied()
+            .unwrap_or_default()
+            .without_reflection(departing)
+    }
+
     pub fn marker_width(&self, page: usize) -> Fixed {
         self.marker_lengths()
             .get(page.saturating_sub(self.pages().0))
@@ -432,12 +471,9 @@ mod tests {
                             <= height - INSET * 2 - PAGE_MARK_HEIGHT - PAGE_MARK_GAP
                     );
                     if plan.card_width >= MIN_CARD_WIDTH {
-                        assert!(
-                            ((plan.card_width - IMAGE_CHROME_WIDTH) * 3
-                                - (plan.card_height - IMAGE_CHROME_HEIGHT) * 4)
-                                .abs()
-                                < 4
-                        );
+                        let width = plan.card_width - IMAGE_CHROME_WIDTH;
+                        let height = plan.card_height - IMAGE_CHROME_HEIGHT;
+                        assert!(width * 3 >= height * 4 && width * 2 <= height * 3 + 2);
                     }
                 }
             }
@@ -462,19 +498,19 @@ mod tests {
         shelf.total = 24;
         shelf.position = 1;
         shelf.update(true);
-        shelf.tick(300);
+        shelf.tick(300, false);
         assert_eq!(shelf.marker_lengths[0], LONG_MARK);
         shelf.position = shelf.plan.grid.capacity() + 1;
         shelf.update(true);
-        shelf.tick(430);
+        shelf.tick(430, false);
         let previous = shelf.marker_lengths;
         assert!(previous[0] > SHORT_MARK && previous[0] < LONG_MARK);
         assert!(previous[1] > SHORT_MARK && previous[1] < LONG_MARK);
         shelf.position = 1;
         shelf.update(true);
-        shelf.tick(430);
+        shelf.tick(430, false);
         assert_eq!(shelf.marker_lengths, previous);
-        shelf.tick(800);
+        shelf.tick(800, false);
         assert_eq!(shelf.marker_lengths[0], LONG_MARK);
         assert_eq!(shelf.marker_lengths[1], SHORT_MARK);
         assert!(shelf.markers_settled());

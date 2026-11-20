@@ -5,10 +5,11 @@ use super::{
 use crate::platform::content::{self, CatalogKind};
 use pinyin::ToPinyin;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 const MAX_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 pub(super) const MAX_RECORDS: usize = 100_000;
@@ -42,9 +43,40 @@ pub struct Index {
     by_path: BTreeMap<PathBuf, usize>,
     #[serde(skip)]
     by_key: BTreeMap<String, Vec<usize>>,
+    #[serde(skip)]
+    by_portable_key: OnceLock<HashMap<[u8; 12], Option<usize>>>,
+}
+
+pub(crate) fn portable_key(path: &Path, roots: &[PathBuf]) -> Option<[u8; 12]> {
+    let relative = roots.iter().find_map(|root| path.strip_prefix(root).ok())?;
+    Sha256::digest(relative.as_os_str().as_encoded_bytes())[..12]
+        .try_into()
+        .ok()
 }
 
 impl Index {
+    pub(crate) fn advertised_game(&self, key: &[u8; 12]) -> Option<&Entry> {
+        let lookup = self.by_portable_key.get_or_init(|| {
+            let mut lookup = HashMap::new();
+            for (id, record) in self.records.iter().enumerate() {
+                if !record.entry.directory
+                    && let Some(key) = portable_key(record.entry.path(), &self.roots)
+                {
+                    lookup
+                        .entry(key)
+                        .and_modify(|value| *value = None)
+                        .or_insert(Some(id));
+                }
+            }
+            lookup
+        });
+        lookup
+            .get(key)
+            .copied()
+            .flatten()
+            .map(|id| &self.records[id].entry)
+    }
+
     pub(super) fn recent_count(&self, times: &BTreeMap<String, u64>) -> usize {
         times
             .keys()
@@ -100,6 +132,7 @@ impl Index {
         Some(value)
     }
     fn derive(&mut self) {
+        self.by_portable_key.take();
         self.by_key.clear();
         for (id, record) in self.records.iter().enumerate() {
             if !record.hidden && !record.entry.directory {
@@ -340,6 +373,7 @@ impl IndexJob {
             children: BTreeMap::new(),
             by_path: BTreeMap::new(),
             by_key: BTreeMap::new(),
+            by_portable_key: OnceLock::new(),
         };
         let mut watched = BTreeSet::new();
         for platform in &self.platforms {
