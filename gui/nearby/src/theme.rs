@@ -145,6 +145,31 @@ impl Palette {
                 Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
             );
         }
+        let (body, rim, recess, trim, tray, shadow, opacity) = match self {
+            Self::Forest => (
+                0x625b53, 0x938679, 0x4b453e, 0xc1ad95, 0xe7e1d6, 0x514638, 78,
+            ),
+            Self::Sunset => (
+                0x624b3c, 0xa18364, 0x49362c, 0xd1a77d, 0xe9dbbc, 0x5e432d, 88,
+            ),
+            Self::Night => (
+                0x444952, 0x737d8a, 0x2c3038, 0xa4b0c1, 0x2b2e34, 0x11151d, 158,
+            ),
+        };
+        for (token, rgb, alpha) in [
+            ("cartridge-body", body, 255),
+            ("cartridge-rim", rim, 255),
+            ("cartridge-recess", recess, 255),
+            ("cartridge-trim", trim, 255),
+            ("cartridge-tray", tray, 255),
+            ("cartridge-shadow", shadow, opacity),
+            ("cartridge-penumbra", shadow, opacity / 2),
+        ] {
+            theme.set(
+                Custom(token),
+                Color::rgba((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, alpha),
+            );
+        }
         theme
     }
 }

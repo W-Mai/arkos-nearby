@@ -35,7 +35,7 @@ fn departing_platform_previews_keep_content_and_entities_until_the_slide_finishe
         } else {
             &scene.state
         };
-        let presentation = state.platform_previews();
+        let presentation = state.platform_preview_frame().arriving.unwrap().platform;
         let preview = app
             .world
             .resource::<IdMap>()
@@ -87,8 +87,10 @@ fn departing_platform_previews_keep_content_and_entities_until_the_slide_finishe
         };
         assert_eq!(state.page_key().library, LibraryKind::Directory);
         assert_eq!(scene.state.snapshot(), current);
-        assert!(state.platform_previews() == presentation);
-        assert_eq!(state.platform_preview_selection(), 1);
+        assert_eq!(
+            state.platform_preview_frame().arriving.unwrap().platform,
+            presentation
+        );
         assert_eq!(state.platform_preview_title(), "snes");
         assert!(members.iter().all(|entity| app.world.is_alive(*entity)));
         assert_eq!(
@@ -913,7 +915,7 @@ fn favorite_page_slide_retains_only_the_leaving_window_and_reverses_in_place() {
         let second = page(capacity, 0);
         update(&mut scene, &first).unwrap();
         paint_at(&mut app, &scene, 1000);
-        assert!(shelf.departing().is_empty());
+        assert!(shelf.departing_count() == 0);
         let at_rest = app
             .backend
             .framebuffer()
@@ -921,8 +923,23 @@ fn favorite_page_slide_retains_only_the_leaving_window_and_reverses_in_place() {
             .unwrap()
             .bytes()
             .to_vec();
+        let previous_tiles: Vec<_> = scene
+            .shelf
+            .entries()
+            .entries()
+            .take(capacity)
+            .map(|(_, row)| row.static_picture().token())
+            .collect();
+        shelf.clear_prepared_turn();
         update(&mut scene, &second).unwrap();
-        assert_eq!(shelf.departing().len(), capacity);
+        assert_eq!(shelf.departing_count(), capacity);
+        assert!(
+            shelf
+                .departing()
+                .entries()
+                .map(|(_, row)| row.static_picture().token())
+                .eq(previous_tiles)
+        );
         assert_eq!(
             shelf.departing().entries().next().unwrap().1.label(true),
             "游戏 0"
@@ -983,23 +1000,69 @@ fn favorite_page_slide_retains_only_the_leaving_window_and_reverses_in_place() {
             paint_at(&mut app, &scene, 1701 + 16 * frame);
             capture_text_audit(&mut app, &format!("shelf-{frame:02}"), size);
         }
-        assert!(shelf.departing().is_empty());
+        assert!(shelf.departing_count() == 0);
         assert_eq!(shelf.offsets(), (Fixed::ZERO, Fixed::ZERO));
         assert_eq!(active_target(&app), capacity - 1);
         update(&mut scene, &second).unwrap();
         paint_at(&mut app, &scene, 2410);
-        assert!(shelf.departing().is_empty());
+        assert!(shelf.departing_count() == 0);
         assert_eq!(active_target(&app), 0);
+        update(&mut scene, &first).unwrap();
+        for frame in 0..=4 {
+            let timestamp = 2500 + 64 * frame;
+            TIME.with(|clock| clock.set(timestamp * 1_000_000));
+            super::paint_at(&mut app, timestamp).unwrap();
+            assert_eq!(shelf.sliding(), frame < 4, "Slow frame {frame} at {size:?}");
+        }
+        assert!(shelf.departing_count() == 0);
+        assert_eq!(active_target(&app), capacity - 1);
+        let retained = scene
+            .shelf
+            .entries()
+            .entries()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>();
+        let mut last = second.clone();
+        last.entries.truncate(1);
+        last.launcher_shelf = Some(Box::new(last.clone()));
+        update(&mut scene, &last).unwrap();
+        paint_at(&mut app, &scene, 3200);
+        assert_eq!(scene.shelf.populated_rows(), 1);
+        assert_eq!(active_target(&app), 0);
+        assert_eq!(
+            scene
+                .shelf
+                .entries()
+                .entries()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            retained
+        );
+        assert_eq!(shelf.departing_count(), 0);
+        update(&mut scene, &first).unwrap();
+        paint_at(&mut app, &scene, 3700);
+        assert_eq!(scene.shelf.populated_rows(), capacity);
+        assert_eq!(active_target(&app), capacity - 1);
+        assert_eq!(
+            scene
+                .shelf
+                .entries()
+                .entries()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            retained
+        );
         let mut sorted = first;
         sorted.library.sort = "name".into();
         sorted.launcher_shelf = Some(Box::new(sorted.clone()));
         update(&mut scene, &sorted).unwrap();
-        assert!(shelf.departing().is_empty());
+        assert!(shelf.departing_count() == 0);
     }
 }
 
 #[test]
 fn page_marker_entities_follow_the_active_page_without_remounting() {
+    use mirui::ui::widgets::WidgetTransform;
     let mut app = app([640, 480]);
     let mut current = view(Page::Games);
     current.library.kind = crate::model::LibraryKind::Favorites;
@@ -1020,7 +1083,12 @@ fn page_marker_entities_follow_the_active_page_without_remounting() {
             .query::<mirui::ui::Parent>()
             .iter()
             .filter(|(_, value)| value.0 == parent)
-            .map(|(entity, _)| (app.world.get::<ComputedRect>(entity).unwrap().0.x, entity))
+            .map(|(entity, _)| {
+                (
+                    app.world.get::<WidgetTransform>(entity).unwrap().0.tx,
+                    entity,
+                )
+            })
             .collect();
         markers.sort_by_key(|(position, _)| *position);
         markers
@@ -1034,10 +1102,16 @@ fn page_marker_entities_follow_the_active_page_without_remounting() {
     current.library.position = scene.state.shelf().plan().grid.capacity() + 1;
     update(&mut scene, &current).unwrap();
     paint_at(&mut app, &scene, 1130);
+    let width = |app: &TestApp, entity| {
+        let rect = app.world.get::<ComputedRect>(entity).unwrap().0;
+        assert_eq!(rect.w, shelf::SHORT_MARK);
+        let scale = app.world.get::<WidgetTransform>(entity).unwrap().0.m00;
+        (rect.w * scale).round()
+    };
     let widths: Vec<_> = initial
         .iter()
         .take(2)
-        .map(|(_, entity)| app.world.get::<ComputedRect>(*entity).unwrap().0.w)
+        .map(|(_, entity)| width(&app, *entity))
         .collect();
     assert!(
         widths
@@ -1046,14 +1120,8 @@ fn page_marker_entities_follow_the_active_page_without_remounting() {
     );
     paint_at(&mut app, &scene, 1400);
     assert_eq!(markers(&app), initial);
-    assert_eq!(
-        app.world.get::<ComputedRect>(initial[0].1).unwrap().0.w,
-        6.into()
-    );
-    assert_eq!(
-        app.world.get::<ComputedRect>(initial[1].1).unwrap().0.w,
-        22.into()
-    );
+    assert_eq!(width(&app, initial[0].1), 6.into());
+    assert_eq!(width(&app, initial[1].1), 22.into());
 }
 
 #[test]
@@ -1563,6 +1631,39 @@ fn selected_game_keeps_netplay_shortcut_on_browser_snapshots() {
                 paint_at(&mut app, &scene, t);
             }
             assert_eq!(badge_count(&app), 1, "{size:?} {kind:?}: idle");
+            if kind == LibraryKind::Favorites {
+                use mirui::ui::{LayoutGeometry, Outputs};
+                let outline = app
+                    .world
+                    .query::<selection::Outline>()
+                    .iter()
+                    .find_map(|(node, outline)| {
+                        (visible_in_tree(&app.world, node)
+                            && app.world.get::<FollowBounds>(outline.frame).is_some())
+                        .then_some(*outline)
+                    })
+                    .unwrap();
+                let output = app.world.resource::<Outputs<LayoutGeometry>>().unwrap();
+                let panel = output.get(outline.panel).unwrap();
+                let bounds = output.get(outline.frame).unwrap();
+                let border =
+                    selection::outline_rect(bounds, panel, scene.shelf.motion().expansion())
+                        .unwrap();
+                let corner = Rect::bounding_quad(&panel.transform().apply_rect(border).unwrap());
+                let badge = app
+                    .world
+                    .query::<Text>()
+                    .iter()
+                    .find_map(|(node, text)| {
+                        (text.resolve(None) == "长按 X 联机" && visible_in_tree(&app.world, node))
+                            .then_some(app.world.get::<ComputedRect>(node))
+                            .flatten()
+                    })
+                    .unwrap()
+                    .0;
+                assert!((badge.x - corner.x).abs() <= Fixed::ONE);
+                assert!((badge.y - corner.y).abs() <= Fixed::ONE);
+            }
             capture_text_audit(&mut app, &format!("netplay-hint-{kind:?}"), size);
             let gesture = super::launcher(&mut app);
             gesture.press(500);
@@ -3377,17 +3478,21 @@ fn reflow_and_reverse_retarget_match_complete_frames_at_every_viewport() {
                 .next()
                 .unwrap()
                 .0;
-            let target = focus_rect(&app).unwrap();
-            let current = app.world.get::<ComputedRect>(frame).unwrap().0;
-            assert_eq!(
-                [
-                    current.x.to_int(),
-                    current.y.to_int(),
-                    current.w.to_int(),
-                    current.h.to_int()
-                ],
-                target
+            let target = app.world.get::<FollowBounds>(frame).unwrap().target;
+            let geometry = app
+                .world
+                .resource::<mirui::ui::Outputs<mirui::ui::LayoutGeometry>>()
+                .unwrap()
+                .get(target)
+                .unwrap();
+            let expected = Rect::bounding_quad(
+                &geometry
+                    .transform()
+                    .apply_rect(geometry.border_rect())
+                    .unwrap(),
             );
+            let current = app.world.get::<ComputedRect>(frame).unwrap().0;
+            assert_eq!(current, expected);
         }
     }
 }
@@ -3833,6 +3938,7 @@ fn palettes_define_all_roles_and_legible_action_text() {
             (ON_ACCENT, ACCENT),
             (HEADER_TEXT, BACKGROUND),
             (SHELL_TEXT, SHELL),
+            (SHELL_TEXT, CARTRIDGE_BODY),
         ] {
             let a = luminance(theme.resolve(foreground));
             let b = luminance(theme.resolve(background));
@@ -4408,7 +4514,9 @@ fn modal_snapshot_stays_below_foreground_panel_and_actor() {
     panel.return_to_launcher = true;
     update(&mut scene, &panel).unwrap();
     super::paint_at(&mut app, 1016).unwrap();
-    super::paint_at(&mut app, 1500).unwrap();
+    for time in (1032..=1496).step_by(16) {
+        super::paint_at(&mut app, time).unwrap();
+    }
     check_order(&app);
     let layer = app
         .world
@@ -4509,9 +4617,9 @@ fn modal_snapshot_stays_below_foreground_panel_and_actor() {
         .unwrap();
     assert_ne!(token, next_token);
     update(&mut scene, &home).unwrap();
-    super::paint_at(&mut app, 1548).unwrap();
-    super::paint_at(&mut app, 2000).unwrap();
-    super::paint_at(&mut app, 2016).unwrap();
+    for time in (1548..=2012).step_by(16) {
+        super::paint_at(&mut app, time).unwrap();
+    }
     check_order(&app);
     assert!(
         app.world
@@ -5005,6 +5113,7 @@ fn static_cartridge_snapshots_follow_content_geometry_and_row_lifetime() {
     );
     home.entries.truncate(1);
     home.entries[0].key = "replacement".into();
+    home.entries[0].artwork = "replacement.png".into();
     home.library.total = 1;
     home.selected = 0;
     home.launcher_shelf = Some(Box::new({
@@ -5013,6 +5122,9 @@ fn static_cartridge_snapshots_follow_content_geometry_and_row_lifetime() {
         shelf
     }));
     update(&mut scene, &home).unwrap();
+    let replaced = scene.shelf.entries().get(0).unwrap();
+    assert_eq!(replaced.static_picture().token(), None);
+    assert!(!replaced.static_picture().hidden());
     for frame in 280..360 {
         super::paint_at(&mut app, frame * 17).unwrap();
     }
@@ -5024,71 +5136,71 @@ fn static_cartridge_snapshots_follow_content_geometry_and_row_lifetime() {
 }
 
 #[test]
-fn platform_preview_retains_console_entities_across_selection_changes() {
-    use mirui::ui::{Hidden, Parent};
-    let mut app = app([640, 480]);
-    let mut current = view(Page::Games);
-    current.platforms = true;
-    current.library.kind = crate::model::LibraryKind::Platforms;
-    current.library.total = 4;
-    current.entries = ["nes", "snes", "gba", "psx"]
-        .into_iter()
-        .enumerate()
-        .map(|(index, platform)| crate::model::GameRow {
-            key: format!("retained-{index}"),
-            name: platform.into(),
-            icon: platform.into(),
-            available: true,
-            ..Default::default()
-        })
-        .collect();
-    let mut scene = draw(&mut app, &current).unwrap();
-    super::paint_at(&mut app, 1000).unwrap();
-    let preview = app
-        .world
-        .query::<Style>()
-        .iter()
-        .find_map(|(entity, style)| {
-            let rect = app.world.get::<ComputedRect>(entity)?.0;
-            (rect.w > Fixed::from_int(100)
-                && rect.h > Fixed::from_int(100)
-                && style.bg_color == Some(style::PANEL.into()))
-            .then_some(entity)
-        })
-        .unwrap();
-    let descendants = |app: &TestApp| {
-        app.world
-            .query::<Style>()
-            .iter()
-            .filter_map(|(entity, _)| {
-                selection::contains(preview, entity, |node| {
-                    app.world.get::<Parent>(node).map(|p| p.0)
-                })
-                .then_some(entity)
+fn platform_preview_assembles_two_machines_in_one_retained_view() {
+    use super::consoles::{ConsolePreview, Platform};
+
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut current = view(Page::Games);
+        current.platforms = true;
+        current.library.kind = crate::model::LibraryKind::Platforms;
+        current.library.total = 4;
+        current.entries = ["nes", "snes", "gba", "psx"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, platform)| crate::model::GameRow {
+                key: format!("retained-{index}"),
+                name: platform.into(),
+                icon: platform.into(),
+                available: true,
+                directory: true,
+                ..Default::default()
             })
-            .collect::<Vec<_>>()
-    };
-    let members = descendants(&app);
-    let layers: Vec<_> = members
-        .iter()
-        .copied()
-        .filter(|entity| {
-            app.world.get::<Style>(*entity).unwrap().layout.position == Position::Absolute
-                && app.world.get::<Parent>(*entity).map(|p| p.0) == Some(preview)
-        })
-        .collect();
-    assert_eq!(layers.len(), 4);
-    for (step, selected) in [1, 2, 3, 0].into_iter().enumerate() {
-        current.selected = selected;
-        update(&mut scene, &current).unwrap();
-        super::paint_at(&mut app, 1016 + step as u64 * 16).unwrap();
-        assert_eq!(descendants(&app), members);
+            .collect();
+        let mut scene = draw(&mut app, &current).unwrap();
+        paint_at(&mut app, &scene, 500);
+        let pane = app.world.query::<ConsolePreview>().iter().next().unwrap().0;
+        let state = scene.state.clone();
         assert_eq!(
-            layers
-                .iter()
-                .filter(|node| !app.world.has::<Hidden>(**node))
-                .count(),
-            1
+            state.platform_preview_frame().arriving.unwrap().platform,
+            Platform::Nes
+        );
+        assert!(state.platform_preview_frame().leaving.is_none());
+        assert_eq!(state.surface_focus().at(0), Fixed::ONE);
+
+        capture_text_audit(&mut app, "assembly-00", size);
+        current.selected = 1;
+        update(&mut scene, &current).unwrap();
+        let start = state.platform_preview_frame();
+        for step in 1..=8 {
+            paint_at(&mut app, &scene, 500 + step * 32);
+            capture_text_audit(&mut app, &format!("assembly-{step:02}"), size);
+        }
+        assert_eq!(app.world.query::<ConsolePreview>().iter().count(), 1);
+        assert_eq!(
+            app.world.query::<ConsolePreview>().iter().next().unwrap().0,
+            pane
+        );
+        let middle = state.platform_preview_frame();
+        assert_ne!(start, middle);
+        assert_eq!(middle.arriving.unwrap().platform, Platform::Snes);
+        assert_eq!(state.surface_focus().at(0), Fixed::ZERO);
+
+        current.selected = 2;
+        update(&mut scene, &current).unwrap();
+        for step in 9..=19 {
+            paint_at(&mut app, &scene, 756 + (step - 8) * 32);
+            capture_text_audit(&mut app, &format!("assembly-{step:02}"), size);
+        }
+        paint_at(&mut app, &scene, 1500);
+        assert_eq!(
+            state.platform_preview_frame().arriving.unwrap().platform,
+            Platform::Gba
+        );
+        assert!(state.platform_preview_frame().leaving.is_none());
+        assert_eq!(
+            app.world.query::<ConsolePreview>().iter().next().unwrap().0,
+            pane
         );
     }
 }
@@ -6214,7 +6326,7 @@ fn product_header_keeps_identity_and_context_inside_its_bounds() {
                 })
                 .map(|(entity, text)| (entity, text.resolve(None).to_string()))
                 .collect::<Vec<_>>();
-            for value in ["23:59", "100%"] {
+            for value in ["23:59", "100"] {
                 assert_eq!(
                     labels.iter().any(|(_, text)| text == value),
                     page == Page::Choice
@@ -6727,9 +6839,10 @@ fn device_status_updates_leave_navigation_and_content_entities_intact() {
         .0
         .clone();
     let mut now = 800;
-    for (clock, reading) in [
+    for (clock, label, reading) in [
         (
             "23:59",
+            "8",
             Status {
                 battery: Some(Battery {
                     percent: Some(8),
@@ -6740,6 +6853,7 @@ fn device_status_updates_leave_navigation_and_content_entities_intact() {
         ),
         (
             "00:00",
+            "100",
             Status {
                 battery: Some(Battery {
                     percent: Some(100),
@@ -6748,7 +6862,7 @@ fn device_status_updates_leave_navigation_and_content_entities_intact() {
                 wireless: Wireless::Connected,
             },
         ),
-        ("00:01", Status::default()),
+        ("00:01", "--", Status::default()),
     ] {
         status.present(clock.into(), reading);
         now += 16;
@@ -6768,10 +6882,23 @@ fn device_status_updates_leave_navigation_and_content_entities_intact() {
                 .iter()
                 .any(|(_, text)| text.resolve(None) == clock)
         );
+        let (digits, _) = app
+            .world
+            .query::<Text>()
+            .iter()
+            .find(|(entity, text)| {
+                visible_in_tree(&app.world, *entity) && text.resolve(None) == label
+            })
+            .unwrap();
+        let battery = app.world.get::<mirui::ui::Parent>(digits).unwrap().0;
+        let digits = app.world.get::<ComputedRect>(digits).unwrap().0;
+        let battery = app.world.get::<ComputedRect>(battery).unwrap().0;
+        assert!(digits.x >= battery.x && digits.x + digits.w <= battery.x + battery.w);
+        assert!(digits.y >= battery.y && digits.y + digits.h <= battery.y + battery.h);
+        assert_eq!(status.battery_label(), label);
         assert_eq!(status.battery(), reading.battery);
         assert_eq!(status.wireless(), reading.wireless);
     }
-    assert_eq!(status.battery_label(), "--%");
 }
 
 #[test]
@@ -6952,26 +7079,54 @@ fn selected_favorite_keeps_clear_contacts_and_scrolls_the_full_title() {
                 .apply_rect(geometry.border_rect())
                 .unwrap(),
         );
+        let seat = app.world.get::<Parent>(anchor).unwrap().0;
+        let shell = app
+            .world
+            .query::<super::cartridge::Shell>()
+            .iter()
+            .find_map(|(node, _)| (app.world.get::<Parent>(node)?.0 == seat).then_some(node))
+            .unwrap();
+        let shell_rect = app.world.get::<ComputedRect>(shell).unwrap().0;
+        let shell_pose = app.world.get::<WidgetTransform>(shell).unwrap().0;
+        let shell_bottom = (shell_rect.y + shell_rect.h + shell_pose.ty)
+            .ceil()
+            .to_int();
+        let frame_bottom = (frame.y + frame.h).to_int();
+        let frame_right = (frame.x + frame.w).to_int();
+        let engraving_rim = app.theme().resolve(super::style::CARTRIDGE_RIM);
         let framebuffer = app.backend.framebuffer();
-        let data = framebuffer.read_pixels().unwrap();
-        let brass = super::style::CARTRIDGE_BRASS;
-        let mut rows = 0;
-        let mut bottom = 0;
-        for y in (frame.y + frame.h - Fixed::from_int(18)).to_int()..(frame.y + frame.h).to_int() {
-            if (frame.x.to_int()..(frame.x + frame.w).to_int()).any(|x| {
-                let start = (y as usize * usize::from(size[0]) + x as usize) * 4;
-                data.bytes()[start..start + 3] == [brass.r, brass.g, brass.b]
-            }) {
-                rows += 1;
-                bottom = y;
-            }
-        }
-        assert!(rows >= 4, "Visible contact rows: {rows} at {size:?}");
+        let pixels = framebuffer.read_pixels().unwrap();
+        let matches_color = |x: i32, y: i32, color: Color| {
+            let start = (y as usize * usize::from(size[0]) + x as usize) * 4;
+            pixels.bytes()[start..start + 3] == [color.r, color.g, color.b]
+        };
+        let contacts: Vec<_> = (frame_bottom - 18..frame_bottom)
+            .filter(|&y| {
+                (frame.x.to_int()..frame_right)
+                    .any(|x| matches_color(x, y, super::style::CARTRIDGE_BRASS))
+            })
+            .collect();
         assert!(
-            bottom <= (frame.y + frame.h).to_int() - 7,
-            "Contact strip touches the focus stroke at {size:?}"
+            contacts.len() >= 4,
+            "Visible contact rows: {contacts:?} at {size:?}"
         );
-        drop(data);
+        assert_eq!(contacts[0], shell_bottom, "Detached contacts at {size:?}");
+
+        let engraving_top = (frame.y.to_int()..shell_rect.y.to_int())
+            .find(|&y| {
+                (frame_right - 58..frame_right - 8)
+                    .filter(|&x| matches_color(x, y, engraving_rim))
+                    .count()
+                    >= 20
+            })
+            .expect("The engraving rises above the shell only in focus");
+        let top_clearance = engraving_top - frame.y.to_int();
+        let bottom_clearance = frame_bottom - (contacts.last().unwrap() + 1);
+        assert!(
+            (top_clearance - bottom_clearance).abs() <= 2,
+            "Unequal edge clearance at {size:?}: {top_clearance} above, {bottom_clearance} below"
+        );
+        drop(pixels);
         drop(framebuffer);
         capture_text_audit(&mut app, "favorite-contact-and-marquee", size);
         home.selected = 1;
@@ -6991,7 +7146,7 @@ fn selected_favorite_keeps_clear_contacts_and_scrolls_the_full_title() {
 fn game_room_entry_keeps_the_source_across_a_cold_frame_and_reverses() {
     use mirui::ui::widgets::WidgetTransform;
     for size in [[480, 320], [640, 480]] {
-        for menu in [false, true] {
+        for (menu, deliver_preparation) in [(false, true), (true, true), (true, false)] {
             let mut app = app(size);
             let mut home = view(Page::Games);
             home.launcher.enabled = true;
@@ -7014,32 +7169,75 @@ fn game_room_entry_keeps_the_source_across_a_cold_frame_and_reverses() {
             }
             let mut scene = draw(&mut app, &home).unwrap();
             paint_at(&mut app, &scene, 540);
+            paint_at(&mut app, &scene, 900);
+            let popup = scene.state.launcher().popup();
+            assert_eq!(popup.mounted(), menu);
+            let feedback = app.world.find_by_id("launcher_game_feedback").unwrap();
+
             let mut preparing = home.clone();
             preparing.busy = true;
+            preparing.preparing_netplay = true;
             preparing.status = "正在准备联机".into();
             preparing.launcher.key.clear();
-            update(&mut scene, &preparing).unwrap();
-            paint_at(&mut app, &scene, 820);
+            preparing.launcher.overlay.clear();
+            preparing.launcher.overlay_kind.clear();
+            if deliver_preparation {
+                update(&mut scene, &preparing).unwrap();
+                paint_at(&mut app, &scene, 916);
+            }
+
             let mut room = view(Page::Choice);
             room.current_game = true;
             room.return_to_launcher = true;
             update(&mut scene, &room).unwrap();
-            let source = if menu {
-                deck::RoomEntry::Action(1)
-            } else {
-                deck::RoomEntry::Charge
-            };
-            assert_eq!(scene.deck.room_entry(), Some(source));
-            super::paint_at(&mut app, 840).unwrap();
-            assert!(scene.deck.room_origin().is_some());
+            assert!(scene.deck.game_room());
+            super::paint_at(&mut app, 932).unwrap();
             assert_eq!(scene.deck.panel(), Fixed::ZERO);
-            super::paint_at(&mut app, 1500).unwrap();
+            let entered = if menu {
+                assert!(popup.mounted());
+                assert!(!visible_in_tree(&app.world, feedback));
+                assert!(!scene.deck.panel_visible());
+
+                // A long render gap may finish dismissal, but the next
+                // presented frame must be the loading card.
+                super::paint_at(&mut app, 1600).unwrap();
+                assert!(!popup.mounted());
+                assert!(visible_in_tree(&app.world, feedback));
+                assert!(!scene.deck.panel_visible());
+                assert!(app.world.query::<Text>().iter().any(|(entity, text)| {
+                    text.resolve(None) == "正在准备联机" && visible_in_tree(&app.world, entity)
+                }));
+                capture_text_audit(&mut app, "friends-preparing", size);
+                let span = scene.deck.room_loading_span().unwrap();
+                super::paint_at(&mut app, 2800).unwrap();
+                assert!(visible_in_tree(&app.world, feedback));
+                assert!(!scene.deck.panel_visible());
+                for t in (2816..=2896).step_by(16) {
+                    super::paint_at(&mut app, t).unwrap();
+                    assert!(!scene.deck.panel_visible());
+                }
+                assert_ne!(scene.deck.room_loading_span(), Some(span));
+
+                let opened = (2912..=3088)
+                    .step_by(16)
+                    .find(|t| {
+                        super::paint_at(&mut app, *t).unwrap();
+                        scene.deck.panel_visible()
+                    })
+                    .expect("The ready room should open after the loading card");
+                assert_eq!(scene.deck.panel(), Fixed::ZERO);
+                opened
+            } else {
+                932
+            };
+            assert!(scene.deck.room_origin().is_some());
+            super::paint_at(&mut app, entered + 660).unwrap();
             let early = scene.deck.panel();
             assert!(
                 early < Fixed::from_ratio(1, 10),
                 "cold frame skipped the transition"
             );
-            for t in [1516, 1532, 1548, 1564, 1580, 1596, 1612, 1628, 1644] {
+            for t in (entered + 676..=entered + 804).step_by(16) {
                 super::paint_at(&mut app, t).unwrap();
             }
             let middle = scene.deck.panel();
@@ -7059,13 +7257,13 @@ fn game_room_entry_keeps_the_source_across_a_cold_frame_and_reverses() {
             shelf.launcher.overlay.clear();
             shelf.launcher.overlay_kind.clear();
             update(&mut scene, &shelf).unwrap();
-            super::paint_at(&mut app, 1660).unwrap();
+            super::paint_at(&mut app, entered + 820).unwrap();
             assert_eq!(scene.deck.panel(), middle);
-            for t in (1676..1980).step_by(16) {
+            for t in (entered + 836..entered + 1140).step_by(16) {
                 super::paint_at(&mut app, t).unwrap();
             }
             assert!(!scene.deck.panel_visible());
-            assert_eq!(scene.deck.room_entry(), None);
+            assert!(!scene.deck.game_room());
         }
     }
 }
@@ -7114,7 +7312,7 @@ fn unselected_favorite_clips_natural_text_and_folds_it_into_the_shell() {
     assert!(app.world.has::<super::reading::FoldTitle>(node));
     let slot = app.world.get::<ComputedRect>(clip).unwrap().0;
     let rect = Rect::new(slot.x + slot.w - Fixed::from_int(48), slot.y, 48, slot.h);
-    let color = app.theme().resolve(super::style::SHELL);
+    let color = app.theme().resolve(super::style::CARTRIDGE_BODY);
     let mut peak = |first: i32, end: i32| {
         let fb = app.backend.framebuffer();
         let pixels = fb.read_pixels().unwrap();
@@ -7811,7 +8009,7 @@ fn favorite_cartridge_keeps_its_top_edge_through_focus_and_page_changes() {
                     .resource::<Outputs<LayoutGeometry>>()
                     .unwrap()
                     .get(target)
-                    .unwrap();
+                    .unwrap_or_else(|| panic!("Missing selected geometry at {size:?}, step {step}, {elapsed} ms, animation {:?}: {target:?}, alive {}, rect {:?}, texture {}", scene.shelf.shelf().offsets(), app.world.is_alive(target), app.world.get::<ComputedRect>(target).map(|rect| rect.0), scene.shelf.shelf().departure_image().hidden()));
                 let bounds = Rect::bounding_quad(
                     &geometry
                         .transform()
@@ -7834,6 +8032,437 @@ fn favorite_cartridge_keeps_its_top_edge_through_focus_and_page_changes() {
                         "Missing focus ink at {size:?}"
                     );
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn warmed_shelf_turn_uses_prepared_pixels_and_keeps_live_focus() {
+    use crate::model::{GameRow, LibraryKind};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut home = view(Page::Games);
+        home.launcher.enabled = true;
+        home.library.kind = LibraryKind::Favorites;
+        home.library.total = 20;
+        let mut scene = draw(&mut app, &home).unwrap();
+        paint_at(&mut app, &scene, 400);
+        let shelf = scene.shelf.shelf();
+        let capacity = shelf.plan().grid.capacity();
+        let page = |start: usize, selected: usize| {
+            let mut result = home.clone();
+            result.entries = (start..start + capacity)
+                .map(|i| GameRow {
+                    key: i.to_string(),
+                    name: format!("游戏 {i}"),
+                    available: true,
+                    icon: "nes".into(),
+                    ..Default::default()
+                })
+                .collect();
+            result.selected = selected;
+            result.library.position = start + selected + 1;
+            result.launcher.key = result.entries[selected].key.clone();
+            result.launcher_shelf = Some(Box::new(result.clone()));
+            result
+        };
+        let first = page(0, capacity - 1);
+        let second = page(capacity, 0);
+        update(&mut scene, &first).unwrap();
+        for frame in 0..30 {
+            paint_at(&mut app, &scene, 1000 + frame * 16);
+        }
+        assert!(shelf.has_prepared_turn(), "{size:?}");
+        update(&mut scene, &second).unwrap();
+        assert!(shelf.departure_image().hidden(), "{size:?}");
+        assert_eq!(shelf.departing_count(), 0);
+        for frame in 0..6 {
+            paint_at(&mut app, &scene, 1500 + frame * 16);
+        }
+        assert_ne!(shelf.offsets(), (Fixed::ZERO, Fixed::ZERO));
+        let previous = shelf.offsets();
+        update(&mut scene, &first).unwrap();
+        assert!(!shelf.departure_image().hidden());
+        assert_eq!(shelf.offsets(), (previous.1, previous.0));
+        for frame in 6..32 {
+            paint_at(&mut app, &scene, 1500 + frame * 16);
+        }
+        assert!(!shelf.sliding());
+        let frame = app
+            .world
+            .query::<actor::ActorFrame>()
+            .iter()
+            .next()
+            .unwrap()
+            .0;
+        let target = app.world.get::<FollowBounds>(frame).unwrap().target;
+        assert_eq!(
+            app.world
+                .get::<selection::FocusTarget>(target)
+                .unwrap()
+                .index(),
+            capacity - 1
+        );
+    }
+}
+
+#[test]
+fn multiplayer_focus_travels_through_a_reversal_and_lifts_on_landing() {
+    use mirui::ui::{Children, widgets::WidgetTransform};
+    for size in [[480, 320], [640, 480]] {
+        for (name, page) in [("choice", Page::Choice), ("mode", Page::Mode)] {
+            let mut app = app(size);
+            let mut current = view(page);
+            let mut scene = draw(&mut app, &current).unwrap();
+            paint_at(&mut app, &scene, 640);
+            let card = |index| {
+                app.world
+                    .query::<FocusTarget>()
+                    .iter()
+                    .find(|(node, focus)| {
+                        focus.index() == index && visible_in_tree(&app.world, *node)
+                    })
+                    .unwrap()
+                    .0
+            };
+            let [first, second] = [card(0), card(1)];
+            let a = app.world.get::<ComputedRect>(first).unwrap().0;
+            let b = app.world.get::<ComputedRect>(second).unwrap().0;
+            let outline = app
+                .world
+                .query::<selection::SelectionFrame>()
+                .iter()
+                .next()
+                .unwrap()
+                .0;
+            let ink_node = app.world.get::<Children>(outline).unwrap().0[0];
+            let accent = app.theme().resolve(super::style::ACCENT);
+            capture_text_audit(&mut app, &format!("travelling-{name}-00"), size);
+            let mut last_x = a.x;
+            let mut saw_transit = false;
+            for (selected, from, count, offset) in [(1, 640, 8, 0), (0, 768, 27, 8)] {
+                current.selected = selected;
+                update(&mut scene, &current).unwrap();
+                for step in 1..=count {
+                    paint_at(&mut app, &scene, from + step * 16);
+                    {
+                        assert_eq!(
+                            app.world
+                                .query::<selection::SelectionFrame>()
+                                .iter()
+                                .count(),
+                            1
+                        );
+                        assert_eq!(
+                            app.world.get::<Children>(outline).unwrap().0.as_slice(),
+                            &[ink_node]
+                        );
+                        let bounds = app.world.get::<ComputedRect>(ink_node).unwrap().0;
+                        let framebuffer = app.backend.framebuffer();
+                        let buffer = framebuffer.read_pixels().unwrap();
+                        let ink = buffer.get_pixel(bounds.x.to_int() + 6, bounds.y.ceil().to_int());
+                        assert_eq!(ink, accent, "{size:?} {name} step {step}: travelling frame");
+                        let x = app.world.get::<ComputedRect>(outline).unwrap().0.x;
+                        assert!(
+                            (x - last_x).abs() < (b.x - a.x) / 3,
+                            "{size:?} {name} step {step}: frame jumped"
+                        );
+                        last_x = x;
+                        if selected == 1
+                            && x > a.x + Fixed::from_int(16)
+                            && x < b.x - Fixed::from_int(20)
+                        {
+                            let lift = app.world.get::<WidgetTransform>(second).unwrap().0.ty;
+                            assert_eq!(
+                                lift,
+                                Fixed::ZERO,
+                                "{size:?} {name}: destination lifted during transit"
+                            );
+                            saw_transit = true;
+                        }
+                    }
+                    capture_text_audit(
+                        &mut app,
+                        &format!("travelling-{name}-{:02}", offset + step),
+                        size,
+                    );
+                }
+                assert_full_frame_matches(&mut app, name);
+            }
+            assert!(saw_transit);
+            assert_eq!(last_x, a.x);
+            assert!(app.world.get::<WidgetTransform>(first).unwrap().0.ty < Fixed::ZERO);
+            assert_eq!(scene.state.button_landing(), Some(0));
+        }
+    }
+}
+
+#[test]
+fn select_lobby_cards_share_the_single_moving_focus_and_landing() {
+    use mirui::ui::{LayoutGeometry, Outputs, widgets::WidgetTransform};
+    for size in [[480, 320], [640, 480]] {
+        let mut app = app(size);
+        let mut home = view(Page::Games);
+        home.library.kind = crate::model::LibraryKind::Favorites;
+        home.launcher.enabled = true;
+        let mut scene = draw(&mut app, &home).unwrap();
+        paint_at(&mut app, &scene, 600);
+        let mut lobby = view(Page::Lobby);
+        lobby.lobby = true;
+        lobby.return_to_launcher = true;
+        lobby.selected = 2;
+        lobby.room_selected = Some(2);
+        lobby.current_game = true;
+        update(&mut scene, &lobby).unwrap();
+        paint_at(&mut app, &scene, 1300);
+        let (outline_node, outline) = app
+            .world
+            .query::<selection::Outline>()
+            .iter()
+            .find(|(node, outline)| {
+                visible_in_tree(&app.world, *node)
+                    && app
+                        .world
+                        .get::<selection::SelectionFrame>(outline.frame)
+                        .is_some_and(|f| f.page.page == Page::Lobby)
+            })
+            .map(|(node, outline)| (node, *outline))
+            .unwrap();
+        let original = app.world.get::<FollowBounds>(outline.frame).unwrap().target;
+        assert_eq!(app.world.get::<FocusTarget>(original).unwrap().index(), 2);
+        lobby.page = Page::Mode;
+        lobby.selected = 0;
+        update(&mut scene, &lobby).unwrap();
+        paint_at(&mut app, &scene, 2200);
+        assert!(scene.room.button_focus());
+        assert_eq!(scene.room.button_landing(), Some(0));
+        let left = app.world.get::<FollowBounds>(outline.frame).unwrap().target;
+        assert_ne!(left, original);
+        assert!(app.world.get::<WidgetTransform>(left).unwrap().0.ty < Fixed::ZERO);
+        capture_text_audit(&mut app, "shared-select-00", size);
+
+        lobby.selected = 1;
+        update(&mut scene, &lobby).unwrap();
+        let mut transit = false;
+        for step in 1..=28 {
+            paint_at(&mut app, &scene, 2200 + step * 16);
+            {
+                let node = app.world.get::<selection::Outline>(outline_node).unwrap();
+                assert_eq!(node.frame, outline.frame);
+                let geometry = app.world.resource::<Outputs<LayoutGeometry>>().unwrap();
+                let focus = geometry.get(outline.frame).unwrap();
+                let outline_x = Rect::bounding_quad(
+                    &focus.transform().apply_rect(focus.border_rect()).unwrap(),
+                )
+                .x;
+                let target = app.world.get::<FollowBounds>(outline.frame).unwrap().target;
+                assert_eq!(app.world.get::<FocusTarget>(target).unwrap().index(), 1);
+                let card = geometry.get(target).unwrap();
+                let card_x =
+                    Rect::bounding_quad(&card.transform().apply_rect(card.border_rect()).unwrap())
+                        .x;
+                if card_x - outline_x > Fixed::from_int(20) {
+                    transit = true;
+                    assert_eq!(scene.room.button_motion().at(1), Fixed::ZERO);
+                }
+            }
+            capture_text_audit(&mut app, &format!("shared-select-{step:02}"), size);
+        }
+        assert!(transit);
+        paint_at(&mut app, &scene, 3100);
+        assert_eq!(scene.room.button_landing(), Some(1));
+        assert_eq!(scene.room.button_motion().at(1), Fixed::ONE);
+        assert_full_frame_matches(&mut app, "Select lower sheet uses the shared focus");
+        lobby.page = Page::Lobby;
+        lobby.selected = 2;
+        update(&mut scene, &lobby).unwrap();
+        paint_at(&mut app, &scene, 3800);
+        assert!(!scene.room.button_focus());
+        assert_eq!(
+            app.world.get::<FollowBounds>(outline.frame).unwrap().target,
+            original
+        );
+    }
+}
+
+#[test]
+fn direct_network_keeps_its_shared_room_stage_through_pairing() {
+    use crate::model::NetworkPeer;
+    for size in [[480, 320], [640, 480]] {
+        for (page, phases) in [
+            (
+                Page::Host,
+                &[
+                    Phase::Creating,
+                    Phase::WaitingPeer,
+                    Phase::ApprovalPending,
+                    Phase::NetworkConfirming,
+                    Phase::NetworkConnected,
+                ][..],
+            ),
+            (
+                Page::Joined,
+                &[
+                    Phase::Connecting,
+                    Phase::ApprovalPendingClient,
+                    Phase::NetworkConfirming,
+                    Phase::NetworkConnected,
+                ][..],
+            ),
+        ] {
+            let mut app = app(size);
+            let mut current = view(page);
+            current.network_only = true;
+            current.status.clear();
+            current.player_names = ["白色掌机".into(), "紫色掌机".into()];
+            current.phase = phases[0];
+            let mut scene = draw(&mut app, &current).unwrap();
+            paint_at(&mut app, &scene, 480);
+            let stage = app
+                .world
+                .query::<pixel::SessionSprite>()
+                .iter()
+                .next()
+                .unwrap()
+                .0;
+            assert!(matches!(
+                app.world.get::<pixel::Scenery>(stage),
+                Some(pixel::Scenery::Landscape)
+            ));
+            for (step, &phase) in phases.iter().enumerate() {
+                current.phase = phase;
+                current.connected = phase == Phase::NetworkConnected;
+                if current.connected {
+                    current.local_address = "192.168.49.1".into();
+                    current.peers = vec![NetworkPeer {
+                        name: "好友掌机".into(),
+                        address: "192.168.49.2".into(),
+                    }];
+                }
+                update(&mut scene, &current).unwrap();
+                paint_at(&mut app, &scene, 760 + step as u64 * 400);
+                assert_eq!(
+                    app.world
+                        .query::<pixel::SessionSprite>()
+                        .iter()
+                        .next()
+                        .unwrap()
+                        .0,
+                    stage
+                );
+                let expected = if page == Page::Host && !current.connected {
+                    button_text(&current)
+                } else {
+                    headline(&current)
+                };
+                let visible = |value: &str| {
+                    app.world
+                        .query::<Text>()
+                        .iter()
+                        .filter(|(node, text)| {
+                            text.resolve(app.world.resource()).as_ref() == value
+                                && visible_in_tree(&app.world, *node)
+                        })
+                        .count()
+                };
+                assert_eq!(visible(expected), 1, "{page:?} {phase:?} {size:?}");
+                assert_eq!(visible("开始游戏"), 0);
+                if current.connected {
+                    assert_eq!(visible(&current.local_address), 1);
+                    assert_eq!(visible(button_text(&current)), 1);
+                    assert_eq!(visible("断开组网"), 1);
+                } else {
+                    assert_eq!(visible("1P 房主") + visible("2P 玩家"), 0);
+                    assert_eq!(
+                        visible(&player_labels(&current)[usize::from(page == Page::Joined)]),
+                        1
+                    );
+                }
+                if phase == Phase::NetworkConfirming {
+                    assert!(scene.state.session_motion().visitor);
+                }
+                capture_text_audit(
+                    &mut app,
+                    &format!("shared-network-{page:?}-{phase:?}"),
+                    size,
+                );
+                assert_full_frame_matches(&mut app, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn retained_network_select_keeps_opening_frames_after_each_cold_frame() {
+    use crate::model::NetworkPeer;
+    use mirui::ui::widgets::WidgetTransform;
+    for size in [[480, 320], [640, 480]] {
+        for page in [Page::Host, Page::Joined] {
+            let mut app = app(size);
+            let mut home = view(Page::Games);
+            home.library.kind = crate::model::LibraryKind::Favorites;
+            home.launcher.enabled = true;
+            home.launcher.retained = true;
+            let mut scene = draw(&mut app, &home).unwrap();
+            paint_at(&mut app, &scene, 800);
+            let mut room = view(page);
+            room.return_to_launcher = true;
+            room.network_only = true;
+            room.phase = Phase::NetworkConnected;
+            room.connected = true;
+            room.local_address = if page == Page::Host {
+                "192.168.49.1"
+            } else {
+                "192.168.49.2"
+            }
+            .into();
+            room.peers = vec![NetworkPeer {
+                name: "好友掌机".into(),
+                address: if page == Page::Host {
+                    "192.168.49.2"
+                } else {
+                    "192.168.49.1"
+                }
+                .into(),
+            }];
+            for opening in [900, 3100] {
+                update(&mut scene, &room).unwrap();
+                super::paint_at(&mut app, opening).unwrap();
+                assert!(scene.deck.panel_visible());
+                assert_eq!(scene.deck.panel(), Fixed::ZERO);
+                super::paint_at(&mut app, opening + 700).unwrap();
+                let first = scene.deck.panel();
+                assert!(first < Fixed::from_ratio(1, 10));
+                for step in 1..=21 {
+                    super::paint_at(&mut app, opening + 700 + step * 16).unwrap();
+                    if step == 10 {
+                        let progress = scene.deck.panel();
+                        assert!(progress > first && progress < Fixed::ONE);
+                        let (node, _) = app
+                            .world
+                            .query::<super::material::PanelMotion>()
+                            .iter()
+                            .find(|(_, panel)| panel.is_room())
+                            .unwrap();
+                        let transform = app.world.get::<WidgetTransform>(node).unwrap().0;
+                        assert!(transform.m00 < Fixed::ONE);
+                    }
+                    if opening == 3100 {
+                        capture_text_audit(
+                            &mut app,
+                            &format!("network-reopen-{page:?}-{step:02}"),
+                            size,
+                        );
+                    }
+                }
+                assert_eq!(scene.deck.panel(), Fixed::ONE);
+                assert!(scene.room.network_connected());
+                update(&mut scene, &home).unwrap();
+                for time in (opening + 1052..=opening + 1500).step_by(16) {
+                    super::paint_at(&mut app, time).unwrap();
+                }
+                assert!(!scene.deck.panel_visible());
             }
         }
     }

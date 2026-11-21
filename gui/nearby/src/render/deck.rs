@@ -6,6 +6,8 @@ pub(super) const FULL: Fixed = Fixed::from_ratio(13, 16);
 const MINIATURE: Fixed = Fixed::from_ratio(36, 100);
 const SLIDE: TweenConfig = TweenConfig::new(540, &ease::IN_OUT_CUBIC);
 const MAX_ROOM_STEP_MS: u64 = 24;
+const MIN_PREPARATION_MS: u64 = 180;
+const PREPARATION_SWEEP_OFFSET_MS: u64 = 350;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Layer {
@@ -17,9 +19,9 @@ pub(super) enum Layer {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RoomEntry {
-    Charge,
-    Action(usize),
+enum RoomPreparation {
+    ClosingMenu,
+    Loading(u64),
 }
 
 #[component]
@@ -69,12 +71,7 @@ impl Track {
         }
     }
     fn value(&self, now: u64) -> Fixed {
-        let mut tween = self.tween;
-        tween.tick(
-            now.saturating_sub(self.at)
-                .min(u64::from(tween.duration_ms)) as u16,
-        );
-        tween.value()
+        super::motion::tween_at(self.tween, now.saturating_sub(self.at))
     }
     fn set(&mut self, target: bool, now: u64, config: TweenConfig) {
         let target = if target { Fixed::ONE } else { Fixed::ZERO };
@@ -101,15 +98,18 @@ pub(super) struct Deck {
     #[observe]
     pub panel_visible: bool,
     #[observe]
-    pub room_entry: Option<RoomEntry>,
+    pub game_room: bool,
+    #[observe]
+    preparation: Option<RoomPreparation>,
     room_origin: Option<Rect>,
+    room_requested: bool,
+    game_menu: bool,
     #[observe]
     pub height: Fixed,
     slide: Track,
     modal: crate::launcher::popup::Track,
     now: u64,
     room_now: u64,
-    launcher_entry: RoomEntry,
     pause_background: bool,
     slide_clock: super::modal::AnimationClock,
     slide_now: u64,
@@ -123,14 +123,16 @@ impl Default for Deck {
             expansion: Fixed::ZERO,
             panel: Fixed::ZERO,
             panel_visible: false,
-            room_entry: None,
+            game_room: false,
+            preparation: None,
             room_origin: None,
+            room_requested: false,
+            game_menu: false,
             height: Fixed::ZERO,
             slide: Track::new(SLIDE),
             modal: crate::launcher::popup::Track::visibility(),
             now: 0,
             room_now: 0,
-            launcher_entry: RoomEntry::Charge,
             pause_background: false,
             slide_clock: super::modal::AnimationClock::default(),
             slide_now: 0,
@@ -159,46 +161,85 @@ impl Deck {
         };
         if view.launcher.enabled {
             self.enabled = true;
-            self.launcher_entry = if view.launcher.overlay_kind == "game" {
-                view.launcher
-                    .items
-                    .iter()
-                    .position(|item| item.action == crate::model::MenuAction::Multiplayer)
-                    .map_or(RoomEntry::Charge, RoomEntry::Action)
-            } else {
-                RoomEntry::Charge
-            };
             self.slide
                 .set(view.launcher.tab == 1, self.slide_now, SLIDE);
         }
-        if view.return_to_launcher && view.current_game && self.enabled && !self.panel_visible {
-            self.room_entry = Some(self.launcher_entry);
+        let opening = view.return_to_launcher
+            && view.current_game
+            && self.enabled
+            && !self.room_requested
+            && !self.panel_visible;
+        if self.game_menu && (view.preparing_netplay || opening) && self.preparation.is_none() {
+            self.preparation = Some(RoomPreparation::ClosingMenu);
+        } else if !view.preparing_netplay && !view.return_to_launcher {
+            self.preparation = None;
+        }
+        self.game_menu = view.launcher.enabled && view.launcher.overlay_kind == "game";
+        if opening {
+            self.game_room = true;
             self.room_origin = None;
         }
-        self.modal.show(view.return_to_launcher);
+        self.room_requested = view.return_to_launcher;
+        self.modal
+            .show(self.room_requested && self.preparation.is_none());
         self.panel_visible = self.modal.visible();
     }
-    pub fn tick(&mut self, now: u64) {
+    pub fn tick(&mut self, now: u64, menu_mounted: bool) {
         let elapsed = now.saturating_sub(self.now);
         self.now = now;
         if let Some(local) = self.slide_clock.sample(now, self.pause_background) {
             self.slide_now = local;
             self.expansion = self.slide.value(local);
         }
-        self.room_now = if self.room_entry.is_some() {
-            self.room_now + elapsed.min(MAX_ROOM_STEP_MS)
-        } else {
-            now
-        };
+        let room_step = elapsed.min(MAX_ROOM_STEP_MS);
+        match self.preparation {
+            Some(RoomPreparation::ClosingMenu) if !menu_mounted => {
+                self.preparation = Some(RoomPreparation::Loading(0));
+            }
+            Some(RoomPreparation::Loading(shown)) => {
+                let shown = shown + room_step;
+                if self.room_requested && shown >= MIN_PREPARATION_MS {
+                    self.preparation = None;
+                    self.modal.show(true);
+                } else {
+                    self.preparation = Some(RoomPreparation::Loading(shown));
+                }
+            }
+            _ => {}
+        }
+
+        // Both room entrances keep their opening frames across a cold mount.
+        self.room_now += room_step;
         self.panel = self.modal.tick(self.room_now);
         self.panel_visible = self.modal.visible();
-        if !self.panel_visible {
-            self.room_entry = None;
+        if !self.panel_visible && !self.room_requested {
+            self.game_room = false;
             self.room_origin = None;
         }
     }
+
+    #[observe]
+    pub(super) fn closing_game_menu(&self) -> bool {
+        self.preparation == Some(RoomPreparation::ClosingMenu)
+    }
+
+    #[observe]
+    pub(super) fn room_loading_span(&self) -> Option<(Fixed, Fixed)> {
+        match self.preparation {
+            Some(RoomPreparation::Loading(shown)) => Some(crate::launcher::loading_span(
+                shown + PREPARATION_SWEEP_OFFSET_MS,
+            )),
+            _ => None,
+        }
+    }
+
+    #[observe]
+    pub(super) fn preparing_room(&self) -> bool {
+        self.preparation.is_some()
+    }
+
     pub fn pin_room_origin(&mut self, origin: Rect) {
-        if self.room_entry.is_some() && self.room_origin.is_none() {
+        if self.game_room && self.room_origin.is_none() {
             self.room_origin = Some(origin);
         }
     }
@@ -243,19 +284,23 @@ mod tests {
         deck.present(&view);
         view.launcher.tab = 1;
         deck.present(&view);
-        deck.tick(200);
+        deck.tick(200, false);
         let middle = deck.expansion;
         assert!(middle > Fixed::ZERO && middle < Fixed::ONE);
         view.launcher.tab = 0;
         deck.present(&view);
-        deck.tick(200);
+        deck.tick(200, false);
         assert_eq!(deck.expansion, middle);
         view.return_to_launcher = true;
         view.launcher.enabled = false;
         deck.present(&view);
-        deck.tick(200);
-        deck.tick(800);
+        deck.tick(200, false);
+        deck.tick(800, false);
         assert_eq!(deck.expansion, Fixed::ZERO);
+        assert!(deck.panel < Fixed::from_ratio(1, 10));
+        for now in (816..=1152).step_by(16) {
+            deck.tick(now, false);
+        }
         assert_eq!(deck.panel, Fixed::ONE);
         assert!(deck.layer == Layer::Room);
         for step in 0..=16 {

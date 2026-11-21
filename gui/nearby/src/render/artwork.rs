@@ -1,6 +1,7 @@
 mod resources;
 #[cfg(test)]
 mod tests;
+mod transition;
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -78,6 +79,23 @@ impl CoverBounds {
         self.source.clone()
     }
 
+    pub(super) fn frozen(&self) -> Self {
+        Self {
+            resource: self.resource.clone(),
+            source: self.source.clone(),
+            signal: self.signal.clone(),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn replace_binding(&mut self, other: &Self) {
+        self.bind(
+            other.source.clone(),
+            other.resource.clone(),
+            other.signal.clone(),
+        );
+    }
+
     fn binding(&self) -> CoverBinding {
         CoverBinding {
             source: self.source.clone(),
@@ -86,7 +104,7 @@ impl CoverBounds {
         }
     }
 
-    fn resolved(&self) -> Option<Handle<Texture<'static>>> {
+    pub(super) fn resolved(&self) -> Option<Handle<Texture<'static>>> {
         self.signal.as_ref()?.get();
         let texture = self.resource.as_ref()?.get();
         (texture.cache_revision != 0).then_some(texture)
@@ -343,6 +361,7 @@ impl ArtworkPlan {
 pub(super) fn install<B: Surface, F: RendererFactory<B>>(
     app: &mut App<B, F>,
 ) -> Result<(), String> {
+    app.with_widget(transition::departure::view());
     app.add_plugin(
         ImageResourcesPlugin::empty()
             .with_values_budget(MaxSize::Bytes(TEXTURE_BUDGET))
@@ -556,7 +575,7 @@ pub(super) fn sleeve_face(
             ) [
                 CartridgePart::Label,
             ] {
-                cover (bounds, platform)
+                preview_cover (bounds, platform, measure_source)
                 View (
                     position: Position::Absolute,
                     top: 0,
@@ -629,6 +648,16 @@ pub(super) fn cover(
     bounds: model!(CoverBounds),
     platform: prop!(super::consoles::Platform),
 ) -> Entity {
+    ui! { preview_cover (bounds, platform, false) }
+}
+
+#[compose]
+fn preview_cover(
+    bounds: model!(CoverBounds),
+    platform: prop!(super::consoles::Platform),
+    animate_changes: bool,
+) -> Entity {
+    let departure = bounds.clone();
     let fallback = bounds.clone();
     ui! {
         Column (
@@ -647,6 +676,12 @@ pub(super) fn cover(
                         console (kind)
                     }
                 }
+            }
+            if animate_changes {
+                View (
+                    position: Position::Absolute, top: 0, left: 0,
+                    width: Dimension::percent(100), height: Dimension::percent(100)
+                ) [transition::LeavingArtwork::new(departure), mirui::ui::IgnoreHitTest]
             }
         } on SizeChanged { bounds.resize(event.new); }
     }

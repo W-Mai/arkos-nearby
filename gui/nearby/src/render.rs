@@ -7,6 +7,10 @@ use mirui::ui::widgets::page_view;
 use state::{DisplayHandle, PageKey};
 use style::{ACCENT_DIM, BACKGROUND, Metrics};
 
+// Keep the full-window launcher snapshot and the modal's live output resident
+// alongside the shelf's cached artwork and the renderer's shared workspace.
+const WIDGET_OUTPUT_BUDGET: usize = 16 * 1024 * 1024;
+
 mod actions_damage;
 mod actor;
 mod artwork;
@@ -24,6 +28,7 @@ mod deck;
 mod deferred;
 pub(crate) mod device_status;
 mod discovery;
+mod focus_surface;
 mod font;
 mod keyboard;
 mod launcher;
@@ -45,6 +50,7 @@ mod scroll;
 mod selection;
 mod sessions;
 mod shelf;
+mod snapshot;
 mod state;
 mod static_snapshot;
 mod style;
@@ -71,7 +77,7 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     #[cfg(any(target_os = "linux", test))]
     response::install(app);
     app.with_theme(crate::theme::Palette::default().theme());
-    app.with_offscreen_pool_budget(8 * 1024 * 1024);
+    app.with_offscreen_pool_budget(WIDGET_OUTPUT_BUDGET);
     app.with_widget(page_view::view::<PageKey>());
     app.with_widget(page_view::view::<deferred::Pane>());
     app.with_widget(selection::target::view());
@@ -80,6 +86,13 @@ pub fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) -> Result
     app.with_widget(launcher::details_scroll::view());
     app.with_widget(material::panel_motion::view());
     app.with_widget(material::measure_source::view());
+    app.with_widget(cartridge::seat::view());
+    app.with_widget(cartridge::contacts::view());
+    app.with_widget(consoles::console_icon::view());
+    app.with_widget(consoles::console_preview::view());
+    app.with_widget(lists::listing_shadow::view());
+    app.with_widget(focus_surface::edge::view());
+    app.with_widget(focus_surface::button_bottom::view());
     app.with_widget(material::card_placement::view());
     app.with_widget(reading::marquee::view());
     app.with_widget(reading::fold_title::view());
@@ -138,6 +151,11 @@ impl Scene {
             self.catalog.navigate_forward();
             self.room.navigate_forward();
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn preparing_room(&self) -> bool {
+        self.deck.preparing_room()
     }
 
     pub fn press(&self, now: u64) {
@@ -210,6 +228,7 @@ pub fn cycle_theme<B: Surface, F: RendererFactory<B>>(
     let settings = scene.state.settings();
     settings.cycle_theme();
     let palette = settings.palette();
+    scene.shelf.shelf().clear_prepared_turn();
     app.set_theme(palette.theme())
         .map_err(|error| format!("Theme: {error:?}"))?;
     Ok(Some(palette))

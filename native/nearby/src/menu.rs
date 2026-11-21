@@ -204,12 +204,24 @@ impl MenuSession {
             .with_frontend_released(self.launcher, operation, ready)
     }
 
+    pub fn launcher_preparing_netplay(
+        &mut self,
+        controller: &mut crate::launcher::Controller,
+    ) -> Result<()> {
+        let mut view = controller.view();
+        view["preparing_netplay"] = true.into();
+        self.present_launcher_busy(view, "正在准备联机")
+    }
+
     pub fn launcher_busy(
         &mut self,
         controller: &mut crate::launcher::Controller,
         message: &str,
     ) -> Result<()> {
-        let mut view = controller.view();
+        self.present_launcher_busy(controller.view(), message)
+    }
+
+    fn present_launcher_busy(&mut self, mut view: Value, message: &str) -> Result<()> {
         view["busy"] = true.into();
         view["status"] = message.into();
         view["launcher"]["key"] = "".into();

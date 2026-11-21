@@ -19,7 +19,7 @@ pub(super) fn paragraph(align: TextAlign, lines: u16) -> ParagraphStyle {
 }
 
 #[compose]
-pub(super) fn hold_badge() -> Entity {
+pub(super) fn hold_badge(attached: bool) -> Entity {
     ui! {
         Text (
             "长按 X 联机",
@@ -33,8 +33,8 @@ pub(super) fn hold_badge() -> Entity {
             },
             font: font(BODY_SIZE),
             font_size: BODY_SIZE,
-            text_color: SHELL_TEXT,
-            bg_color: SHELL,
+            text_color: if attached { ON_ACCENT } else { SHELL_TEXT },
+            bg_color: if attached { ACCENT } else { SHELL },
             paragraph: paragraph(Center, 1)
         ) [
             FONT_PAINT,

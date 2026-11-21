@@ -1,16 +1,22 @@
 use super::{style::*, widgets::paragraph};
 use howff_platform::device::{Battery, Status, Wireless};
 use mirui::prelude::*;
-use mirui::ui::widgets::{Image, Text, TextAlign::End};
+use mirui::ui::widgets::{
+    Image, Text,
+    TextAlign::{Center, End},
+};
 
 const SIGNAL_WIDTH: i32 = 18;
 const CLOCK_WIDTH: i32 = 36;
-const BATTERY_WIDTH: i32 = 25;
-const PERCENT_WIDTH: i32 = 28;
+const BATTERY_BODY: i32 = 31;
+const BATTERY_TERMINAL: i32 = 3;
+const BATTERY_WIDTH: i32 = BATTERY_BODY + BATTERY_TERMINAL;
+const BATTERY_HEIGHT: i32 = 18;
+const CHARGE_INSET: i32 = 2;
+const BATTERY_CORNER: i32 = 3;
+const CHARGE_WIDTH: i32 = BATTERY_BODY - 2 * CHARGE_INSET;
 const STATUS_GAP: i32 = 8;
-const CHARGE_GAP: i32 = 4;
-const CHARGE_WIDTH: i32 = BATTERY_WIDTH + PERCENT_WIDTH + CHARGE_GAP;
-const STATUS_WIDTH: i32 = SIGNAL_WIDTH + CLOCK_WIDTH + CHARGE_WIDTH + STATUS_GAP * 2;
+const STATUS_WIDTH: i32 = SIGNAL_WIDTH + CLOCK_WIDTH + BATTERY_WIDTH + STATUS_GAP * 2;
 
 #[model]
 pub(crate) struct DeviceStatus {
@@ -51,14 +57,14 @@ impl DeviceStatus {
     pub fn battery_label(&self) -> String {
         self.battery
             .and_then(|battery| battery.percent)
-            .map_or_else(|| "--%".into(), |percent| format!("{percent}%"))
+            .map_or_else(|| "--".into(), |percent| percent.to_string())
     }
 
     #[observe]
     pub fn charge_width(&self) -> i32 {
         self.battery
             .and_then(|battery| battery.percent)
-            .map_or(0, |percent| (i32::from(percent) * 16 + 50) / 100)
+            .map_or(0, |percent| (i32::from(percent) * CHARGE_WIDTH + 50) / 100)
     }
 
     #[observe]
@@ -127,64 +133,53 @@ fn status_contents(status: model!(DeviceStatus), color: ColorToken) -> Entity {
             ) [
                 FONT_PAINT,
             ]
-            Row (
-                width: Dimension::Content,
-                height: Dimension::Content,
-                min_width: CHARGE_WIDTH,
-                column_gap: CHARGE_GAP,
-                align: AlignItems::Center
-            ) {
-                View (width: BATTERY_WIDTH, height: 18, shrink: 0.0) {
-                    View (
-                        position: Position::Absolute,
-                        left: 0,
-                        top: 2,
-                        width: 22,
-                        height: 14,
-                        border_width: 2,
-                        border_color: ${ if status.low_battery() { CLAY } else { color } }
-                    )
-                    View (
-                        position: Position::Absolute,
-                        left: 22,
-                        top: 6,
-                        width: 3,
-                        height: 6,
-                        bg_color: ${ if status.low_battery() { CLAY } else { color } }
-                    )
-                    View (
-                        position: Position::Absolute,
-                        left: 3,
-                        top: 5,
-                        height: 8,
-                        width: ${ status.charge_width() },
-                        bg_color: ${ if status.low_battery() { CLAY } else { color } }
-                    )
-                    Image (
-                        position: Position::Absolute,
-                        left: 7,
-                        top: 0,
-                        width: 10,
-                        height: 18,
-                        viewbox: 18,
-                        visible: ${ status.charging() },
-                        color: ACCENT,
-                        src: path!(M 9 0 H 17 L 11 7 H 17 L 4 18 L 8 10 H 1 Z)
-                    )
-                }
-                Text (
-                    text: ${ status.battery_label() },
-                    width: PERCENT_WIDTH,
-                    height: Dimension::Content,
-                    shrink: 0.0,
-                    font: font(BODY_SIZE),
-                    font_size: BODY_SIZE,
-                    text_color: ${ if status.low_battery() { CLAY } else { color } },
-                    paragraph: paragraph(End, 1)
-                ) [
-                    FONT_PAINT,
-                ]
-            }
+            battery (status, color)
         }
+    }
+}
+
+#[compose]
+fn battery(status: model!(DeviceStatus), color: ColorToken) -> Entity {
+    let digits = status.clone();
+    let outline = status.clone();
+    ui! {
+        Row (width: BATTERY_WIDTH, height: BATTERY_HEIGHT, shrink: 0.0, align: AlignItems::Center) {
+            View (
+                width: BATTERY_BODY, height: BATTERY_HEIGHT, shrink: 0.0,
+                border_width: 1, border_radius: BATTERY_CORNER,
+                border_color: ${ if outline.low_battery() { CLAY } else { color } },
+                container: true
+            ) {
+                battery_digits (digits, color, 0, 0)
+                View (
+                    position: Position::Absolute, left: CHARGE_INSET, top: CHARGE_INSET,
+                    width: ${ status.charge_width() }, height: BATTERY_HEIGHT - 2 * CHARGE_INSET,
+                    border_radius: 1, container: true, clip_children: true,
+                    bg_color: ${ if status.low_battery() { CLAY } else { color } }
+                ) {
+                    battery_digits (status.clone(), BACKGROUND, -CHARGE_INSET, -CHARGE_INSET)
+                }
+            }
+            View (
+                width: BATTERY_TERMINAL, height: 6, border_radius: 1,
+                bg_color: ${ if status.charging() { ACCENT } else if status.low_battery() { CLAY } else { color } }
+            )
+        }
+    }
+}
+
+#[compose]
+fn battery_digits(status: model!(DeviceStatus), color: ColorToken, left: i32, top: i32) -> Entity {
+    ui! {
+        Text (
+            position: Position::Absolute, left: left, top: top + 2,
+            width: BATTERY_BODY,
+            height: Dimension::Content,
+            text: ${ status.battery_label() },
+            font: font(BODY_SIZE),
+            font_size: BODY_SIZE,
+            text_color: color,
+            paragraph: paragraph(Center, 1)
+        ) [FONT_PAINT]
     }
 }

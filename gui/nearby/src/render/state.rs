@@ -27,8 +27,7 @@ struct LibraryPresentation {
 
 #[derive(Default)]
 struct PlatformPresentation {
-    items: Vec<(usize, super::consoles::Platform)>,
-    selected: usize,
+    motion: super::consoles::PreviewMotion,
     title: String,
 }
 
@@ -71,22 +70,6 @@ fn renders_rows(role: DisplayRole, view: &View) -> bool {
     role != DisplayRole::Primary || !(view.launcher.enabled || view.return_to_launcher)
 }
 
-fn platform_items_match(
-    items: &[(usize, super::consoles::Platform)],
-    entries: &[crate::model::GameRow],
-    limit: usize,
-) -> bool {
-    let entries = entries.iter().take(limit);
-    items.len() == entries.len()
-        && items
-            .iter()
-            .zip(entries)
-            .enumerate()
-            .all(|(index, ((slot, platform), row))| {
-                *slot == index && *platform == super::consoles::Platform::from_id(&row.icon)
-            })
-}
-
 #[derive(Clone, Copy, Default)]
 pub(super) struct Changes(u16);
 
@@ -105,7 +88,6 @@ impl Changes {
     const CONFIRM: Self = Self(1 << 10);
     const DEVICES: Self = Self(1 << 11);
     const QUERY: Self = Self(1 << 12);
-    const PLATFORM_PREVIEWS: Self = Self(1 << 13);
     const PLATFORM_TITLE: Self = Self(1 << 14);
     fn contains(self, mask: Self) -> bool {
         self.0 & mask.0 == mask.0
@@ -134,7 +116,6 @@ impl Changes {
         confirm = Changes::CONFIRM,
         devices = Changes::DEVICES,
         query = Changes::QUERY,
-        platform_previews = Changes::PLATFORM_PREVIEWS,
         platform_preview_title = Changes::PLATFORM_TITLE,
     )
 )]
@@ -156,6 +137,11 @@ pub(super) struct DisplayState {
     view: View,
     library: LibraryPresentation,
     platform_preview: PlatformPresentation,
+    row_rise: super::lists::RowRise,
+    button_rise: super::lists::RowRise,
+    #[observe]
+    pub(super) button_landing: Option<usize>,
+    last_library_tick: Option<u64>,
     room_artwork: String,
     artwork_revision: u64,
     pub(crate) launcher: model!(owned crate::launcher::Launcher),
@@ -204,6 +190,12 @@ impl DisplayState {
     }
 
     pub(super) fn present(&mut self, view: &View) -> Changes {
+        if self.view.page != view.page
+            || self.view.lobby != view.lobby
+            || self.view.network_only != view.network_only
+        {
+            self.button_landing = None;
+        }
         if self.role == DisplayRole::Catalog
             && !self.view.launcher.navigation
             && self.view.launcher.overlay.is_empty()
@@ -225,8 +217,7 @@ impl DisplayState {
         self.embedded = view.return_to_launcher;
         self.launcher.present(view);
         if bind_rows {
-            self.shelf
-                .change_window(&self.view, view, &mut self.entries);
+            self.shelf.change_window(&self.view, view, &self.entries);
         }
         self.shelf.present(view);
         self.list_layout.present(view);
@@ -314,21 +305,11 @@ impl DisplayState {
                 && view.page == Page::Games
                 && view.library.kind == crate::model::LibraryKind::Platforms
             {
-                if !platform_items_match(&self.platform_preview.items, &view.entries, limit) {
-                    changes.update(
-                        &mut self.platform_preview.items,
-                        view.entries
-                            .iter()
-                            .take(limit)
-                            .enumerate()
-                            .map(|(index, row)| {
-                                (index, super::consoles::Platform::from_id(&row.icon))
-                            })
-                            .collect(),
-                        Changes::PLATFORM_PREVIEWS,
-                    );
-                }
-                self.platform_preview.selected = view.selected;
+                let platform = view
+                    .entries
+                    .get(view.selected)
+                    .map(|row| super::consoles::Platform::from_id(&row.icon));
+                self.platform_preview.motion.select(platform, view.selected);
                 changes.update(
                     &mut self.platform_preview.title,
                     view.entries
@@ -364,13 +345,18 @@ impl DisplayState {
                     .enumerate()
                     .map(|(i, row)| Row::game(i, row))
                     .collect();
-                if self.role == DisplayRole::Catalog
-                    && view.page == Page::Games
-                    && matches!(
-                        view.library.kind,
+                let reusable_slots = matches!(
+                    (self.role, view.library.kind),
+                    (
+                        DisplayRole::Catalog,
                         crate::model::LibraryKind::Platforms | crate::model::LibraryKind::Directory
                     )
+                );
+                if self.role == DisplayRole::Shelf
+                    && view.library.kind == crate::model::LibraryKind::Favorites
                 {
+                    rows::reconcile_shelf(&mut self.entries, entries, self.row_revision, false);
+                } else if view.page == Page::Games && reusable_slots {
                     rows::reconcile_slots(&mut self.entries, entries, self.row_revision);
                 } else {
                     rows::reconcile(&mut self.entries, entries, self.row_revision);
@@ -515,6 +501,11 @@ impl DisplayState {
     }
 
     #[observe]
+    pub(super) fn populated_rows(&self) -> usize {
+        self.library.entries.len()
+    }
+
+    #[observe]
     pub(super) fn selected(&self) -> Option<usize> {
         match self.view.page {
             Page::Games if self.view.library.keyboard => {
@@ -529,9 +520,11 @@ impl DisplayState {
             Page::Rooms | Page::Lobby if !self.view.rooms.is_empty() => {
                 Some(self.view.selected.min(self.view.rooms.len() - 1))
             }
-            Page::Games | Page::Candidates if !self.view.entries.is_empty() => {
-                Some(self.view.selected.min(self.entries.len().saturating_sub(1)))
-            }
+            Page::Games | Page::Candidates if !self.view.entries.is_empty() => Some(
+                self.view
+                    .selected
+                    .min(self.populated_rows().saturating_sub(1)),
+            ),
             Page::Host | Page::Joined if self.view.manages_network() && !self.view.busy => {
                 Some(self.view.selected.min(1))
             }
@@ -582,13 +575,14 @@ impl DisplayState {
         self.library.platforms
     }
 
-    fn platform_previews_value(&self) -> Vec<(usize, super::consoles::Platform)> {
-        self.platform_preview.items.clone()
+    #[observe]
+    pub(super) fn platform_preview_frame(&self) -> super::consoles::PreviewFrame {
+        self.platform_preview.motion.frame()
     }
 
     #[observe]
-    pub(super) fn platform_preview_selection(&self) -> usize {
-        self.platform_preview.selected
+    pub(super) fn surface_focus(&self) -> super::lists::RiseFrame {
+        self.row_rise.frame()
     }
 
     fn platform_preview_title_value(&self) -> String {
@@ -808,8 +802,47 @@ impl DisplayState {
         self.view.can_switch_theme()
     }
 
+    #[observe]
+    pub(super) fn button_focus(&self) -> bool {
+        buttons_are_focus_targets(self.focus_page())
+    }
+
+    #[observe]
+    pub(super) fn button_motion(&self) -> super::lists::RiseFrame {
+        self.button_rise.frame()
+    }
+
+    pub(super) fn land_button(&mut self, index: Option<usize>) -> Changes {
+        self.button_landing = index;
+        Changes::NONE
+    }
+
     pub(super) fn animate(&mut self, now: u64, press_sequence: u64) -> Changes {
         let selected = self.selected();
+        let delta = self
+            .last_library_tick
+            .replace(now)
+            .map_or(0, |last| now.saturating_sub(last).min(32) as u16);
+        let game_rows = matches!(self.view.page, Page::Games | Page::Candidates)
+            && self.view.library.kind != crate::model::LibraryKind::Favorites
+            && !self.view.library.keyboard;
+        let room_rows = matches!(self.view.page, Page::Rooms | Page::Lobby);
+        let buttons = self.button_focus();
+        self.row_rise.select(
+            if game_rows || room_rows {
+                selected
+            } else {
+                None
+            },
+            true,
+        );
+        self.button_rise.select(
+            if buttons { selected } else { None },
+            self.button_landing == selected,
+        );
+        self.row_rise.advance(delta);
+        self.button_rise.advance(delta);
+        self.platform_preview.motion.advance(delta);
         self.motion = self
             .timeline
             .sample(&self.view, selected, now, press_sequence);
@@ -824,6 +857,10 @@ pub(super) struct PageKey {
     pub(super) library: crate::model::LibraryKind,
     pub(super) page: Page,
     pub(super) network_only: bool,
+}
+
+pub(super) fn buttons_are_focus_targets(page: Page) -> bool {
+    matches!(page, Page::Choice | Page::Mode | Page::Host | Page::Joined)
 }
 
 impl DisplayStateHandle {
@@ -845,11 +882,6 @@ impl DisplayStateHandle {
             })
             .map(|row| row.label(true))
             .unwrap_or_default()
-    }
-
-    pub(super) fn platform_previews(&self) -> Vec<(usize, super::consoles::Platform)> {
-        self.platform_previews_revision();
-        self.platform_previews_value()
     }
 
     pub(super) fn platform_preview_title(&self) -> String {
@@ -947,8 +979,9 @@ pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
     app.add_system(advance::system());
     let deck = app.add_model(super::deck::Deck::default()).finish();
     let card_face = app.add_model(super::material::CardFace::default()).finish();
-    app.add_system(advance_deck::system(deck.clone()));
+    app.add_system(advance_deck::system(deck.clone(), state.launcher().popup()));
     app.add_system(super::cache::settled_layer::system());
+    app.add_resource(selection::ResolvedFocus::default());
     app.add_system(selection::update::system());
     app.add_system(super::actor::follow::system());
     app.add_system(super::shelf::layout_shelves::system());
@@ -983,6 +1016,10 @@ fn register<B: Surface, F: RendererFactory<B>>(
         view: View::default(),
         library: LibraryPresentation::default(),
         platform_preview: PlatformPresentation::default(),
+        row_rise: Default::default(),
+        button_rise: Default::default(),
+        button_landing: None,
+        last_library_tick: None,
         artwork_revision: 0,
         query: String::new(),
         launcher: crate::launcher::Launcher::default().into(),
@@ -1019,9 +1056,13 @@ fn register<B: Surface, F: RendererFactory<B>>(
 }
 
 #[system(order = Animation)]
-fn advance_deck(deck: model!(super::deck::Deck), clock: res!(optional mirui::ecs::MonoClock)) {
+fn advance_deck(
+    deck: model!(super::deck::Deck),
+    popup: model!(crate::launcher::popup::Presence),
+    clock: res!(optional mirui::ecs::MonoClock),
+) {
     if let Some(clock) = clock {
-        deck.tick(clock.now_ns() / 1_000_000);
+        deck.tick(clock.now_ns() / 1_000_000, popup.mounted());
     }
 }
 

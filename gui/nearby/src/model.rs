@@ -62,6 +62,8 @@ pub struct View {
     pub input_generation: howff_menu::input::Generation,
     #[serde(default)]
     pub return_to_launcher: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preparing_netplay: bool,
     #[serde(default)]
     pub launcher: LauncherView,
     #[serde(default)]

@@ -1,7 +1,7 @@
 use super::state::{DisplayState, PageKey};
 use mirui::prelude::*;
 use mirui::ui::widgets::FollowBounds;
-use mirui::ui::{Hidden, LayoutGeometry, Outputs, Parent};
+use mirui::ui::{ComputedRect, Hidden, LayoutGeometry, Outputs, Parent};
 
 #[component]
 pub(super) struct FocusTarget {
@@ -95,7 +95,12 @@ pub(super) fn outline(
     let Some(border) = outline_rect(bounds, panel, frame.state.motion().expansion()) else {
         return;
     };
-    let width = outline.width.min(border.w / 2).min(border.h / 2);
+    let stroke = if frame.state.button_focus() {
+        2.into()
+    } else {
+        outline.width
+    };
+    let width = stroke.min(border.w / 2).min(border.h / 2);
     if width <= Fixed::ZERO {
         return;
     }
@@ -104,35 +109,15 @@ pub(super) fn outline(
     let transform = paint
         .transform()
         .compose(&mirui::types::Transform::translate(rect.x, rect.y));
-    for area in [
-        Rect { h: width, ..border },
-        Rect {
-            y: border.y + border.h - width,
-            h: width,
-            ..border
-        },
-        Rect {
-            y: border.y + width,
-            w: width,
-            h: border.h - width * 2,
-            ..border
-        },
-        Rect {
-            x: border.x + border.w - width,
-            y: border.y + width,
-            w: width,
-            h: border.h - width * 2,
-        },
-    ] {
-        paint.draw(&mirui::render::command::DrawCommand::Fill {
-            area,
-            color,
-            transform,
-            quad: Some(transform.apply_rect(area)),
-            radius: Fixed::ZERO,
-            opa: 255,
-        });
-    }
+    paint.draw(&mirui::render::command::DrawCommand::Border {
+        area: border,
+        color,
+        transform,
+        quad: Some(transform.apply_rect(border)),
+        width,
+        radius: Fixed::ZERO,
+        opa: 255,
+    });
 }
 
 pub(super) fn outline_rect(
@@ -317,18 +302,35 @@ fn initialize_target(
 #[view(component = FocusTarget, attach = initialize_target::callback())]
 pub(super) fn target() {}
 
+#[derive(Default)]
+pub(super) struct ResolvedFocus(pub Option<Entity>);
+
+pub(super) fn action_anchor<'a>(
+    anchors: impl IntoIterator<Item = (Entity, &'a super::deck::ActionAnchor)>,
+    layout: super::deck::ActionLayout,
+    index: usize,
+    mut usable: impl FnMut(Entity) -> bool,
+) -> Option<Entity> {
+    anchors.into_iter().find_map(|(entity, item)| {
+        (item.0 == index && item.1 == layout && usable(entity)).then_some(entity)
+    })
+}
+
 #[system(order = Animation)]
 pub(super) fn update(
     runtime: res!(super::state::DisplayRuntime),
-    frames: query!(Entity, SelectionFrame, optional Hidden),
+    resolved: res!(mut ResolvedFocus),
+    frames: query!(Entity, SelectionFrame, optional Hidden, optional FollowBounds),
     scopes: query!(super::deck::ActorScope),
-    followers: query!(FollowBounds),
     targets: query!(Entity, FocusTarget),
     parents: query!(Parent),
+    rects: query!(ComputedRect),
+    geometry: res!(optional Outputs<LayoutGeometry>),
     commands: commands!(),
 ) {
     let targets: Vec<_> = targets.into_iter().collect();
-    for (entity, frame, hidden) in frames {
+    resolved.0 = None;
+    for (entity, frame, hidden, current) in frames {
         let mut ancestor = Some(frame.body);
         let mut active = true;
         while let Some(node) = ancestor {
@@ -338,16 +340,56 @@ pub(super) fn update(
             }
             ancestor = parents.get(node).map(|parent| parent.0);
         }
-        let target = if active && frame.page == frame.state.page_key() {
+        let active_page = active && frame.page == frame.state.page_key();
+        let target = if active_page {
             resolve(frame, targets.iter().copied(), |e| {
                 parents.get(e).map(|p| p.0)
             })
         } else {
             None
         };
+        if resolved.0.is_none() {
+            resolved.0 = target.filter(|entity| rects.get(*entity).is_some());
+        }
+        if active_page && frame.state.button_focus() {
+            let bounds = |node| {
+                if frame.page.page == crate::model::Page::Lobby {
+                    // The two sheets stay laid out at full size while their presentation moves.
+                    let output = geometry.as_ref()?.get(node)?;
+                    output
+                        .transform()
+                        .apply_rect(output.border_rect())
+                        .map(|quad| Rect::bounding_quad(&quad))
+                } else {
+                    rects.get(node).map(|rect| rect.0)
+                }
+            };
+            let arrived = target.is_some_and(|target| {
+                current.is_some_and(|follow| follow.target == target)
+                    && bounds(entity)
+                        .zip(bounds(target))
+                        .is_some_and(|(outline, card)| {
+                            let tolerance = Fixed::from_int(12);
+                            outline.w > Fixed::ZERO
+                                && outline.h > Fixed::ZERO
+                                && (outline.x - card.x).abs() <= tolerance
+                                && (outline.y - card.y).abs() <= tolerance
+                                && (outline.x + outline.w - card.x - card.w).abs() <= tolerance
+                                && (outline.y + outline.h - card.y - card.h).abs() <= tolerance
+                        })
+            });
+            let landing = if arrived {
+                frame.state.selected()
+            } else {
+                None
+            };
+            if frame.state.button_landing() != landing {
+                frame.state.land_button(landing);
+            }
+        }
         follow(
             target,
-            followers.get(entity),
+            current,
             hidden.is_some(),
             frame.state.shelf().sliding(),
             |change| match change {

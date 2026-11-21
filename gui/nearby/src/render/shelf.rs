@@ -1,29 +1,37 @@
+use super::static_snapshot::{Picture, Tile, turn::Stamp};
 use super::{cartridge, rows::Row};
 use crate::model::{LibraryKind, Page, View};
 use howff_menu::input::Generation;
-use mirui::anim::{Tween, TweenConfig, ease};
-use mirui::core::model::ModelList;
+use mirui::anim::{Spring, SpringConfig};
+use mirui::core::model::{ModelList, OwnedModel};
 use mirui::prelude::*;
 use serde::Serialize;
 
 pub(super) const WINDOW_BUDGET: usize = howff_menu::shelf::MAX_WINDOW_ITEMS;
-pub(super) const INSET: i32 = 8;
-pub(super) const GAP: i32 = 8;
+pub(super) const INSET: i32 = 6;
+pub(super) const GAP: i32 = 6;
 pub(super) const CARD_INSET: i32 = 2;
 pub(super) const LABEL_HEIGHT: i32 = 30;
 pub(super) const SHADOW: i32 = 5;
 const MIN_CARD_WIDTH: i32 = 160;
 const MAX_CARD_WIDTH: i32 = 304;
-const IMAGE_CHROME_WIDTH: i32 = 28;
+const IMAGE_CHROME_WIDTH: i32 = 20;
 const IMAGE_CHROME_HEIGHT: i32 = 52;
-const PAGE_MARK_HEIGHT: i32 = 4;
+pub(super) const PAGE_MARK_HEIGHT: i32 = 4;
 const PAGE_MARK_GAP: i32 = 4;
 pub(super) const PAGE_MARKERS: usize = 7;
-const SHORT_MARK: Fixed = Fixed::from_int(6);
+pub(super) const SHORT_MARK: Fixed = Fixed::from_int(6);
 const LONG_MARK: Fixed = Fixed::from_int(22);
-// A slow cartridge mount must still display the crossing of the two pages.
-const MIN_SLIDE_STEPS: u16 = 8;
-const PAGE_MOTION: TweenConfig = TweenConfig::new(260, &ease::OUT_CUBIC);
+const FIRST_SLIDE_STEP_MS: u64 = 24;
+const SPRING_STEP_MS: u16 = 16;
+const PAGE_MOTION: SpringConfig = SpringConfig {
+    duration_ms: 175,
+    bounce: Fixed::from_ratio(1, 16),
+};
+const MARKER_MOTION: SpringConfig = SpringConfig {
+    duration_ms: 250,
+    bounce: Fixed::from_ratio(1, 8),
+};
 
 pub use howff_menu::shelf::Grid;
 
@@ -118,10 +126,13 @@ pub(super) struct Shelf {
     pub marker_lengths: [Fixed; PAGE_MARKERS],
     pub departing: model!(owned ModelList<Row>),
     #[observe]
+    pub departing_count: usize,
+    pub departure_image: model!(owned Picture),
+    prepared_turn: Option<(Stamp, Tile)>,
+    #[observe]
     pub offsets: (Fixed, Fixed),
     slide: Option<Slide>,
     markers: [MarkerMotion; PAGE_MARKERS],
-    now: u64,
     last_tick: u64,
     cartridges: cartridge::Cartridges,
     #[observe]
@@ -132,11 +143,44 @@ pub(super) struct Shelf {
 
 #[derive(Clone, Copy)]
 struct Slide {
-    tween: Tween,
-    started: u64,
+    spring: Spring,
     distance: Fixed,
     origin: usize,
-    first_frame: bool,
+    start: SlideStart,
+}
+
+#[derive(Clone, Copy)]
+enum SlideStart {
+    AwaitingPaint,
+    FirstStep,
+    Running,
+}
+
+impl Slide {
+    fn advance(&mut self, delta: u64) -> u64 {
+        match self.start {
+            // Discard time spent before the transition's first paint and limit
+            // the next step so a cold mount cannot skip the crossing.
+            SlideStart::AwaitingPaint => {
+                self.start = SlideStart::FirstStep;
+                0
+            }
+            SlideStart::FirstStep if delta > 0 => {
+                self.start = SlideStart::Running;
+                delta.min(FIRST_SLIDE_STEP_MS)
+            }
+            _ => delta,
+        }
+    }
+}
+
+fn advance_spring(spring: &mut Spring, mut delta: u16) {
+    // A late frame still consumes its elapsed time through the same small steps.
+    while delta > 0 && !spring.is_settled() {
+        let step = delta.min(SPRING_STEP_MS);
+        spring.tick(step);
+        delta -= step;
+    }
 }
 
 fn window(view: &View) -> Option<usize> {
@@ -157,18 +201,15 @@ fn window(view: &View) -> Option<usize> {
 #[derive(Clone, Copy)]
 struct MarkerMotion {
     page: usize,
-    tween: Tween,
-    started: u64,
+    spring: Spring,
 }
 
 impl MarkerMotion {
-    fn value(self, now: u64) -> Fixed {
-        let mut tween = self.tween;
-        tween.tick(
-            now.saturating_sub(self.started)
-                .min(u64::from(tween.duration_ms)) as u16,
-        );
-        tween.value()
+    fn new(page: usize) -> Self {
+        Self {
+            page,
+            spring: Spring::preset(SHORT_MARK, SHORT_MARK, MARKER_MOTION),
+        }
     }
 }
 
@@ -188,19 +229,26 @@ impl Shelf {
             pages: (0, 0, 0),
             marker_lengths: [SHORT_MARK; PAGE_MARKERS],
             departing: ModelList::new().into(),
+            departing_count: 0,
+            departure_image: Picture::default().into(),
+            prepared_turn: None,
             offsets: (Fixed::ZERO, Fixed::ZERO),
             slide: None,
-            markers: [MarkerMotion {
-                page: usize::MAX,
-                tween: Tween::preset(SHORT_MARK, SHORT_MARK, PAGE_MOTION),
-                started: 0,
-            }; PAGE_MARKERS],
-            now: 0,
+            markers: [MarkerMotion::new(usize::MAX); PAGE_MARKERS],
             last_tick: 0,
             cartridges: Default::default(),
             poses: [cartridge::Pose::default(); WINDOW_BUDGET],
             departing_poses: [cartridge::Pose::default(); WINDOW_BUDGET],
         }
+    }
+
+    pub fn card_pose(&self, index: usize, departing: bool) -> cartridge::Pose {
+        let poses = if departing {
+            &self.departing_poses
+        } else {
+            &self.poses
+        };
+        pose_at(poses, index, departing)
     }
 
     fn finish_slide(&mut self) {
@@ -209,7 +257,8 @@ impl Shelf {
         }
         self.slide = None;
         self.offsets = (Fixed::ZERO, Fixed::ZERO);
-        self.departing.clear();
+        self.departing_count = 0;
+        self.departure_image.update(Picture::clear);
     }
 
     fn update(&mut self, fit: bool) {
@@ -257,15 +306,8 @@ impl Shelf {
                     .iter()
                     .find(|old| old.page == page)
                     .copied()
-                    .unwrap_or(MarkerMotion {
-                        page,
-                        tween: Tween::preset(SHORT_MARK, SHORT_MARK, PAGE_MOTION),
-                        started: self.now,
-                    });
-                if motion.tween.to != target {
-                    motion.tween = Tween::preset(motion.value(self.now), target, PAGE_MOTION);
-                    motion.started = self.now;
-                }
+                    .unwrap_or_else(|| MarkerMotion::new(page));
+                motion.spring.retarget(target, None);
             }
         }
     }
@@ -273,7 +315,7 @@ impl Shelf {
 
 #[model]
 impl Shelf {
-    pub fn change_window(&mut self, old: &View, new: &View, rows: &mut ModelList<Row>) {
+    pub fn change_window(&mut self, old: &View, new: &View, rows: &ModelList<Row>) {
         if old.library.sort != new.library.sort {
             self.cartridges = Default::default();
         }
@@ -290,7 +332,7 @@ impl Shelf {
             || old.library.total != new.library.total
             || old.launcher.enabled != new.launcher.enabled
             || rows.is_empty()
-            || rows.len() > self.departing.capacity()
+            || old.entries.len() > self.departing.capacity()
             || from % capacity != 0
             || to % capacity != 0
         {
@@ -302,30 +344,44 @@ impl Shelf {
         }
         let stride = Fixed::from_int((self.size.0 - 2 * INSET).max(1));
         let distance = if to > from { stride } else { -stride };
-        let start = match self.slide {
-            Some(slide) if slide.origin == to => self.offsets.1,
-            _ => distance,
+        let (start, velocity) = match self.slide {
+            Some(slide) if slide.origin == to => (self.offsets.1, slide.spring.velocity),
+            _ => (distance, Fixed::ZERO),
         };
-        self.departing.clear();
-        if start == Fixed::ZERO {
+        if start == Fixed::ZERO && velocity == Fixed::ZERO {
             self.finish_slide();
             return;
         }
-        let ids: Vec<_> = rows.entries().map(|(id, _)| id).collect();
-        for id in ids {
-            if let Some(row) = rows.remove(id) {
-                self.departing
-                    .try_push(row)
-                    .unwrap_or_else(|_| unreachable!("identical shelf window capacities"));
-            }
+        let prepared = self.prepared_turn.take().and_then(|(stamp, tile)| {
+            (self.slide.is_none() && stamp == self.turn_stamp(rows, old.entries.len()))
+                .then_some(tile)
+        });
+        #[cfg(any(target_os = "linux", test))]
+        super::response::stage(if prepared.is_some() {
+            "shelf_turn_texture"
+        } else {
+            "shelf_turn_live"
+        });
+        if let Some(tile) = prepared {
+            self.departing_count = 0;
+            self.departure_image
+                .update(|picture| picture.replace(Some(tile)));
+        } else {
+            self.departure_image.update(Picture::clear);
+            let departing: Vec<_> = rows
+                .entries()
+                .zip(&old.entries)
+                .map(|((_, row), data)| row.read(|row| row.departing(data)))
+                .collect();
+            self.departing_count = departing.len();
+            super::rows::reconcile_shelf(&mut self.departing, departing, 0, true);
+            self.departing_poses = self.poses;
         }
-        self.departing_poses = self.poses;
         self.slide = Some(Slide {
             origin: from,
-            first_frame: true,
+            start: SlideStart::AwaitingPaint,
             distance,
-            started: self.now,
-            tween: Tween::preset(start, Fixed::ZERO, PAGE_MOTION),
+            spring: Spring::preset(start, Fixed::ZERO, PAGE_MOTION).with_velocity(velocity),
         });
         self.offsets = (start, start - distance);
     }
@@ -335,28 +391,24 @@ impl Shelf {
         self.poses = self
             .cartridges
             .step(now, delta.min(48) as u16, reflect && self.active);
-        let step = match &mut self.slide {
-            Some(slide) if slide.first_frame => {
-                slide.first_frame = false;
-                0
-            }
-            Some(slide) => delta.min(u64::from(slide.tween.duration_ms / MIN_SLIDE_STEPS)),
-            None => delta,
-        };
-        self.now = self.now.saturating_add(step);
-        let now = self.now;
+        let step = self
+            .slide
+            .as_mut()
+            .map_or(delta, |slide| slide.advance(delta));
+        let step = step.min(u64::from(u16::MAX)) as u16;
         if let Some(slide) = self.slide.as_mut() {
-            let elapsed = now.saturating_sub(slide.started);
-            if elapsed >= u64::from(slide.tween.duration_ms) {
+            advance_spring(&mut slide.spring, step);
+            if slide.spring.is_settled() {
                 self.finish_slide();
             } else {
-                let mut tween = slide.tween;
-                tween.tick(elapsed as u16);
-                let x = tween.value();
+                let x = slide.spring.value().round();
                 self.offsets = (x, x - slide.distance);
             }
         }
-        self.marker_lengths = self.markers.map(|marker| marker.value(now));
+        for marker in &mut self.markers {
+            advance_spring(&mut marker.spring, step);
+        }
+        self.marker_lengths = self.markers.map(|marker| marker.spring.value());
     }
 
     pub fn sliding(&self) -> bool {
@@ -364,10 +416,7 @@ impl Shelf {
     }
 
     pub fn markers_settled(&self) -> bool {
-        self.slide.is_none()
-            && self.markers.iter().all(|marker| {
-                self.now.saturating_sub(marker.started) >= u64::from(marker.tween.duration_ms)
-            })
+        self.slide.is_none() && self.markers.iter().all(|marker| marker.spring.is_settled())
     }
     pub fn present(&mut self, view: &View) {
         if self.input_generation != view.input_generation {
@@ -385,11 +434,15 @@ impl Shelf {
         let fit = active != self.active || self.total != total;
         self.active = active;
         self.total = total;
-        self.position = view
+        let position = view
             .library
             .position
             .max(view.selected.saturating_add(1))
             .min(self.total);
+        if position != self.position {
+            self.clear_prepared_turn();
+        }
+        self.position = position;
         if let Some(start) = window(view) {
             self.cartridges.set_count(view.entries.len());
             if self.cartridges.select(
@@ -403,10 +456,37 @@ impl Shelf {
         self.update(fit);
     }
 
+    pub fn can_prepare_turn(&self) -> bool {
+        self.active
+            && !self.layout_pending
+            && self.total > self.plan.grid.capacity()
+            && self.slide.is_none()
+            && self.markers_settled()
+            && self.cartridges.settled()
+            && self.poses.iter().all(|pose| pose.reflection().is_none())
+    }
+
+    pub fn turn_stamp(&self, rows: &ModelList<Row>, visible: usize) -> Stamp {
+        Stamp::new(self.plan, self.position, &self.poses, rows, visible)
+    }
+
+    pub fn has_prepared_turn(&self) -> bool {
+        self.prepared_turn.is_some()
+    }
+
+    pub fn prepare_turn(&mut self, stamp: Stamp, tile: Tile) {
+        self.prepared_turn = Some((stamp, tile));
+    }
+
+    pub fn clear_prepared_turn(&mut self) {
+        self.prepared_turn = None;
+    }
+
     pub fn set_size(&mut self, width: Fixed, height: Fixed) {
         let size = (width.to_int(), height.to_int());
         if self.size != size {
             self.finish_slide();
+            self.clear_prepared_turn();
             self.size = size;
             self.layout_pending = true;
         }
@@ -425,6 +505,18 @@ impl Shelf {
     }
 }
 
+fn pose_at(
+    poses: &[cartridge::Pose; WINDOW_BUDGET],
+    index: usize,
+    departing: bool,
+) -> cartridge::Pose {
+    poses
+        .get(index)
+        .copied()
+        .unwrap_or_default()
+        .without_reflection(departing)
+}
+
 impl ShelfHandle {
     pub fn pose(&self, index: usize, departing: bool) -> cartridge::Pose {
         let poses = if departing {
@@ -432,18 +524,35 @@ impl ShelfHandle {
         } else {
             self.poses()
         };
-        poses
-            .get(index)
-            .copied()
-            .unwrap_or_default()
-            .without_reflection(departing)
+        pose_at(&poses, index, departing)
     }
 
-    pub fn marker_width(&self, page: usize) -> Fixed {
-        self.marker_lengths()
-            .get(page.saturating_sub(self.pages().0))
+    pub fn marker_transform(&self, page: usize) -> mirui::types::Transform {
+        use mirui::types::Transform;
+
+        let (first, end, _) = self.pages();
+        let lengths = self.marker_lengths();
+        let visible = &lengths[..(end - first).min(PAGE_MARKERS)];
+        let Some(before) = page.checked_sub(first) else {
+            return Transform::IDENTITY;
+        };
+        let Some(width) = visible.get(before).copied() else {
+            return Transform::IDENTITY;
+        };
+        let gap = Fixed::from_int(PAGE_MARK_GAP);
+        let strip_width = visible
+            .iter()
             .copied()
-            .unwrap_or(SHORT_MARK)
+            .fold(Fixed::ZERO, |sum, length| sum + length)
+            + gap * visible.len().saturating_sub(1) as i32;
+        let start = visible[..before]
+            .iter()
+            .copied()
+            .fold(Fixed::ZERO, |sum, length| sum + length)
+            + gap * before as i32;
+        let x = start - strip_width / 2 + (width - SHORT_MARK) / 2;
+        Transform::translate(x, Fixed::ZERO)
+            .compose(&Transform::scale(width / SHORT_MARK, Fixed::ONE))
     }
 }
 

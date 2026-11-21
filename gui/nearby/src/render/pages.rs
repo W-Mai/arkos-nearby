@@ -6,7 +6,7 @@ use super::{
     library::library,
     lists::{game_rows, lobby, rooms},
     pixel::{Scenery::Margins, backdrop},
-    sessions::{game_room, leaving, network_panel, unavailable},
+    sessions::{leaving, room, unavailable},
     state::DisplayState,
     style::*,
     widgets::paragraph,
@@ -84,34 +84,30 @@ pub(super) fn page(view: PageKey, state: model!(DisplayState), metrics: Metrics)
                             Section::Status,
                         ]
                     }
-                    if view.network_only && matches!(view.page, Page::Host | Page::Joined) {
-                        network_panel (state, metrics)
-                    } else {
-                        match view.page {
-                            Page :: Lobby => {
-                                lobby (state, metrics)
-                            }
-                            Page :: Candidates => {
-                                game_rows (state, metrics)
-                            }
-                            Page :: Choice | Page :: Mode => {
-                                choice (view, state, metrics)
-                            }
-                            Page :: Host | Page :: Joined => {
-                                game_room (state, metrics, view.page == Page::Host)
-                            }
-                            Page :: Rooms => {
-                                rooms (state, metrics)
-                            }
-                            Page :: Leaving => {
-                                leaving (state, metrics)
-                            }
-                            Page :: Unavailable => {
-                                unavailable (metrics)
-                            }
-                            Page :: Games => {
-                                library (view.library, state, metrics)
-                            }
+                    match view.page {
+                        Page :: Lobby => {
+                            lobby (state, metrics)
+                        }
+                        Page :: Candidates => {
+                            game_rows (state, metrics)
+                        }
+                        Page :: Choice | Page :: Mode => {
+                            choice (view, state, metrics)
+                        }
+                        Page :: Host | Page :: Joined => {
+                            room (state, metrics, view.page == Page::Host, view.network_only)
+                        }
+                        Page :: Rooms => {
+                            rooms (state, metrics)
+                        }
+                        Page :: Leaving => {
+                            leaving (state, metrics)
+                        }
+                        Page :: Unavailable => {
+                            unavailable (metrics)
+                        }
+                        Page :: Games => {
+                            library (view.library, state, metrics)
                         }
                     }
                 }

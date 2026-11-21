@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-21
+
+- Open and reopen the Select panel with smoother animation. The connected room remains available when reopening the panel.
+- Show a centered Wi-Fi indicator and matching connection animations for the host and guest during direct networking.
+- Carry the focus outline between buttons and rows. Selected controls lift with a deeper shadow, and console previews assemble as the selection changes.
+- Turn favorites pages with spring motion. Focused cartridges lift to reveal their contacts, with the multiplayer hint attached to the focus outline.
+- Show the charge number inside the battery icon.
+
 ## [0.17.0] - 2026-11-20
 
 - Show the local game from the room preview as soon as its content and core pass compatibility checks.

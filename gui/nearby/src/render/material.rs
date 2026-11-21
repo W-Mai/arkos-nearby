@@ -18,40 +18,25 @@ pub(super) struct CartridgeFront;
 pub(super) struct RoomChargeOrigin;
 
 pub(super) fn retain_room_origin(world: &mirui::ecs::World) {
-    use super::deck::{ActionAnchor, ActionLayout, RoomEntry};
     let Some(display) = world.resource::<DisplayRuntime>() else {
         return;
     };
     let deck = &display.deck;
-    display.state.launcher().hold_popup(
-        deck.layer() == super::deck::Layer::Room
-            && matches!(deck.room_entry(), Some(RoomEntry::Action(_)))
-            && deck.panel() < Fixed::from_ratio(1, 4),
-    );
-    if deck.room_origin().is_some() {
+    if !deck.game_room() || deck.room_origin().is_some() {
         return;
     }
-    let visible_rect = |node| {
-        if mirui::ui::branch::is_effectively_hidden(world, node) {
-            return None;
-        }
-        world
-            .get::<ComputedRect>(node)
-            .map(|rect| rect.0)
-            .filter(|rect| rect.w > Fixed::ZERO && rect.h > Fixed::ZERO)
-    };
-    let origin = match deck.room_entry() {
-        Some(RoomEntry::Charge) => world
-            .query::<RoomChargeOrigin>()
-            .iter()
-            .find_map(|(node, _)| visible_rect(node)),
-        Some(RoomEntry::Action(index)) => world
-            .query::<ActionAnchor>()
-            .iter()
-            .filter(|(_, item)| item.0 == index && item.1 == ActionLayout::Grid)
-            .find_map(|(node, _)| visible_rect(node)),
-        None => None,
-    };
+    let origin = world
+        .query::<RoomChargeOrigin>()
+        .iter()
+        .find_map(|(node, _)| {
+            if mirui::ui::branch::is_effectively_hidden(world, node) {
+                return None;
+            }
+            world
+                .get::<ComputedRect>(node)
+                .map(|rect| rect.0)
+                .filter(|rect| rect.w > Fixed::ZERO && rect.h > Fixed::ZERO)
+        });
     if let Some(origin) = origin {
         deck.pin_room_origin(origin);
     }
@@ -97,8 +82,6 @@ pub(super) struct CardFace {
     #[observe]
     pub shelf: bool,
     #[observe]
-    pub netplay: bool,
-    #[observe]
     pub platform: Platform,
     #[observe]
     pub title: String,
@@ -116,7 +99,6 @@ impl Default for CardFace {
             epoch: 0,
             panel: None,
             shelf: false,
-            netplay: false,
             platform: Platform::Unknown,
             title: String::new(),
             cover: CoverBounds::default().into(),
@@ -138,9 +120,6 @@ impl CardFace {
     }
     fn capture_cartridge(&mut self, pose: super::cartridge::Pose) {
         self.cartridge = pose;
-    }
-    fn retain_netplay(&mut self, supported: bool) {
-        self.netplay = supported;
     }
     fn capture_pose(&mut self, pose: super::binding::Pose) {
         self.sleeve = pose;
@@ -303,7 +282,6 @@ pub(super) fn retain_card_face(world: &mut mirui::ecs::World) {
     }
     if let Some((entity, rect, title, platform, cover)) = retained {
         // The modal snapshot must retain the real card through the handoff back to live UI.
-        face.retain_netplay(launcher.view().netplay);
         face.cover().share_artwork(&cover);
         face.pin(rect, title, platform, entity, tab == 0, popup.card_epoch());
     }
@@ -394,9 +372,7 @@ fn room_pose(from: Rect, panel: Rect, progress: Fixed) -> Transform {
 }
 
 pub(super) fn charge_opacity(deck: &super::deck::DeckHandle) -> Fixed {
-    if deck.room_entry() == Some(super::deck::RoomEntry::Charge)
-        && deck.layer() == super::deck::Layer::Room
-    {
+    if deck.game_room() && deck.layer() == super::deck::Layer::Room {
         return (Fixed::ONE - deck.panel() * 2).max(Fixed::ZERO);
     }
     Fixed::ONE

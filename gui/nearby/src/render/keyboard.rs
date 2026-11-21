@@ -1,7 +1,8 @@
+use super::focus_surface::{Cue::Key, focus_shadow};
 use super::{
     deck::{ActionAnchor, ActionLayout},
     style::*,
-    widgets::{caption, shadow},
+    widgets::caption,
 };
 use mirui::prelude::*;
 use mirui::types::Transform;
@@ -42,7 +43,7 @@ pub(super) fn keycap(
                     LABEL_LEADING
                 )
             }
-            shadow (metrics)
+            focus_shadow (selected, Key, metrics)
         }
     }
 }

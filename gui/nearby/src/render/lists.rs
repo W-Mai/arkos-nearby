@@ -1,7 +1,8 @@
 use super::artwork::{preview, room_preview};
 use super::choices::choice;
-use super::consoles::console;
+use super::consoles::{ConsolePreview, console};
 use super::discovery::{self, caption as discovery_caption};
+use super::focus_surface::{Cue, paint_shadow};
 use super::library::search_icon;
 use super::pixel::Stage::Search;
 use super::reading::title_strip;
@@ -15,7 +16,9 @@ use super::{
     style::*,
     widgets::{caption, shadow, text_block},
 };
+use mirui::anim::{SNAPPY, Spring};
 use mirui::prelude::*;
+use mirui::types::Transform;
 use mirui::ui::widgets::Image;
 use mirui::ui::widgets::TextAlign::{Center, Start};
 
@@ -216,11 +219,11 @@ pub(super) fn games(state: model!(DisplayState), metrics: Metrics, platforms: bo
                             grow: 1.0,
                             min_height: 0,
                             bg_color: PANEL,
-                            container: true
+                            clip_children: true
                         ) {
-                            walk ${ state.platform_previews() } with item by item {
-                                platform_preview_layer (state, item.0, item.1)
-                            }
+                            View (grow: 1.0, min_height: 0, min_width: 0) [
+                                ConsolePreview { state: state.clone() },
+                            ]
                         }
                     } else {
                         preview (state, metrics)
@@ -237,29 +240,9 @@ pub(super) fn games(state: model!(DisplayState), metrics: Metrics, platforms: bo
                 View (width: 4, height: 18, shrink: 0.0, bg_color: ACCENT)
                 title_strip (state, platforms)
                 if ${ state.shows_netplay_hint() && !platforms } {
-                    hold_badge ()
+                    hold_badge (false)
                 }
             }
-        }
-    }
-}
-
-#[compose]
-fn platform_preview_layer(
-    state: model!(DisplayState),
-    index: usize,
-    platform: super::consoles::Platform,
-) -> Entity {
-    ui! {
-        View (
-            position: Position::Absolute,
-            left: 0,
-            top: 0,
-            width: Dimension::percent(100),
-            height: Dimension::percent(100),
-            visible: ${ index == state.platform_preview_selection() }
-        ) {
-            console (platform)
         }
     }
 }
@@ -394,7 +377,10 @@ fn list_row(
     has_signal: bool,
 ) -> Entity {
     let color_index = item.clone();
-    let transform_index = item.clone();
+    let face_state = state.clone();
+    let face_index = item.clone();
+    let shadow_state = state.clone();
+    let shadow_item = item.clone();
     let accent_index = item.clone();
     let available = item.clone();
     let marker = item.clone();
@@ -408,15 +394,23 @@ fn list_row(
             } else {
                 metrics.library_row_height().max(metrics.library_row_min_height())
             },
-            min_width: 0,
-            transform: ${ state.card_motion().card_transform(transform_index.index()) }
+            min_width: 0
         ) {
             Row (
                 grow: 1.0,
                 min_height: 0,
                 padding: metrics.row_padding(),
                 column_gap: metrics.gap,
-                bg_color: ${ state.card_motion().card_color(color_index.index()) },
+                transform: ${ if has_signal {
+                    Transform::IDENTITY
+                } else {
+                    Transform::translate(Fixed::ZERO, -face_state.surface_focus().at(face_index.index()) * (if metrics.compact { 2 } else { 3 }))
+                } },
+                bg_color: ${ if state.selected() == Some(color_index.index()) {
+                    ACCENT_DIM
+                } else {
+                    PANEL
+                } },
                 align: AlignItems::Center
             ) [
                 if has_signal {
@@ -473,9 +467,106 @@ fn list_row(
                     row_signal (state, item, metrics)
                 }
             }
-            shadow (metrics)
+            View (height: metrics.shadow_height(), shrink: 0.0) [
+                ListingShadow { state: shadow_state, row: shadow_item, room: has_signal },
+            ]
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct RiseFrame {
+    current: Option<(usize, Fixed)>,
+    previous: Option<(usize, Fixed)>,
+}
+
+impl RiseFrame {
+    pub(super) fn at(self, index: usize) -> Fixed {
+        [self.current, self.previous]
+            .into_iter()
+            .flatten()
+            .find_map(|(row, rise)| (row == index).then_some(rise))
+            .unwrap_or_default()
+            .clamp(Fixed::ZERO, Fixed::ONE)
+    }
+}
+
+#[derive(Default)]
+pub(super) struct RowRise {
+    current: Option<(usize, Spring)>,
+    previous: Option<(usize, Spring)>,
+}
+
+impl RowRise {
+    pub(super) fn select(&mut self, index: Option<usize>, raised: bool) {
+        let target = if raised { Fixed::ONE } else { Fixed::ZERO };
+        if self.current.map(|(row, _)| row) == index {
+            if let Some((_, motion)) = &mut self.current {
+                motion.retarget(target, None);
+            }
+            return;
+        }
+        if index.is_some() && self.previous.map(|(row, _)| row) == index {
+            std::mem::swap(&mut self.current, &mut self.previous);
+            if let Some((_, motion)) = &mut self.current {
+                motion.retarget(target, None);
+            }
+        } else {
+            let initial = if self.current.is_none() && self.previous.is_none() {
+                target
+            } else {
+                Fixed::ZERO
+            };
+            self.previous = self.current.take();
+            self.current = index.map(|row| (row, Spring::preset(initial, target, SNAPPY)));
+        }
+        if let Some((_, motion)) = &mut self.previous {
+            motion.retarget(Fixed::ZERO, None);
+        }
+    }
+
+    pub(super) fn advance(&mut self, delta: u16) {
+        if let Some((_, motion)) = &mut self.current {
+            motion.tick(delta);
+        }
+        if let Some((_, motion)) = &mut self.previous {
+            motion.tick(delta);
+            if motion.is_settled() {
+                self.previous = None;
+            }
+        }
+    }
+
+    pub(super) fn frame(&self) -> RiseFrame {
+        RiseFrame {
+            current: self.current.map(|(row, motion)| (row, motion.value())),
+            previous: self.previous.map(|(row, motion)| (row, motion.value())),
+        }
+    }
+}
+
+#[component]
+struct ListingShadow {
+    state: model!(DisplayState),
+    row: model!(Row),
+    room: bool,
+}
+
+#[view(component = ListingShadow, invalidation = Visual)]
+pub(super) fn listing_shadow(
+    listing: component!(),
+    state: model!(component.state, watch(surface_focus)),
+    row: model!(component.row, watch(index, available)),
+    theme: res!(mirui::ui::theme::Theme),
+    paint: paint!(),
+) {
+    let cue = if listing.room { Cue::Row } else { Cue::Depth };
+    let rise = if !listing.room || row.available {
+        state.surface_focus().at(row.index)
+    } else {
+        Fixed::ZERO
+    };
+    paint_shadow(paint, &theme, cue, rise);
 }
 
 #[compose]

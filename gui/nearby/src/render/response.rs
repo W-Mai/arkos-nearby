@@ -45,6 +45,7 @@ pub(super) fn route_lifecycle(
     if !enabled() && !interactions() {
         return;
     }
+    let preview = state.platform_preview_frame();
     record(
         "route_lifecycle",
         json!({
@@ -53,7 +54,7 @@ pub(super) fn route_lifecycle(
             "library": format!("{:?}", route.library),
             "network_only": route.network_only,
             "entries_len": state.entries().len(),
-            "platform_previews_len": state.platform_previews().len(),
+            "platform_previews_len": usize::from(preview.arriving.is_some()) + usize::from(preview.leaving.is_some()),
             "library_selection": state.library_selection(),
             "list_rows": state.list_layout().rows(),
         }),

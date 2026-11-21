@@ -1,19 +1,18 @@
-# Howff 0.17.0
+# Howff 0.18.0
 
-- 收藏架放大了卡带并收紧间距。短标题居中，溢出的长标题沿右缘淡出，选中时滚动显示完整标题。
-- 按 A 将卡带翻到游戏操作面。长按 X 时联机面板从蓄力卡展开，选「和朋友玩」时从所选按钮展开。移动选框时，列表边缘保留完整描边。
-- 仅组网成功后，按 A 或 B 返回会保留连接。选择「断开组网」并确认后恢复 Wi-Fi。
-- 房主开局时，房主和访客分别看到发出和接住信号。备份或恢复存档时，界面显示存档移动到对应槽位。
-
-- 加入附近房间时，预览里对应的本地游戏通过兼容性检查后即可选择。
+- 反复按 Select 打开联机面板时，入场更流畅。仅组网后再打开，面板会带着当前连接状态展开。
+- 仅组网的无线图标在两台掌机上居中，等待确认、连接中和组网完成各有对应的动画。
+- 游戏库和房间的选框会滑到下一个目标，选中的按钮和列表项会抬起，游戏平台预览随选择逐步拼装。
+- 收藏翻页使用弹簧动画。选中卡带时外壳抬起，切角和金手指随之露出，长按 X 的联机提示贴在选框上。
+- 剩余电量直接显示在电池图标内。
 
 ## 安装与更新
 
-下载本页的 **howff-0.17.0-arm64.tar.gz**。首次安装时，解压并将 `howff` 文件夹复制到游戏卡，在掌机文件管理器中运行 **Install Howff.sh**。
+下载本页的 **howff-0.18.0-arm64.tar.gz**。首次安装时，解压并将 `howff` 文件夹复制到游戏卡，在掌机文件管理器中运行 **Install Howff.sh**。
 
 已安装 Howff 时，将安装包归档放到游戏卡，结束游戏与房间，在 **START → 应用管理 → 安装更新** 中选择归档并确认。安装后在应用管理中查看版本，两台掌机使用同一版本联机。
 
-[安装与更新](https://github.com/W-Mai/howff/blob/v0.17.0/docs/installation.md) · [使用说明](https://github.com/W-Mai/howff/blob/v0.17.0/docs/usage.md) · [游戏兼容性](https://github.com/W-Mai/howff/blob/v0.17.0/docs/compatibility.md)
+[安装与更新](https://github.com/W-Mai/howff/blob/v0.18.0/docs/installation.md) · [使用说明](https://github.com/W-Mai/howff/blob/v0.18.0/docs/usage.md) · [游戏兼容性](https://github.com/W-Mai/howff/blob/v0.18.0/docs/compatibility.md)
 
 ## 源码与校验
 

@@ -73,7 +73,13 @@ fn open_actions(games: &View) -> View {
     open
 }
 
-fn assert_first_frame_near_origin(app: &mut TestApp, size: [u16; 2], origin: Rect, before: &[u8]) {
+fn assert_first_frame_near_origin(
+    app: &mut TestApp,
+    size: [u16; 2],
+    origin: Rect,
+    selection: Option<[i32; 4]>,
+    before: &[u8],
+) {
     let framebuffer = app.backend.framebuffer();
     let frame = framebuffer.read_pixels().unwrap();
     let width = usize::from(size[0]);
@@ -86,7 +92,13 @@ fn assert_first_frame_near_origin(app: &mut TestApp, size: [u16; 2], origin: Rec
             let y = (i / width) as i32;
             let inside = (origin.x.to_int() - 4..=(origin.x + origin.w).to_int() + 4).contains(&x)
                 && (origin.y.to_int() - 4..=(origin.y + origin.h).to_int() + 4).contains(&y);
+            // The row lift, its shadow and the focus actor can change when the
+            // action panel takes focus. Keep measuring the rest of the scene.
+            let focused_row = selection.is_some_and(|[left, top, w, h]| {
+                (left - 4..=left + w + 4).contains(&x) && (top - 4..=top + h + 4).contains(&y)
+            });
             !inside
+                && !focused_row
                 && old[..3]
                     .iter()
                     .zip(&new[..3])
@@ -241,9 +253,28 @@ fn cartridge_action_flip_reverses_and_restores_its_game_and_launch_gestures() {
                 }
             };
             record(&mut app, "rest", 0);
+            let departing_focus = (kind == LibraryKind::Directory).then(|| {
+                app.world
+                    .query::<selection::SelectionFrame>()
+                    .iter()
+                    .filter(|(node, _)| visible_in_tree(&app.world, *node))
+                    .find_map(|(node, _)| {
+                        let target = app.world.get::<FollowBounds>(node)?.target;
+                        let row = app.world.get::<FocusTarget>(target)?;
+                        let bounds = app.world.get::<ComputedRect>(target)?.0;
+                        (Some(row.index()) == selection && bounds.x + bounds.w <= origin.x)
+                            .then_some([
+                                bounds.x.to_int(),
+                                bounds.y.to_int(),
+                                bounds.w.to_int(),
+                                bounds.h.to_int(),
+                            ])
+                    })
+                    .expect("focused directory row")
+            });
             update(&mut scene, &actions).unwrap();
             paint_at(&mut app, &scene, time + 16);
-            assert_first_frame_near_origin(&mut app, size, origin, &before);
+            assert_first_frame_near_origin(&mut app, size, origin, departing_focus, &before);
             if kind == LibraryKind::Directory && artwork {
                 let framebuffer = app.backend.framebuffer();
                 let frame = framebuffer.read_pixels().unwrap();
@@ -460,13 +491,35 @@ fn opening_and_closing_show_one_face_and_leave_the_source_slot_empty() {
                         assert_eq!((phase, elapsed), ("close", duration));
                         continue;
                     }
-                    let front = app.world.query::<CartridgeFront>().iter().any(|(e, _)| {
-                        visible_in_tree(&app.world, e)
-                            && app
-                                .world
-                                .get::<OffscreenRender>(e)
-                                .is_some_and(|r| r.opacity == 255)
-                    });
+                    let front = app
+                        .world
+                        .query::<CartridgeFront>()
+                        .iter()
+                        .find_map(|(e, _)| {
+                            (visible_in_tree(&app.world, e)
+                                && app
+                                    .world
+                                    .get::<OffscreenRender>(e)
+                                    .is_some_and(|r| r.opacity == 255))
+                            .then_some(e)
+                        });
+                    if let Some(root) = front.filter(|_| kind == LibraryKind::Favorites) {
+                        assert!(
+                            app.world
+                                .query::<super::cartridge::PaperCorner>()
+                                .iter()
+                                .any(|(e, _)| {
+                                    visible_in_tree(&app.world, e)
+                                        && super::selection::contains(root, e, |node| {
+                                            app.world
+                                                .get::<mirui::ui::Parent>(node)
+                                                .map(|parent| parent.0)
+                                        })
+                                }),
+                            "Missing the corner on the rotating paper label"
+                        );
+                    }
+                    let front = front.is_some();
                     let panel = app
                         .world
                         .query::<actions_damage::ActionsPanel>()

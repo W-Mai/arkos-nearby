@@ -1,7 +1,7 @@
 use super::{
     deck::{ActionAnchor, ActionLayout, ActorAnchor, ActorScope, Layer},
     pixel::ActorSprite,
-    selection::{FocusTarget, contains},
+    selection::{ResolvedFocus, action_anchor, contains},
     state::{DisplayRuntime, DisplayState},
 };
 use mirui::prelude::*;
@@ -46,7 +46,7 @@ pub(super) fn follow(
     scopes: query!(Entity, ActorScope),
     anchors: query!(Entity, ActorAnchor, ComputedRect),
     actions: query!(Entity, ActionAnchor, ComputedRect),
-    targets: query!(Entity, FocusTarget, ComputedRect),
+    resolved: res!(ResolvedFocus),
     pages: query!(super::selection::SelectionFrame),
     parents: query!(Parent),
     commands: commands!(),
@@ -188,14 +188,16 @@ pub(super) fn follow(
     } else {
         anchor.or_else(|| {
             if layer == Layer::Actions {
-                actions.into_iter().find_map(|(entity, item, _)| {
-                    (item.1 == action_layout && inside(entity) && Some(item.0) == selection)
-                        .then_some(entity)
+                selection.and_then(|index| {
+                    action_anchor(
+                        actions.into_iter().map(|(entity, item, _)| (entity, item)),
+                        action_layout,
+                        index,
+                        inside,
+                    )
                 })
             } else {
-                targets.into_iter().find_map(|(entity, item, _)| {
-                    (inside(entity) && Some(item.index()) == selection).then_some(entity)
-                })
+                resolved.0.filter(|entity| inside(*entity))
             }
         })
     };

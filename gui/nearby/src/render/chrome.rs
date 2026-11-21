@@ -195,7 +195,7 @@ fn footer_controls(view: PageKey, state: model!(DisplayState), metrics: Metrics)
         ) {
             if ${
                 state.confirm_visible()
-                    && !(view.page == Page::Host && !view.network_only && state.enabled())
+                    && !(view.page == Page::Host && state.enabled() && !state.manages_network())
             } {
                 control_key ("A", metrics, true)
                 control_label (${ confirm.confirm() }, metrics)

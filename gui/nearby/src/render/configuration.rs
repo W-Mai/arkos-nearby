@@ -1,8 +1,9 @@
 use super::deferred::Pane;
+use super::focus_surface::{Cue::Row as RowCue, focus_shadow};
 use super::{
     deck::{ActionAnchor, ActionLayout},
     style::*,
-    widgets::{control_key, control_label, shadow, text_block},
+    widgets::{control_key, control_label, text_block},
 };
 use crate::launcher::configuration::Editor;
 use howff_menu::configuration::Section;
@@ -256,7 +257,7 @@ fn row(state: model!(Editor), index: usize, metrics: Metrics) -> Entity {
                     ]
                 }
             }
-            shadow (metrics)
+            focus_shadow (${ state.selected() == index }, RowCue, metrics)
         } on SizeChanged { state.measure(index, event.new.height); }
     }
 }

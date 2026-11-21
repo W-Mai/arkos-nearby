@@ -115,11 +115,6 @@ impl Drop for DiscoveryCaption {
 fn mix(a: Fixed, b: Fixed, t: Fixed) -> Fixed {
     a + (b - a) * t
 }
-fn smooth(t: Fixed) -> Fixed {
-    let t = t.clamp(Fixed::ZERO, Fixed::ONE);
-    t * t * (Fixed::from_int(3) - t * 2)
-}
-
 impl DiscoveryCaption {
     fn advance(&mut self, next: Destination, dt: u16) {
         let changed = next != self.destination;
@@ -153,7 +148,9 @@ impl DiscoveryCaption {
             // The leading edge lifts before sliding out; the final approach
             // skims the header horizontally. Both directions share this track.
             let travel = Fixed::ONE - (Fixed::ONE - dock) * (Fixed::ONE - dock);
-            let x = mix(centered, self.inset, smooth(online)) + em * i as i32 + em / 2;
+            let x = mix(centered, self.inset, super::motion::smoothstep(online))
+                + em * i as i32
+                + em / 2;
             // The retained offline row stays in place. The word turns inside
             // the header even when both endpoints share the same height.
             let turn = Fixed::sin_deg(online.clamp(Fixed::ZERO, Fixed::ONE) * 360) * 8;
@@ -177,8 +174,10 @@ impl DiscoveryCaption {
             .iter()
             .fold(Fixed::ZERO, |total, knot| total + knot.dock.value())
             / COUNT as i32;
-        let beacon = Fixed::ONE - smooth(dock * 2);
-        let results = smooth((dock - Fixed::from_ratio(60, 100)) / Fixed::from_ratio(40, 100));
+        let beacon = Fixed::ONE - super::motion::smoothstep(dock * 2);
+        let results = super::motion::smoothstep(
+            (dock - Fixed::from_ratio(60, 100)) / Fixed::from_ratio(40, 100),
+        );
         [
             (beacon * 255).to_int() as u8,
             (results * 255).to_int() as u8,

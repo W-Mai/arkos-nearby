@@ -6,6 +6,7 @@ use super::{
     selection,
     state::{DisplayState, PageKey},
     style::*,
+    widgets::hold_badge,
 };
 use mirui::prelude::*;
 use mirui::ui::widgets::page_view::{CreatePage, PageView};
@@ -60,12 +61,32 @@ pub(super) fn focus_frame(
 ) -> Entity {
     use crate::model::Page;
     let draw_above_viewport = matches!(view.page, Page::Games | Page::Candidates | Page::Lobby);
-    let border = metrics.focus_border();
+    let border = if super::state::buttons_are_focus_targets(view.page) {
+        2
+    } else {
+        metrics.focus_border()
+    };
+    let cartridge =
+        view.page == Page::Games && view.library == crate::model::LibraryKind::Favorites;
+    let badge = state.clone();
+    let badge_x = state.clone();
+    let badge_y = state.clone();
     let frame = ui! {
         View (position: Position::Absolute, width: 0, height: 0, border_width: 0) [
             mirui::ui::IgnoreHitTest,
             selection::SelectionFrame { body, page: view, state: state.clone() },
         ] {
+            if cartridge {
+                if ${ badge.shows_netplay_hint() } {
+                    Row (
+                        position: Position::Absolute, shrink: 0.0, width: Dimension::Content,
+                        left: ${ Dimension::Percent(-badge_x.motion().expansion().0) },
+                        top: ${ Dimension::Percent(-badge_y.motion().expansion().1) }
+                    ) [mirui::ui::IgnoreHitTest] {
+                        hold_badge (true)
+                    }
+                }
+            }
             if !draw_above_viewport {
                 View (
                     position: Position::Absolute,

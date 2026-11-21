@@ -1,10 +1,28 @@
 use super::{rows::RowHandle, state::DisplayHandle};
 use mirui::app::RendererFactory;
-use mirui::core::resource::{ResourceHandle, ResourceManager};
+use mirui::core::cache::{Cache, Handle, HasSize, MaxSize};
 use mirui::prelude::*;
 use mirui::render::texture::Texture;
 use mirui::surface::Surface;
+use mirui::ui::widgets::ImageSource;
 use std::{cell::RefCell, rc::Rc};
+
+pub(super) mod turn;
+
+const TURN_TILE_BUDGET: usize = 4 * 1024 * 1024;
+
+#[derive(Clone)]
+pub(super) struct Tile {
+    revision: u64,
+    bounds: Rect,
+    texture: Handle<Texture<'static>>,
+}
+
+impl HasSize for Tile {
+    fn cache_size(&self) -> usize {
+        usize::from(self.texture.width()) * usize::from(self.texture.height()) * 4
+    }
+}
 
 #[model]
 pub(super) struct Picture {
@@ -15,6 +33,7 @@ pub(super) struct Picture {
     #[observe]
     pub bounds: Rect,
     size: (Fixed, Fixed),
+    tile: Option<Tile>,
 }
 
 impl Default for Picture {
@@ -24,6 +43,7 @@ impl Default for Picture {
             token: None,
             bounds: Rect::new(0, 0, 0, 0),
             size: (Fixed::ZERO, Fixed::ZERO),
+            tile: None,
         }
     }
 }
@@ -38,13 +58,40 @@ impl Picture {
         self.size
     }
 
-    fn set_bounds(&mut self, bounds: Rect) {
-        self.bounds = bounds;
+    pub(super) fn replace(&mut self, tile: Option<Tile>) {
+        self.hidden = tile.is_some();
+        self.token = tile.as_ref().map(|tile| tile.revision);
+        self.bounds = tile.as_ref().map_or(Rect::ZERO, |tile| tile.bounds);
+        self.tile = tile;
     }
 
-    pub(super) fn publish(&mut self, hidden: bool, token: Option<u64>) {
-        self.hidden = hidden;
-        self.token = token;
+    pub(super) fn clear(&mut self) {
+        self.replace(None);
+    }
+
+    pub(super) fn frozen(&self) -> Self {
+        let mut picture = Self::default();
+        picture.replace(self.tile.clone());
+        picture
+    }
+
+    pub(super) fn import(&mut self, other: &Self) {
+        self.replace(other.tile.clone());
+    }
+
+    fn image_value(&self) -> ImageSource {
+        self.tile
+            .as_ref()
+            .map_or_else(ImageSource::default, |tile| {
+                ImageSource::Handle(tile.texture.clone())
+            })
+    }
+}
+
+impl PictureHandle {
+    pub(super) fn image(&self) -> ImageSource {
+        self.token();
+        self.image_value()
     }
 }
 
@@ -55,7 +102,7 @@ pub(super) struct Source {
     pub state: model!(super::state::DisplayState),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct Stamp {
     theme: mirui::ui::theme::ThemeId,
     physical: (u16, u16),
@@ -66,10 +113,8 @@ struct Stamp {
 }
 
 struct Image {
-    revision: u64,
     stamp: Stamp,
-    bounds: Rect,
-    _handle: ResourceHandle<Texture<'static>>,
+    tile: Tile,
 }
 
 struct Entry {
@@ -79,7 +124,7 @@ struct Entry {
     picture: PictureHandle,
     attempted: Option<Stamp>,
     pending: Option<Image>,
-    held: Option<Image>,
+    held: Option<Stamp>,
 }
 
 struct Capture {
@@ -91,9 +136,10 @@ struct Capture {
 }
 
 fn source_live(world: &mirui::ecs::World, entity: Entity) -> bool {
-    world
-        .get::<Source>(entity)
-        .is_some_and(|source| source.state.entries().get_by_id(source.member).is_some())
+    world.get::<Source>(entity).is_some_and(|source| {
+        source.row.index() < source.state.populated_rows()
+            && source.state.entries().get_by_id(source.member).is_some()
+    })
 }
 
 fn pixel_aligned(layout: Rect, local: Rect, scale: Fixed) -> bool {
@@ -108,10 +154,9 @@ fn pixel_aligned(layout: Rect, local: Rect, scale: Fixed) -> bool {
         })
 }
 
-#[derive(Default)]
 struct Controller {
     entries: Vec<Entry>,
-    retired: Vec<Image>,
+    turn_tiles: Cache<Stamp, Tile>,
     capture: Option<Capture>,
     revision: u64,
     #[cfg(test)]
@@ -121,17 +166,15 @@ struct Controller {
 struct Runtime(Rc<RefCell<Controller>>);
 
 pub(super) fn install<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
-    app.add_resource(Runtime(Rc::new(RefCell::new(Controller::default()))));
-}
-
-pub(super) fn texture_token(revision: u64) -> String {
-    format!("nearby-static-picture-{revision}")
-}
-
-fn publish(picture: &PictureHandle, hidden: bool, token: Option<u64>) {
-    if picture.hidden() != hidden || picture.token() != token {
-        picture.publish(hidden, token);
-    }
+    turn::install(app);
+    app.add_resource(Runtime(Rc::new(RefCell::new(Controller {
+        entries: Vec::new(),
+        turn_tiles: Cache::new(MaxSize::Bytes(TURN_TILE_BUDGET)),
+        capture: None,
+        revision: 0,
+        #[cfg(test)]
+        captures: 0,
+    }))));
 }
 
 fn stamp<B: Surface, F: RendererFactory<B>>(app: &App<B, F>, row: &RowHandle) -> Option<Stamp> {
@@ -154,7 +197,8 @@ fn allowed<B: Surface, F: RendererFactory<B>>(
     entity: Entity,
     state: &DisplayHandle,
 ) -> bool {
-    if !state.card_motion().cards_settled()
+    if state.shelf().sliding()
+        || !state.card_motion().cards_settled()
         || app
             .world
             .resource::<super::state::DisplayRuntime>()
@@ -188,10 +232,8 @@ impl Controller {
             if !source_live(&app.world, self.entries[index].entity) {
                 let entry = self.entries.remove(index);
                 if entry.state.entries().get_by_id(entry.member).is_some() {
-                    publish(&entry.picture, false, None);
+                    entry.picture.clear();
                 }
-                self.retired.extend(entry.held);
-                self.retired.extend(entry.pending);
             }
         }
         let sources: Vec<_> = app
@@ -213,7 +255,7 @@ impl Controller {
             let index = match existing {
                 Some(index) => index,
                 None if self.entries.len() < super::shelf::WINDOW_BUDGET
-                    && allowed(app, entity, &state) =>
+                    && (state.shelf().sliding() || allowed(app, entity, &state)) =>
                 {
                     self.entries.push(Entry {
                         entity,
@@ -232,32 +274,27 @@ impl Controller {
             let current = stamp(app, &row);
             if let Some(pending) = entry.pending.take() {
                 if Some(pending.stamp) == current {
-                    entry.held = Some(pending);
-                    entry
-                        .picture
-                        .set_bounds(entry.held.as_ref().unwrap().bounds);
-                    publish(
-                        &entry.picture,
-                        true,
-                        entry.held.as_ref().map(|image| image.revision),
-                    );
+                    entry.held = Some(pending.stamp);
+                    entry.picture.replace(Some(pending.tile));
                 } else {
-                    self.retired.push(pending);
                     entry.attempted = None;
                 }
             }
-            if entry
-                .held
-                .as_ref()
-                .is_some_and(|image| Some(image.stamp) == current)
-            {
+            if entry.held.is_some() && entry.held == current && entry.picture.hidden() {
                 continue;
             }
-            if let Some(previous) = entry.held.take() {
-                self.retired.push(previous);
-                publish(&entry.picture, false, None);
+            if entry.held.take().is_some() {
+                entry.picture.clear();
+                entry.attempted = None;
             }
             let Some(current) = current else { continue };
+            if state.shelf().sliding()
+                && let Some(tile) = self.turn_tiles.acquire(&current)
+            {
+                entry.picture.replace(Some(tile.get().clone()));
+                entry.held = Some(current);
+                continue;
+            }
             if self.capture.is_none()
                 && entry.attempted != Some(current)
                 && allowed(app, entity, &state)
@@ -295,11 +332,6 @@ impl Controller {
     }
 
     fn after<B: Surface, F: RendererFactory<B>>(&mut self, app: &mut App<B, F>) {
-        if let Some(textures) = app.world.resource::<ResourceManager<Texture<'static>>>() {
-            for image in self.retired.drain(..) {
-                textures.remove_token(&texture_token(image.revision));
-            }
-        }
         let Some(capture) = self.capture.take() else {
             return;
         };
@@ -323,10 +355,7 @@ impl Controller {
         });
         // Reading a prepared widget output does not add another present.
         let texture = if valid && aligned {
-            app.take_widget_output(capture.entity)
-                .ok()
-                .flatten()
-                .map(|owned| owned.into_texture())
+            super::snapshot::take(app, capture.entity)
         } else {
             None
         };
@@ -348,37 +377,37 @@ impl Controller {
             entry.attempted = None;
         }
         let Some(texture) = texture else { return };
-        if texture.width() == 0 || texture.height() == 0 {
-            return;
-        }
-        let Some(textures) = app.world.resource::<ResourceManager<Texture<'static>>>() else {
-            return;
-        };
         self.revision += 1;
         let revision = self.revision | (1_u64 << 62);
-        let texture = texture.with_cache_revision(revision);
-        let dimensions = (texture.width(), texture.height());
-        let token = texture_token(revision);
-        textures.add_factory(token.clone(), move || Some(texture));
-        let handle = textures.load(token.clone());
-        if (handle.get().width(), handle.get().height()) != dimensions {
-            textures.remove_token(&token);
-            return;
-        }
         #[cfg(test)]
         {
             self.captures += 1;
         }
-        entry.pending = Some(Image {
+        let bounds = bounds.unwrap();
+        let tile = Tile {
             revision,
+            bounds,
+            texture: Handle::new(texture.with_cache_revision(revision)),
+        };
+        // Cropped outputs may serve their original slot only.
+        if bounds.x <= Fixed::ZERO
+            && bounds.y <= Fixed::ZERO
+            && bounds.x + bounds.w >= capture.stamp.size.0
+            && bounds.y + bounds.h >= capture.stamp.size.1
+        {
+            self.turn_tiles
+                .entry(capture.stamp)
+                .or_insert_with(|| tile.clone());
+        }
+        entry.pending = Some(Image {
             stamp: capture.stamp,
-            bounds: bounds.unwrap(),
-            _handle: handle,
+            tile,
         });
     }
 }
 
 pub(super) fn before_tick<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
+    turn::before_tick(app);
     if let Some(runtime) = app
         .world
         .resource::<Runtime>()
@@ -389,6 +418,7 @@ pub(super) fn before_tick<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>
 }
 
 pub(super) fn after_tick<B: Surface, F: RendererFactory<B>>(app: &mut App<B, F>) {
+    turn::after_tick(app);
     if let Some(runtime) = app
         .world
         .resource::<Runtime>()

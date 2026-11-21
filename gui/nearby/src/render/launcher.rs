@@ -1,23 +1,27 @@
 use super::actor::actor;
 use super::artwork::sleeve_face;
+use super::cartridge::{Label as CartridgeLabel, front as cartridge_front};
 use super::configuration::{hints as configuration_hints, panel as configuration_panel};
 use super::deck::{ActionAnchor, ActionLayout, ActorScope, Layer};
 use super::deferred::Pane;
+use super::focus_surface::{
+    Cue::{Card, Dial, Row as RowCue},
+    focus_shadow,
+};
 use super::management::{hints as management_hints, panel as management_panel};
-use super::reading::cartridge_title;
 use super::saves::{hints as saves_hints, panel as saves_panel};
 use super::wifi::{heading as wifi_heading, hints as wifi_hints, panel as wifi_panel};
 use super::{
     chrome::{footer, header},
     composition::{focus_frame, room_pages},
     deck::{Deck, FULL, catalog_share, shelf_share, transform},
-    library::{cartridge_source, library},
+    library::library,
     pixel::{Scenery::Margins, backdrop},
     state::{DisplayState, PageKey},
 };
 use super::{
     style::*,
-    widgets::{control_key, control_label, hold_badge, shadow, text_block},
+    widgets::{control_key, control_label, text_block},
 };
 use crate::launcher::Launcher;
 use crate::model::{LibraryKind, Page};
@@ -205,9 +209,12 @@ fn game_feedback(state: model!(DisplayState), deck: model!(Deck), metrics: Metri
     ui! {
         Column (
             visible: ${
-                gesture.progress() > 0 || gesture.opening_room()
-                    || (state.launcher().enabled() && state.busy() && !state.status().is_empty())
-                    || transferring_charge(&handoff) && super::material::charge_opacity(&handoff) > Fixed::ZERO
+                !handoff.closing_game_menu() && (
+                    gesture.progress() > 0 || gesture.opening_room()
+                        || (state.launcher().enabled() && state.busy() && !state.status().is_empty())
+                        || handoff.room_loading_span().is_some()
+                        || transferring_charge(&handoff) && super::material::charge_opacity(&handoff) > Fixed::ZERO
+                )
             },
             id: "launcher_game_feedback",
             position: Position::Absolute,
@@ -237,10 +244,12 @@ fn game_feedback(state: model!(DisplayState), deck: model!(Deck), metrics: Metri
             ] {
                 Text (
                     text: ${
-                        if state.busy() {
-                            state.status()
-                        } else if caption.opening_room() || transferring_charge(&handoff_caption) {
+                        if handoff_caption.room_loading_span().is_some() || caption.opening_room()
+                            || transferring_charge(&handoff_caption)
+                        {
                             "正在准备联机".into()
+                        } else if state.busy() {
+                            state.status()
                         } else {
                             "按住 X 进入联机".into()
                         }
@@ -261,7 +270,9 @@ fn game_feedback(state: model!(DisplayState), deck: model!(Deck), metrics: Metri
                         top: 0,
                         left: ${
                             Dimension::Percent(
-                                if lead.progress() > 0 || transferring_charge(&handoff_lead) {
+                                if let Some((start, _)) = handoff_lead.room_loading_span() {
+                                    start * 100
+                                } else if lead.progress() > 0 || transferring_charge(&handoff_lead) {
                                     Fixed::ZERO
                                 } else {
                                     lead.loading_start() * Fixed::from_int(100)
@@ -271,7 +282,9 @@ fn game_feedback(state: model!(DisplayState), deck: model!(Deck), metrics: Metri
                         height: Dimension::percent(100),
                         width: ${
                             Dimension::Percent(
-                                if transferring_charge(&handoff_fill) {
+                                if let Some((start, end)) = handoff_fill.room_loading_span() {
+                                    (end - start) * 100
+                                } else if transferring_charge(&handoff_fill) {
                                     Fixed::from_int(100)
                                 } else if charge.progress() > 0 {
                                     Fixed::from_ratio(i32::from(charge.progress()), 10)
@@ -289,7 +302,7 @@ fn game_feedback(state: model!(DisplayState), deck: model!(Deck), metrics: Metri
 }
 
 fn transferring_charge(deck: &super::deck::DeckHandle) -> bool {
-    deck.layer() == Layer::Room && deck.room_entry() == Some(super::deck::RoomEntry::Charge)
+    deck.layer() == Layer::Room && deck.game_room()
 }
 
 #[compose]
@@ -591,11 +604,8 @@ fn create_cartridge_front(
     let title = face.title();
     let pose = face.cartridge_pose();
     let rect = face.origin().unwrap_or(Rect::ZERO);
-    let (ink, backdrop): (mirui::ui::theme::ThemedColor, _) = if pose.paper() >= Fixed::HALF {
-        (CARTRIDGE_INK.into(), CARTRIDGE_PAPER.into())
-    } else {
-        (SHELL_TEXT.into(), SHELL.into())
-    };
+    let label = CartridgeLabel::captured(title, pose.paper());
+    let stationary = mirui::types::Transform::IDENTITY;
     ui! {
         Column (
             position: Position::Absolute,
@@ -611,37 +621,12 @@ fn create_cartridge_front(
             mirui::ui::OffscreenRender::default(),
         ] {
             if face.shelf() {
-                Column (
-                    grow: 1.0,
-                    min_width: 0,
-                    min_height: 0,
-                    container: true,
-                    padding: Padding::all(super::shelf::CARD_INSET),
-                    bg_color: SHELL,
-                    border_color: SHELL_EDGE,
-                    border_width: 2
-                ) {
-                    View (grow: 1.0, min_width: 0, min_height: 0, clip_children: true) {
-                        Column (grow: 1.0, min_width: 0, min_height: 0, transform: ${ pose.cover() }) {
-                            cartridge_source (bounds, platform)
-                        }
-                    }
-                    if face.netplay() {
-                        Row (position: Position::Absolute, top: 4, left: 4) {
-                            hold_badge ()
-                        }
-                    }
-                    Row (
-                        height: super::shelf::LABEL_HEIGHT,
-                        shrink: 0.0,
-                        min_width: 0,
-                        bg_color: backdrop,
-                        padding: metrics.cartridge_title_padding()
-                    ) {
-                        cartridge_title (title, false, ink, backdrop)
-                    }
-                }
-                View (height: super::shelf::SHADOW, shrink: 0.0, bg_color: SHELL_EDGE)
+                cartridge_front (
+                    None, stationary, pose,
+                    bounds, platform, super::cartridge::CartridgeFace::Flip, false, metrics,
+                    label
+                )
+                View (height: super::shelf::SHADOW, shrink: 0.0)
             } else {
                 sleeve_face (bounds, face.sleeve_pose(), platform, metrics, false)
             }
@@ -818,7 +803,7 @@ fn detail_row(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity
                     action_icon (state, index)
                 }
             }
-            shadow (metrics)
+            focus_shadow (${ state.menu_selection() == Some(index) }, RowCue, metrics)
         } on SizeChanged { state.detail_measure(index, event.new.height); }
     }
 }
@@ -1073,7 +1058,7 @@ fn level_row(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity 
                                 top: -4,
                                 width: 10,
                                 height: 22,
-                                bg_color: WARNING,
+                                bg_color: ${ if state.selected() == index { WARNING } else { PANEL } },
                                 border_width: 2,
                                 border_color: FOREGROUND
                             ) [
@@ -1085,7 +1070,7 @@ fn level_row(state: model!(Launcher), index: usize, metrics: Metrics) -> Entity 
                     }
                 }
             }
-            shadow (metrics)
+            focus_shadow (${ state.selected() == index }, Dial, metrics)
         }
     }
 }
@@ -1149,7 +1134,11 @@ fn action_tile(
                     action_caption (state, settings, index, metrics)
                 }
             }
-            shadow (metrics)
+            focus_shadow (
+                ${ state.selected() == index && state.item(index).is_some_and(|item| item.enabled()) },
+                Card,
+                metrics
+            )
         }
     }
 }

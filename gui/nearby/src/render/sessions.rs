@@ -1,3 +1,4 @@
+use super::focus_surface::{button_shadow, button_transform};
 use super::motion::anchors::SEAT_WIDTH_PERCENT;
 use super::pixel::Stage::Session;
 use super::selection::FocusTarget;
@@ -15,13 +16,14 @@ use mirui::ui::widgets::Text;
 use mirui::ui::widgets::TextAlign::{Center, End, Start};
 
 #[compose]
-pub(super) fn game_room(state: model!(DisplayState), metrics: Metrics, host: bool) -> Entity {
+pub(super) fn room(
+    state: model!(DisplayState),
+    metrics: Metrics,
+    host: bool,
+    network: bool,
+) -> Entity {
     ui! {
-        Column (
-            grow: 1.0,
-            min_height: 0,
-            row_gap: metrics.gap
-        ) {
+        Column (grow: 1.0, min_height: 0, row_gap: metrics.gap) {
             Column (grow: 1.0, min_height: 0) {
                 Column (
                     grow: 1.0,
@@ -30,52 +32,77 @@ pub(super) fn game_room(state: model!(DisplayState), metrics: Metrics, host: boo
                     bg_color: PANEL,
                     row_gap: metrics.gap
                 ) {
-                    player_cards (state, metrics, host)
+                    if network {
+                        if ${ state.manages_network() } {
+                            live_label (state, Headline, TITLE_SIZE, FOREGROUND, Start)
+                        }
+                    }
+                    player_cards (state, metrics, host, network)
+                    if network {
+                        guidance (state, metrics)
+                    }
                 }
                 shadow (metrics)
             }
-            Column (
-                height: metrics.action_height(),
-                shrink: 0.0,
-                transform: ${ state.card_motion().card_transform(0) }
-            ) {
-                if host {
-                    Column (
-                        grow: 1.0,
-                        bg_color: ${ if state.enabled() { ACCENT } else { PANEL } },
-                        border_color: ACCENT,
-                        border_width: ${ if state.enabled() { 2 } else { 0 } },
-                        justify: JustifyContent::Center
-                    ) [
-                        Section::FocusHost,
-                        FocusTarget::fixed(0),
-                    ] {
-                        Row (
-                            width: Dimension::percent(100),
-                            align: AlignItems::Center,
-                            justify: JustifyContent::Center,
-                            column_gap: metrics.gap
-                        ) {
-                            if ${ state.enabled() } {
-                                control_key ("A", metrics, false)
-                            }
-                            Text (
-                                text: ${ state.host_button() },
-                                width: Dimension::Content,
-                                min_width: 0,
-                                font: font(TITLE_SIZE),
-                                font_size: TITLE_SIZE,
-                                text_color: ${ if state.enabled() { ON_ACCENT } else { FOREGROUND } },
-                                paragraph: paragraph(Center, 1)
-                            ) [
-                                FONT_PAINT,
-                            ]
-                        }
+            Row (height: metrics.action_height(), shrink: 0.0, column_gap: metrics.gap) {
+                if network {
+                    if ${ state.manages_network() } {
+                        network_action (state, metrics, 0)
+                        network_action (state, metrics, 1)
+                    } else {
+                        session_action (state, metrics, host)
                     }
                 } else {
-                    Column (grow: 1.0, bg_color: PANEL, justify: JustifyContent::Center) {
-                        live_label (state, Headline, TITLE_SIZE, FOREGROUND, Center)
+                    session_action (state, metrics, host)
+                }
+            }
+        }
+    }
+}
+
+#[compose]
+fn session_action(state: model!(DisplayState), metrics: Metrics, host: bool) -> Entity {
+    ui! {
+        Column (grow: 1.0, min_width: 0) {
+            if host {
+                Column (
+                    grow: 1.0,
+                    min_height: 0,
+                    bg_color: ${ if state.enabled() { ACCENT } else { PANEL } },
+                    border_color: ${ if state.enabled() { ACCENT } else { DIVIDER } },
+                    border_width: 1,
+                    transform: ${ button_transform(&state, 0, metrics) },
+                    justify: JustifyContent::Center
+                ) [
+                    Section::FocusHost,
+                    FocusTarget::fixed(0),
+                ] {
+                    Row (
+                        width: Dimension::percent(100),
+                        align: AlignItems::Center,
+                        justify: JustifyContent::Center,
+                        column_gap: metrics.gap
+                    ) {
+                        if ${ state.enabled() } {
+                            control_key ("A", metrics, false)
+                        }
+                        Text (
+                            text: ${ state.host_button() },
+                            width: Dimension::Content,
+                            min_width: 0,
+                            font: font(TITLE_SIZE),
+                            font_size: TITLE_SIZE,
+                            text_color: ${ if state.enabled() { ON_ACCENT } else { FOREGROUND } },
+                            paragraph: paragraph(Center, 1)
+                        ) [
+                            FONT_PAINT,
+                        ]
                     }
+                }
+                button_shadow (state, 0, metrics)
+            } else {
+                Column (grow: 1.0, bg_color: PANEL, justify: JustifyContent::Center) {
+                    live_label (state, Headline, TITLE_SIZE, FOREGROUND, Center)
                 }
                 shadow (metrics)
             }
@@ -84,13 +111,12 @@ pub(super) fn game_room(state: model!(DisplayState), metrics: Metrics, host: boo
 }
 
 #[compose]
-fn player_cards(state: model!(DisplayState), metrics: Metrics, host: bool) -> Entity {
-    let plate_height = 2 * (metrics.gap + 2)
-        + i32::from(BODY_SIZE)
-        + LABEL_LEADING
-        + 2
-        + i32::from(TITLE_SIZE) * 2
-        + LABEL_LEADING;
+fn player_cards(
+    state: model!(DisplayState),
+    metrics: Metrics,
+    host: bool,
+    network: bool,
+) -> Entity {
     ui! {
         Column (grow: 1.0, min_height: 0, min_width: 0, row_gap: metrics.gap) {
             View (grow: 1.0, min_height: 0, min_width: 0, container: true, clip_children: true) [
@@ -99,14 +125,35 @@ fn player_cards(state: model!(DisplayState), metrics: Metrics, host: bool) -> En
                     state: state.clone(),
                 },
             ]
-            Row (
-                height: plate_height,
-                shrink: 0.0,
-                min_width: 0
-            ) {
-                player_plate (state, metrics, false, host)
-                player_plate (state, metrics, true, false)
+            if network {
+                if ${ !state.network_connected() } {
+                    player_seats (state, metrics, host, true)
+                }
+                network_devices (state, metrics)
+            } else {
+                player_seats (state, metrics, host, false)
             }
+        }
+    }
+}
+
+#[compose]
+fn player_seats(
+    state: model!(DisplayState),
+    metrics: Metrics,
+    host: bool,
+    network: bool,
+) -> Entity {
+    let plate_height = 2 * (metrics.gap + 2)
+        + i32::from(BODY_SIZE)
+        + LABEL_LEADING
+        + 2
+        + i32::from(TITLE_SIZE) * 2
+        + LABEL_LEADING;
+    ui! {
+        Row (height: plate_height, shrink: 0.0, min_width: 0) {
+            player_plate (state, metrics, false, host, network)
+            player_plate (state, metrics, true, false, network)
         }
     }
 }
@@ -117,6 +164,7 @@ fn player_plate(
     metrics: Metrics,
     guest: bool,
     local_host: bool,
+    network: bool,
 ) -> Entity {
     let inset = metrics.gap + 2;
     ui! {
@@ -147,7 +195,12 @@ fn player_plate(
                 ) {
                     seat_rule (state, guest, local_host)
                     Text (
-                        if guest { "2P 玩家" } else { "1P 房主" },
+                        match (network, guest) {
+                            (true, false) => "房主",
+                            (true, true) => "好友",
+                            (false, false) => "1P 房主",
+                            (false, true) => "2P 玩家",
+                        },
                         width: Dimension::Content,
                         font: font(BODY_SIZE),
                         font_size: BODY_SIZE,
@@ -193,68 +246,18 @@ fn seat_rule(state: model!(DisplayState), guest: bool, local_host: bool) -> Enti
 }
 
 #[compose]
-pub(super) fn network_panel(state: model!(DisplayState), metrics: Metrics) -> Entity {
-    ui! {
-        Column (grow: 1.0, min_height: 0, row_gap: metrics.gap) {
-            Column (grow: 1.0, min_height: 0) {
-                Column (
-                    grow: 1.0,
-                    min_height: 0,
-                    padding: Padding::all(metrics.gap),
-                    bg_color: PANEL,
-                    justify: JustifyContent::Center,
-                    row_gap: metrics.gap
-                ) {
-                    Row (
-                        height: i32::from(TITLE_SIZE) + LABEL_LEADING,
-                        shrink: 0.0,
-                        align: AlignItems::Center,
-                        column_gap: metrics.gap
-                    ) {
-                        Column (grow: 1.0, min_width: 0) {
-                            live_label (state, Headline, TITLE_SIZE, FOREGROUND, Start)
-                        }
-                    }
-                    View (
-                        height: if metrics.compact { 48 } else { 84 },
-                        min_height: i32::from(metrics.small) + 4,
-                        shrink: 1.0,
-                        grow: 1.0,
-                        width: Dimension::percent(100),
-                        clip_children: true
-                    ) [
-                        pixel::SessionSprite {
-                            state: state.clone(),
-                        },
-                    ]
-                    network_devices (state, metrics)
-                    guidance (state, metrics)
-                }
-                shadow (metrics)
-            }
-            Row (height: metrics.action_height(), shrink: 0.0, column_gap: metrics.gap) {
-                network_action (state, metrics, 0)
-                if ${ state.manages_network() } {
-                    network_action (state, metrics, 1)
-                }
-            }
-        }
-    }
-}
-
-#[compose]
 fn network_action(state: model!(DisplayState), metrics: Metrics, index: usize) -> Entity {
     ui! {
         Column (
             grow: 1.0,
-            min_width: 0,
-            transform: ${ state.card_motion().card_transform(index) }
+            min_width: 0
         ) {
             Column (
                 grow: 1.0,
                 min_width: 0,
                 justify: JustifyContent::Center,
-                bg_color: ${ if state.selected() == Some(index) { ACCENT } else { PANEL } }
+                transform: ${ button_transform(&state, index, metrics) },
+                bg_color: ${ if state.button_motion().at(index) >= Fixed::HALF { ACCENT } else { PANEL } }
             ) [
                 FocusTarget::fixed(index),
             ] {
@@ -268,13 +271,13 @@ fn network_action(state: model!(DisplayState), metrics: Metrics, index: usize) -
                             "断开组网".into()
                         }
                     },
-                    ${ if state.selected() == Some(index) { ON_ACCENT } else { FOREGROUND } },
+                    ${ if state.button_motion().at(index) >= Fixed::HALF { ON_ACCENT } else { FOREGROUND } },
                     TITLE_SIZE,
                     Center,
                     LABEL_LEADING
                 )
             }
-            shadow (metrics)
+            button_shadow (state, index, metrics)
         }
     }
 }
@@ -295,7 +298,7 @@ fn network_devices(state: model!(DisplayState), metrics: Metrics) -> Entity {
             justify: JustifyContent::Center,
             row_gap: metrics.device_row_gap()
         ) {
-            walk ${ state.devices() } with device {
+            walk ${ state.devices() } with device by (device.name.clone(), device.address.clone()) {
                 Row (
                     height: metrics.device_row_height(),
                     shrink: 1.0,

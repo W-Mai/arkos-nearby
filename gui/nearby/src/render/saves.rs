@@ -1,4 +1,8 @@
 use super::deferred::Pane;
+use super::focus_surface::{
+    Cue::{Card, Row as RowCue},
+    focus_shadow,
+};
 use super::{
     deck::{ActionAnchor, ActionLayout},
     style::*,
@@ -532,7 +536,11 @@ fn row(
                     }
                 }
             }
-            shadow (metrics)
+            focus_shadow (
+                ${ (if modal { state.selected() } else { state.list_selection() }) == index },
+                if horizontal { Card } else { RowCue },
+                metrics
+            )
         }
     }
 }

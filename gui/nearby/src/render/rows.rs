@@ -1,5 +1,5 @@
 use crate::model::{GameRow, RoomRow};
-use mirui::core::model::ModelList;
+use mirui::core::model::{ModelList, OwnedModel};
 use mirui::prelude::*;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -80,7 +80,28 @@ impl RowHandle {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct CartridgeStamp {
+    title: u64,
+    cover: Option<u64>,
+    directory: bool,
+    available: bool,
+    platform: super::consoles::Platform,
+}
+
 impl Row {
+    pub fn cartridge_stamp(&self) -> CartridgeStamp {
+        CartridgeStamp {
+            title: self.title_revision,
+            cover: self
+                .cover_bounds
+                .read(|bounds| bounds.resolved().map(|image| image.cache_revision)),
+            directory: self.directory,
+            available: self.available,
+            platform: self.platform,
+        }
+    }
+
     pub fn room(index: usize, data: &RoomRow) -> Self {
         Self {
             key: Key::Named(data.key.clone()),
@@ -101,6 +122,20 @@ impl Row {
             favorite: false,
         }
     }
+    pub fn departing(&self, data: &GameRow) -> Self {
+        Self {
+            cover_bounds: self
+                .cover_bounds
+                .read(super::artwork::CoverBounds::frozen)
+                .into(),
+            static_picture: self
+                .static_picture
+                .read(super::static_snapshot::Picture::frozen)
+                .into(),
+            ..Self::game(self.index, data)
+        }
+    }
+
     pub fn game(index: usize, data: &GameRow) -> Self {
         Self {
             key: Key::Named(data.key.clone()),
@@ -136,7 +171,25 @@ pub(super) fn reconcile_slots(list: &mut ModelList<Row>, mut rows: Vec<Row>, rev
     reconcile(list, rows, revision);
 }
 
-pub(super) fn reconcile(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision: u64) {
+pub(super) fn reconcile_shelf(
+    list: &mut ModelList<Row>,
+    mut rows: Vec<Row>,
+    revision: u64,
+    departing: bool,
+) {
+    // Keep the existing widgets when a short page follows a full page.
+    rows.extend((rows.len()..list.len()).map(|i| Row::game(i, &GameRow::default())));
+    for row in &mut rows {
+        row.key = Key::Slot(row.index);
+    }
+    reconcile_rows(list, rows, revision, departing);
+}
+
+pub(super) fn reconcile(list: &mut ModelList<Row>, rows: Vec<Row>, revision: u64) {
+    reconcile_rows(list, rows, revision, false);
+}
+
+fn reconcile_rows(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision: u64, departing: bool) {
     let ambiguous: Vec<_> = rows
         .iter()
         .map(|row| {
@@ -166,6 +219,23 @@ pub(super) fn reconcile(list: &mut ModelList<Row>, mut rows: Vec<Row>, revision:
             incoming.detail_revision = current
                 .detail_revision
                 .wrapping_add(u64::from(detail_changed));
+            let artwork_changed = current.artwork != incoming.artwork;
+            if departing {
+                current.static_picture.update(|picture| {
+                    incoming
+                        .static_picture
+                        .read(|incoming| picture.import(incoming));
+                });
+            } else if artwork_changed || current.platform != incoming.platform {
+                current.static_picture.update(|picture| picture.clear());
+            }
+            if departing || artwork_changed {
+                current.cover_bounds.update(|cover| {
+                    incoming
+                        .cover_bounds
+                        .read(|incoming| cover.replace_binding(incoming));
+                });
+            }
             std::mem::swap(&mut current.cover_bounds, &mut incoming.cover_bounds);
             std::mem::swap(&mut current.static_picture, &mut incoming.static_picture);
             *current = incoming;

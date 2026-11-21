@@ -323,43 +323,18 @@ impl Controller {
             self.attempted = None;
             return;
         }
-        // Read only the completed output; a fallback render would reenter
-        // RestorePaint while this controller is mutably borrowed.
-        let prepared = app
-            .world
-            .resource::<mirui::ui::Outputs<mirui::ui::WidgetTexture>>()
-            .is_some_and(|outputs| outputs.get(captured.source).is_some());
-        if !prepared {
-            captured.release(app);
-            return;
-        }
-        let snapshot = app
-            .take_widget_output(captured.source)
-            .ok()
-            .flatten()
-            .map(|owned| owned.into_texture());
+        let snapshot = super::snapshot::take(app, captured.source);
         captured.release(app);
         let Some(texture) = snapshot else {
             return;
         };
-        if texture.width() == 0 || texture.height() == 0 {
-            return;
-        }
         self.revision = self.revision.wrapping_add(1);
         let revision = self.revision | (1 << 63);
-        let dimensions = (texture.width(), texture.height());
-        let texture = texture.with_cache_revision(revision);
-        let Some(textures) = app.world.resource::<ResourceManager<Texture<'static>>>() else {
+        let Some(handle) =
+            super::snapshot::register(&app.world, texture_token(revision), texture, revision)
+        else {
             return;
         };
-        let token = texture_token(revision);
-        textures.add_factory(token.clone(), move || Some(texture));
-        let handle = textures.load(token.clone());
-        let admitted = handle.get();
-        if (admitted.width(), admitted.height()) != dimensions {
-            textures.remove_token(&token);
-            return;
-        }
         self.pending = Some(Image {
             revision,
             stamp: captured.stamp,

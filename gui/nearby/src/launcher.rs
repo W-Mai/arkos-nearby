@@ -79,7 +79,6 @@ pub struct Launcher {
     #[observe]
     pub opening_room: bool,
     launch_busy: bool,
-    hold_popup: bool,
     #[observe]
     pub selection_age: u16,
     #[observe]
@@ -140,7 +139,6 @@ impl Default for Launcher {
             progress: Default::default(),
             opening_room: false,
             launch_busy: false,
-            hold_popup: false,
             selection_age: Default::default(),
             level_positions: Default::default(),
             detail_offset: Default::default(),
@@ -733,16 +731,10 @@ impl Launcher {
         self.progress = 0;
     }
 
-    pub(crate) fn hold_popup(&mut self, hold: bool) {
-        self.hold_popup = hold;
-    }
-
     pub fn tick(&mut self, now: u64) {
         self.now = now;
         self.refresh_popup();
-        if !self.hold_popup {
-            self.popup.tick(now);
-        }
+        self.popup.tick(now);
         if !self.popup.mounted() && self.closing.take().is_some() {
             self.management.sync(None);
             self.configuration.sync(None);
@@ -1027,6 +1019,7 @@ impl Launcher {
     }
 }
 mod wifi;
+pub(crate) use wifi::loading_span;
 
 #[cfg(target_os = "linux")]
 pub mod input;

@@ -1,3 +1,5 @@
+mod network;
+
 use super::{
     motion::{self, Frame, anchors, timing},
     state::DisplayState,
@@ -597,9 +599,13 @@ impl<F: FnMut(DrawCommand<'_>)> Painter<'_, F> {
         };
         let left = (source + 10).clamp(18, w - 18);
         let right = (destination - 10).clamp(left, w - 18);
-        self.room_link([left, right], floor - 12, hops, frame);
-        if self.unit == 1 && w >= 200 && h >= 80 {
-            self.room_emblem((left + right) / 2, (floor - 54).max(8), frame);
+        if frame.network_only {
+            self.network_link(floor - 12, frame);
+        } else {
+            self.room_link([left, right], floor - 12, hops, frame);
+            if self.unit == 1 && w >= 200 && h >= 80 {
+                self.room_emblem((left + right) / 2, (floor - 54).max(8), frame);
+            }
         }
         let doorway = position(anchors::GUEST_GATE);
         let vacancy =

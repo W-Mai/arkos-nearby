@@ -1,8 +1,21 @@
-use super::{copy, style::*};
+use super::{
+    copy,
+    style::{FOCUS_OUTSET_X_PERCENT, FOCUS_OUTSET_Y_PERCENT},
+};
 use crate::model::{Page, Phase, View};
 use mirui::anim::{Tween, TweenConfig, ease};
 use mirui::prelude::*;
 use mirui::types::Transform;
+
+pub(super) fn smoothstep(progress: Fixed) -> Fixed {
+    let t = progress.clamp(Fixed::ZERO, Fixed::ONE);
+    t * t * (Fixed::from_int(3) - t * 2)
+}
+
+pub(super) fn tween_at(mut tween: Tween, elapsed: u64) -> Fixed {
+    tween.elapsed_ms = elapsed.min(u64::from(tween.duration_ms)) as u16;
+    tween.value()
+}
 
 pub(crate) mod timing {
     use super::*;
@@ -143,6 +156,7 @@ pub(super) struct Timeline {
     selection_at: Option<u64>,
     pulse_at: Option<u64>,
     phase_at: Option<u64>,
+    network_wave_at: u64,
     press_at: Option<u64>,
     press_sequence: u64,
     walker: Travel,
@@ -288,6 +302,7 @@ impl Timeline {
                 || view.connected
                 || view.page == Page::Joined
                 || matches!(key.phase, Phase::ApprovalPending | Phase::PeerPreparing)
+                || (key.phase == Phase::NetworkConfirming && continues_session && was_present)
                 || !view.network_only
                     && matches!(
                         key.phase,
@@ -340,6 +355,9 @@ impl Timeline {
             self.host_ack_at = Some(now);
         }
         if self.key.as_ref() != Some(&key) {
+            if key.network_only && key.is_session() {
+                self.network_wave_at = now;
+            }
             // Opening an existing state does not replay its readiness celebration.
             self.phase_at = self
                 .key
@@ -496,6 +514,13 @@ impl Timeline {
             } else {
                 phase != Phase::Starting
             };
+        let wave_clock = if view.network_only
+            && matches!(view.page, Page::Host | Page::Joined | Page::Leaving)
+        {
+            now.saturating_sub(self.network_wave_at)
+        } else {
+            now
+        };
         Frame {
             external_actor: false,
             page: view.page,
@@ -509,7 +534,7 @@ impl Timeline {
             phase_age: age(now, self.phase_at),
             press: age(now, self.press_at),
             wave: copy::loading(view).then_some(
-                (now % u64::from(timing::WAVE_MS) / u64::from(timing::WAVE_STEP_MS)
+                (wave_clock % u64::from(timing::WAVE_MS) / u64::from(timing::WAVE_STEP_MS)
                     * u64::from(timing::WAVE_STEP_MS)) as u16,
             ),
             walker: self.walker.value(now),
@@ -577,14 +602,6 @@ impl Frame {
             self.selection
         };
         Transform::translate(recoil(age).into(), (hop(age, 3.0) + pressed).into())
-    }
-
-    pub(super) fn card_color(self, index: usize) -> ColorToken {
-        if self.selected == Some(index) && self.selection < timing::HOP_MS {
-            ACCENT_DIM
-        } else {
-            PANEL
-        }
     }
 }
 
@@ -684,11 +701,9 @@ mod tests {
                 let cards = frame.cards();
                 for index in [0, 1] {
                     assert_eq!(cards.card_transform(index), frame.card_transform(index));
-                    assert_eq!(cards.card_color(index), frame.card_color(index));
                 }
                 if cards.cards_settled() {
                     assert_eq!(cards.card_transform(0), Transform::IDENTITY);
-                    assert_eq!(cards.card_color(0), PANEL);
                 }
             }
         }

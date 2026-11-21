@@ -18,7 +18,7 @@
     "released_binary_sha256": "a874e1df5c862972d3c3220d38a69d043830b10122e23f49462c1d84597b301e"
   },
   "rust": {
-    "source_archive": "howff-0.17.0-rust-sources.tar.gz",
+    "source_archive": "howff-0.18.0-rust-sources.tar.gz",
     "locked_crates": 200,
     "included_crates": 200
   },
@@ -188,8 +188,8 @@
   "renderer": {
     "version": "0.56.0",
     "mirx_version": "0.56.0",
-    "sha256": "bdbc6bd307c35489c1cc6253521b81bd324bf6fc819e5c1fb9329f048c451da7",
-    "source_sha256": "e6def46295457bf788f7886acf04f9f983d4f11391bda12162abe30a5aca63c0",
+    "sha256": "dff4aefa57284ed98db5390a0b54745de46a472ac8d6145a0181076200f65477",
+    "source_sha256": "d624a57c9f566ab67de15c779dcd6417b8d7023fc0f876dc058a3052cb81f05f",
     "cargo_lock_sha256": "238e56d69f7db2fb2be04516ac5ea9f243d9fb0004c96d37cad173772d87c1cd",
     "mirui_crate_sha256": "c1fe6aa364fb4d7feb43e085cec92dd7480e8a35758dd9234277584c61f500b9",
     "mirui_macros_crate_sha256": "a6e7004d8a3a6be495a765c36418b120dbe011a0de889f26fbfcd9bf686fb1c4",

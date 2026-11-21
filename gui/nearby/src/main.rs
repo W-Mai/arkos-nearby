@@ -504,6 +504,11 @@ fn live() -> Result<(), String> {
             }
         }
         for mut action in actions {
+            if scene.as_ref().is_some_and(render::Scene::preparing_room)
+                && action != model::Action::Back
+            {
+                continue;
+            }
             if launcher.overlay_visible() && launcher.management().active() {
                 if action == model::Action::Theme {
                     action = model::Action::Auxiliary;

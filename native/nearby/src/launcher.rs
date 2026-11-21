@@ -585,9 +585,7 @@ impl Controller {
             if overlay == Overlay::Controls && selected != MenuAction::ShowTools {
                 return Ok(None);
             }
-            if selected != MenuAction::Multiplayer {
-                self.overlay = None;
-            }
+            self.overlay = None;
             return match selected {
                 MenuAction::Play if overlay != Overlay::Network => {
                     let key = self.entry.as_ref().map(Entry::key).unwrap_or_default();
@@ -957,10 +955,8 @@ fn run_page(application: bool) -> Result<i32> {
                             return Ok(false);
                         }
                     }
-                    menu.launcher_busy(&mut controller, "正在准备联机")?;
-                    let context = entry.prepare();
-                    controller.overlay = None;
-                    let context = context?;
+                    menu.launcher_preparing_netplay(&mut controller)?;
+                    let context = entry.prepare()?;
                     menu.run_with_fallback(
                         Some(context.clone()),
                         Some(crate::session::NativeBackend::shared(context)),

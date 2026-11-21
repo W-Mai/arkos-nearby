@@ -1,9 +1,10 @@
 use super::deferred::Pane;
+use super::focus_surface::{Cue::Row as RowCue, focus_shadow};
 use super::{
     deck::{ActionAnchor, ActionLayout},
     keyboard::keycap,
     style::*,
-    widgets::{control_key, control_label, shadow, text_block},
+    widgets::{control_key, control_label, text_block},
 };
 use crate::launcher::Launcher;
 use howff_menu::wifi::Page;
@@ -267,7 +268,7 @@ fn row(state: model!(Launcher), index: usize, list: bool, metrics: Metrics) -> E
                     }
                 }
             }
-            shadow (metrics)
+            focus_shadow (${ state.menu_selection() == Some(index) }, RowCue, metrics)
         }
     }
 }

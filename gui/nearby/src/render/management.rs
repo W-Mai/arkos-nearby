@@ -1,9 +1,10 @@
 use super::deferred::Pane;
+use super::focus_surface::{Cue::Row as RowCue, focus_shadow};
 use super::{
     deck::{ActionAnchor, ActionLayout},
     keyboard::keycap,
     style::*,
-    widgets::{control_key, control_label, shadow, text_block},
+    widgets::{control_key, control_label, text_block},
 };
 use crate::launcher::management::{Manager, ManagerHandle, Page};
 use crate::launcher::text_entry::{Mode, TextEntry};
@@ -265,7 +266,7 @@ fn row(state: model!(Manager), index: usize, metrics: Metrics) -> Entity {
                     )
                 }
             }
-            shadow (metrics)
+            focus_shadow (${ state.selected() == index && state.row(index).is_some_and(|r| r.enabled) }, RowCue, metrics)
         }
     }
 }

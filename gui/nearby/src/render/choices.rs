@@ -1,3 +1,4 @@
+use super::focus_surface::{button_shadow, button_transform};
 use super::pixel::Stage::Walker;
 use super::state::PageKey;
 use super::{
@@ -6,7 +7,7 @@ use super::{
     selection::FocusTarget,
     state::DisplayState,
     style::*,
-    widgets::{label, paragraph, shadow},
+    widgets::{label, paragraph},
 };
 use crate::model::Page;
 use mirui::prelude::*;
@@ -40,8 +41,7 @@ pub(super) fn choice(view: PageKey, state: model!(DisplayState), metrics: Metric
                     Column (
                         grow: 1.0,
                         min_width: 0,
-                        min_height: 0,
-                        transform: ${ state.card_motion().card_transform(card.0) }
+                        min_height: 0
                     ) {
                         Column (
                             grow: 1.0,
@@ -49,7 +49,8 @@ pub(super) fn choice(view: PageKey, state: model!(DisplayState), metrics: Metric
                             min_height: 0,
                             padding: metrics.card_padding(),
                             row_gap: metrics.gap,
-                            bg_color: ${ state.card_motion().card_color(card.0) },
+                            transform: ${ button_transform(&state, card.0, metrics) },
+                            bg_color: ${ if state.button_motion().at(card.0) >= Fixed::HALF { ACCENT_DIM } else { PANEL } },
                             border_width: 1,
                             border_color: DIVIDER
                         ) [
@@ -99,21 +100,25 @@ pub(super) fn choice(view: PageKey, state: model!(DisplayState), metrics: Metric
                                 ]
                             }
                         }
-                        shadow (metrics)
+                        button_shadow (state, card.0, metrics)
                     }
                 }
             }
             if ${ view.page == Page::Mode && state.current_game() } {
-                Row (
-                    height: 36,
-                    shrink: 0.0,
-                    bg_color: PANEL,
-                    padding: Padding::all(6),
-                    transform: ${ state.card_motion().card_transform(2) }
-                ) [
-                    FocusTarget::fixed(2),
-                ] {
-                    label ("+ 创建当前游戏的房间", metrics.body, FOREGROUND, Center)
+                Column (height: 36, shrink: 0.0) {
+                    Row (
+                        grow: 1.0,
+                        min_height: 0,
+                        bg_color: ${ if state.button_motion().at(2) >= Fixed::HALF { ACCENT_DIM } else { PANEL } },
+                        transform: ${ button_transform(&state, 2, metrics) },
+                        padding: Padding { left: 6.into(), right: 6.into(), ..Default::default() },
+                        align: AlignItems::Center
+                    ) [
+                        FocusTarget::fixed(2).scoped(view.page),
+                    ] {
+                        label ("+ 创建当前游戏的房间", metrics.body, FOREGROUND, Center)
+                    }
+                    button_shadow (state, 2, metrics)
                 }
             }
             art (state, Walker, metrics.walker_height())

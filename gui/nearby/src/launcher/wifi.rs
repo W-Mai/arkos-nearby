@@ -9,7 +9,7 @@ const TRAVEL_MS: u64 = 1500;
 const STRETCH_MS: u16 = 350;
 
 /// A continuous, reversing indeterminate span; it never represents a percentage.
-pub(super) fn loading_span(now: u64) -> (Fixed, Fixed) {
+pub(crate) fn loading_span(now: u64) -> (Fixed, Fixed) {
     let elapsed = (now % TRAVEL_MS) as u16;
     let sample = |offset: u16| {
         let mut tween = Tween::preset(

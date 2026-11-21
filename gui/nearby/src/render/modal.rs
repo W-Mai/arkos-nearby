@@ -224,6 +224,7 @@ fn requested<B: Surface, F: RendererFactory<B>>(app: &App<B, F>) -> bool {
             }
             runtime.deck.enabled()
                 && (runtime.deck.layer() == Layer::Actions
+                    || runtime.deck.preparing_room()
                     || runtime.deck.panel() > Fixed::ZERO
                     || popup.mounted())
         })
@@ -394,31 +395,11 @@ impl Controller {
         if self.mode == Mode::Freeze && self.model.phase() == Phase::Capturing {
             self.capture_calls += 1;
             let start = Instant::now();
-            // A refused offscreen allocation has no completed image to copy.
-            // Keep the live background instead of recursively rendering a frame.
-            let prepared = app
-                .world
-                .resource::<mirui::ui::Outputs<mirui::ui::WidgetTexture>>()
-                .is_some_and(|outputs| outputs.get(root).is_some());
-            let captured = if prepared {
-                app.take_widget_output(root)
-                    .map(|output| output.map(|owned| owned.into_texture()))
-            } else {
-                Ok(None)
-            };
+            let captured = super::snapshot::take(app, root);
             self.snapshot_ms = Some(start.elapsed().as_secs_f64() * 1000.0);
             app.world.remove::<mirui::ui::OffscreenRender>(root);
-            let texture = match captured {
-                Ok(Some(texture))
-                    if requested(app)
-                        && self.capture_generation == self.generation
-                        && texture.width() > 0
-                        && texture.height() > 0 =>
-                {
-                    Some(texture)
-                }
-                _ => None,
-            };
+            let texture =
+                captured.filter(|_| requested(app) && self.capture_generation == self.generation);
             let admit = Instant::now();
             let event = if let Some(texture) = texture {
                 self.revision += 1;
